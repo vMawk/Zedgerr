@@ -14,7 +14,384 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      business_settings: {
+        Row: {
+          btw_number: string | null
+          city: string | null
+          company_name: string | null
+          contact_person: string | null
+          country: string | null
+          created_at: string
+          email: string | null
+          iban: string | null
+          id: string
+          kvk_number: string | null
+          logo_url: string | null
+          phone: string | null
+          postal_code: string | null
+          street: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          btw_number?: string | null
+          city?: string | null
+          company_name?: string | null
+          contact_person?: string | null
+          country?: string | null
+          created_at?: string
+          email?: string | null
+          iban?: string | null
+          id?: string
+          kvk_number?: string | null
+          logo_url?: string | null
+          phone?: string | null
+          postal_code?: string | null
+          street?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          btw_number?: string | null
+          city?: string | null
+          company_name?: string | null
+          contact_person?: string | null
+          country?: string | null
+          created_at?: string
+          email?: string | null
+          iban?: string | null
+          id?: string
+          kvk_number?: string | null
+          logo_url?: string | null
+          phone?: string | null
+          postal_code?: string | null
+          street?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      companies: {
+        Row: {
+          btw_number: string | null
+          city: string | null
+          contact_person: string | null
+          country: string | null
+          created_at: string
+          default_hourly_rate: number | null
+          email: string | null
+          id: string
+          kvk_number: string | null
+          name: string
+          notes: string | null
+          phone: string | null
+          postal_code: string | null
+          street: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          btw_number?: string | null
+          city?: string | null
+          contact_person?: string | null
+          country?: string | null
+          created_at?: string
+          default_hourly_rate?: number | null
+          email?: string | null
+          id?: string
+          kvk_number?: string | null
+          name: string
+          notes?: string | null
+          phone?: string | null
+          postal_code?: string | null
+          street?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          btw_number?: string | null
+          city?: string | null
+          contact_person?: string | null
+          country?: string | null
+          created_at?: string
+          default_hourly_rate?: number | null
+          email?: string | null
+          id?: string
+          kvk_number?: string | null
+          name?: string
+          notes?: string | null
+          phone?: string | null
+          postal_code?: string | null
+          street?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      invoice_lines: {
+        Row: {
+          amount: number
+          created_at: string
+          date: string | null
+          description: string
+          hourly_rate: number | null
+          hours: number | null
+          id: string
+          invoice_id: string
+          time_entry_id: string | null
+        }
+        Insert: {
+          amount: number
+          created_at?: string
+          date?: string | null
+          description: string
+          hourly_rate?: number | null
+          hours?: number | null
+          id?: string
+          invoice_id: string
+          time_entry_id?: string | null
+        }
+        Update: {
+          amount?: number
+          created_at?: string
+          date?: string | null
+          description?: string
+          hourly_rate?: number | null
+          hours?: number | null
+          id?: string
+          invoice_id?: string
+          time_entry_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invoice_lines_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoice_lines_time_entry_id_fkey"
+            columns: ["time_entry_id"]
+            isOneToOne: false
+            referencedRelation: "time_entries"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      invoices: {
+        Row: {
+          btw_amount: number
+          btw_percentage: number
+          company_id: string
+          created_at: string
+          due_date: string | null
+          id: string
+          invoice_date: string
+          invoice_number: string
+          notes: string | null
+          status: string
+          subtotal: number
+          total: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          btw_amount?: number
+          btw_percentage?: number
+          company_id: string
+          created_at?: string
+          due_date?: string | null
+          id?: string
+          invoice_date?: string
+          invoice_number: string
+          notes?: string | null
+          status?: string
+          subtotal?: number
+          total?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          btw_amount?: number
+          btw_percentage?: number
+          company_id?: string
+          created_at?: string
+          due_date?: string | null
+          id?: string
+          invoice_date?: string
+          invoice_number?: string
+          notes?: string | null
+          status?: string
+          subtotal?: number
+          total?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invoices_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      quote_lines: {
+        Row: {
+          amount: number
+          created_at: string
+          description: string
+          hourly_rate: number | null
+          hours: number | null
+          id: string
+          quote_id: string
+        }
+        Insert: {
+          amount: number
+          created_at?: string
+          description: string
+          hourly_rate?: number | null
+          hours?: number | null
+          id?: string
+          quote_id: string
+        }
+        Update: {
+          amount?: number
+          created_at?: string
+          description?: string
+          hourly_rate?: number | null
+          hours?: number | null
+          id?: string
+          quote_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quote_lines_quote_id_fkey"
+            columns: ["quote_id"]
+            isOneToOne: false
+            referencedRelation: "quotes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      quotes: {
+        Row: {
+          btw_amount: number
+          btw_percentage: number
+          company_id: string
+          created_at: string
+          id: string
+          notes: string | null
+          quote_date: string
+          quote_number: string
+          status: string
+          subtotal: number
+          total: number
+          updated_at: string
+          user_id: string
+          valid_until: string | null
+        }
+        Insert: {
+          btw_amount?: number
+          btw_percentage?: number
+          company_id: string
+          created_at?: string
+          id?: string
+          notes?: string | null
+          quote_date?: string
+          quote_number: string
+          status?: string
+          subtotal?: number
+          total?: number
+          updated_at?: string
+          user_id: string
+          valid_until?: string | null
+        }
+        Update: {
+          btw_amount?: number
+          btw_percentage?: number
+          company_id?: string
+          created_at?: string
+          id?: string
+          notes?: string | null
+          quote_date?: string
+          quote_number?: string
+          status?: string
+          subtotal?: number
+          total?: number
+          updated_at?: string
+          user_id?: string
+          valid_until?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quotes_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      time_entries: {
+        Row: {
+          company_id: string
+          created_at: string
+          date: string
+          description: string | null
+          hourly_rate: number | null
+          hours: number
+          id: string
+          invoice_id: string | null
+          invoiced: boolean
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          date: string
+          description?: string | null
+          hourly_rate?: number | null
+          hours: number
+          id?: string
+          invoice_id?: string | null
+          invoiced?: boolean
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          date?: string
+          description?: string | null
+          hourly_rate?: number | null
+          hours?: number
+          id?: string
+          invoice_id?: string | null
+          invoiced?: boolean
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "time_entries_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "time_entries_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
