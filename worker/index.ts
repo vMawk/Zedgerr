@@ -12,6 +12,8 @@ export type Env = {
   ASSETS?: Fetcher;
   /** Alleen extra accounts na de eerste: zet op "true" in wrangler.toml of als secret. */
   ALLOW_REGISTRATION?: string;
+  /** Bij lege `users`: verplicht veld `setup_code` bij POST /api/auth/register (geen open “eerste account”). */
+  FIRST_REGISTRATION_SECRET?: string;
 };
 
 type Variables = { userId: string; email?: string };
@@ -20,7 +22,15 @@ function rowInvoiced(r: Record<string, unknown>) {
   return { ...r, invoiced: Boolean(r.invoiced) };
 }
 
-const publicApiPaths = new Set(["/api/auth/login", "/api/auth/register"]);
+/** Constant-time vergelijking voor setup-code (ASCII/hex secrets). */
+function timingSafeEqualUtf8(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+const publicApiPaths = new Set(["/api/auth/login", "/api/auth/register", "/api/auth/registration-status"]);
 
 const api = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -49,12 +59,46 @@ api.use("/api/*", async (c, next) => {
 });
 
 // --- Auth ---
+api.get("/api/auth/registration-status", async (c) => {
+  const countRow = await c.env.DB.prepare("SELECT COUNT(*) as c FROM users").first<{ c: number }>();
+  const count = countRow?.c ?? 0;
+  const setupSecret = (c.env.FIRST_REGISTRATION_SECRET ?? "").trim();
+  if (count === 0) {
+    if (setupSecret.length < 8) {
+      return c.json({
+        canRegister: false,
+        needsSetupCode: false,
+        reason: "server_not_configured",
+        message: "Eerste gebruiker is nog niet geconfigureerd (FIRST_REGISTRATION_SECRET).",
+      });
+    }
+    return c.json({
+      canRegister: true,
+      needsSetupCode: true,
+      reason: "first_user",
+    });
+  }
+  if (c.env.ALLOW_REGISTRATION === "true") {
+    return c.json({
+      canRegister: true,
+      needsSetupCode: false,
+      reason: "open_registration",
+    });
+  }
+  return c.json({
+    canRegister: false,
+    needsSetupCode: false,
+    reason: "registration_disabled",
+    message: "Registratie is uitgeschakeld.",
+  });
+});
+
 api.post("/api/auth/register", async (c) => {
   const secret = c.env.JWT_SECRET;
   if (!secret || secret.length < 16) {
     return c.json({ error: "Server misconfigured: JWT_SECRET required (min 16 chars)" }, 500);
   }
-  let body: { email?: string; password?: string };
+  let body: { email?: string; password?: string; setup_code?: string };
   try {
     body = await c.req.json();
   } catch {
@@ -67,7 +111,18 @@ api.post("/api/auth/register", async (c) => {
 
   const countRow = await c.env.DB.prepare("SELECT COUNT(*) as c FROM users").first<{ c: number }>();
   const count = countRow?.c ?? 0;
-  if (count > 0 && c.env.ALLOW_REGISTRATION !== "true") {
+
+  if (count === 0) {
+    const setupSecret = (c.env.FIRST_REGISTRATION_SECRET ?? "").trim();
+    if (setupSecret.length < 8) {
+      return c.json({ error: "First user registration is not configured server-side." }, 503);
+    }
+    const setupCode = (body.setup_code ?? "").trim();
+    if (setupCode.length === 0) return c.json({ error: "Setup code required for the first account" }, 400);
+    if (!timingSafeEqualUtf8(setupCode, setupSecret)) {
+      return c.json({ error: "Invalid setup code" }, 403);
+    }
+  } else if (c.env.ALLOW_REGISTRATION !== "true") {
     return c.json({ error: "Registration is disabled" }, 403);
   }
 
