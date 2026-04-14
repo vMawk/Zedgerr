@@ -10,6 +10,9 @@ lerna-debug.log*
 node_modules
 dist
 
+# Gebruik package-lock.json voor CI (Cloudflare Pages); oude bun.lockb veroorzaakt frozen-lock failures.
+bun.lockb
+
 # Wrangler local D1 / cache
 .wrangler
 

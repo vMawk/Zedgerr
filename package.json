@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "packageManager": "npm@10.9.2",
   "scripts": {
     "dev": "concurrently -k \"wrangler dev --port 8787\" \"vite\"",
     "dev:vite": "vite",
