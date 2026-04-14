@@ -10,7 +10,7 @@ compatibility_date = "2024-11-01"
 
 [vars]
 # Alleen voor lokaal / eerste deploy; in productie: wrangler secret put JWT_SECRET
-JWT_SECRET = "REPLACE_ME"
+JWT_SECRET = "1495960008180958"
 # Extra accounts na de eerste gebruiker: zet op "true" (of via wrangler vars)
 # ALLOW_REGISTRATION = "false"
 
