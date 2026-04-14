@@ -1,4 +1,4 @@
-/** Types voor lokale SQLite (voorheen Supabase-generated). */
+/** Types voor D1 / SQLite (Worker API). */
 
 export type Company = {
   id: string;

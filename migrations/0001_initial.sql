@@ -1,4 +1,4 @@
--- SQLite / D1 — mirrors Supabase public schema (TEXT ids = UUIDs, REAL = numeric).
+-- SQLite / D1 — app schema (TEXT ids = UUIDs, REAL = numeric).
 -- Timestamps stored as ISO-8601 strings; booleans as INTEGER 0/1.
 
 CREATE TABLE business_settings (

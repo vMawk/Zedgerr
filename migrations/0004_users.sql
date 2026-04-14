@@ -1,4 +1,4 @@
--- Lokale auth (geen Supabase): e-mail + PBKDF2-hash in app; JWT wordt in Worker uitgegeven.
+-- Auth: e-mail + PBKDF2-hash; JWT in Worker.
 CREATE TABLE users (
   id TEXT PRIMARY KEY NOT NULL,
   email TEXT NOT NULL UNIQUE COLLATE NOCASE,
