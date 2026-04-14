@@ -28,7 +28,7 @@ const settingsItems = [
   { title: "Instellingen", url: "/instellingen", icon: Settings },
 ];
 
-const LOGO_SRC = "/logo.png";
+const LOGO_SRC = "/gibby-logo.png";
 
 export function AppSidebar() {
   const { state } = useSidebar();

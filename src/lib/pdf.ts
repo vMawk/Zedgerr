@@ -2,10 +2,10 @@ import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import type { BusinessSettings, Company, Invoice, InvoiceLine } from "@/lib/db-types";
 
-/** Gibby.it wordmark — same asset as in the app (`public/logo.png`). */
+/** Gibby.it wordmark — same asset as in the app (`public/gibby-logo.png`). */
 async function loadInvoiceLogo(): Promise<{ dataUrl: string; wMm: number; hMm: number } | null> {
   try {
-    const res = await fetch("/logo.png");
+    const res = await fetch("/gibby-logo.png");
     if (!res.ok) return null;
     const blob = await res.blob();
     const dataUrl = await new Promise<string>((resolve, reject) => {

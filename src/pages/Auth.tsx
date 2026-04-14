@@ -55,7 +55,7 @@ export default function Auth() {
       <Card className="w-full max-w-md">
         <CardHeader className="text-center space-y-2">
           <div className="mx-auto mb-3 flex justify-center">
-            <img src="/logo.png" alt="gibby.it" className="h-10 w-auto max-w-[200px] object-contain" />
+            <img src="/gibby-logo.png" alt="gibby.it" className="h-10 w-auto max-w-[200px] object-contain" />
           </div>
           <CardTitle className="text-2xl font-semibold">
             {isLogin ? "Welkom terug" : "Account aanmaken"}
