@@ -8,7 +8,7 @@ interface AuthContextType {
   user: AuthUser | null;
   loading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
-  signUp: (email: string, password: string, setupCode?: string) => Promise<void>;
+  signUp: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
 }
 
@@ -55,17 +55,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(data.user);
   }, []);
 
-  const signUp = useCallback(async (email: string, password: string, setupCode?: string) => {
-    const payload: { email: string; password: string; setup_code?: string } = {
-      email: email.trim(),
-      password,
-    };
-    const code = setupCode?.trim();
-    if (code) payload.setup_code = code;
+  const signUp = useCallback(async (email: string, password: string) => {
     const r = await fetch(apiUrl("/api/auth/register"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ email: email.trim(), password }),
     });
     if (!r.ok) {
       let msg = await r.text();
