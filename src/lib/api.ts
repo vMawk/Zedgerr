@@ -65,6 +65,9 @@ export const api = {
   updateCompany: (id: string, body: Partial<Company>) => req<Company>("PATCH", `/companies/${id}`, body),
   deleteCompany: (id: string) => req<void>("DELETE", `/companies/${id}`),
   getCompany: (id: string) => req<Company>("GET", `/companies/${id}`),
+  getCompanyPortal: (id: string) => req<{ hasPortal: boolean; email: string | null }>("GET", `/companies/${id}/portal`),
+  putCompanyPortal: (id: string, body: { email: string; password?: string }) => req<{ ok: boolean }>("PUT", `/companies/${id}/portal`, body),
+  deleteCompanyPortal: (id: string) => req<void>("DELETE", `/companies/${id}/portal`),
 
   getTimeEntries: (q?: { company_id?: string; invoiced?: boolean }) => {
     const p = new URLSearchParams();

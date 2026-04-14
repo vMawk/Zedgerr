@@ -1,4 +1,4 @@
-import { LayoutDashboard, Building2, Clock, FileText, FileCheck, BarChart3, Settings, LogOut } from "lucide-react";
+import { LayoutDashboard, Building2, Clock, FileText, FileCheck, BarChart3, Settings, LogOut, MonitorSmartphone } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
@@ -26,6 +26,7 @@ const mainItems = [
 
 const settingsItems = [
   { title: "Instellingen", url: "/instellingen", icon: Settings },
+  { title: "Klantenportaal", url: "/klantenportaal", icon: MonitorSmartphone },
 ];
 
 const LOGO_SRC = "/gibby-logo.png";

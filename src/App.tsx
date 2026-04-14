@@ -14,6 +14,9 @@ import Reports from "./pages/Reports";
 import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
 import Auth from "./pages/Auth";
+import { PortalProvider, usePortalAuth } from "@/lib/portal-auth";
+import PortalLogin from "./pages/PortalLogin";
+import PortalDashboard from "./pages/PortalDashboard";
 
 const queryClient = new QueryClient();
 
@@ -43,6 +46,27 @@ function AuthRoute() {
   return <Auth />;
 }
 
+function KlantenportaalPage() {
+  return (
+    <PortalProvider>
+      <PortalShell />
+    </PortalProvider>
+  );
+}
+
+function PortalShell() {
+  const { company, loading } = usePortalAuth();
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background text-muted-foreground">
+        Laden…
+      </div>
+    );
+  }
+  if (!company) return <PortalLogin />;
+  return <PortalDashboard />;
+}
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
@@ -52,6 +76,7 @@ const App = () => (
         <AuthProvider>
           <Routes>
             <Route path="/auth" element={<AuthRoute />} />
+            <Route path="/klantenportaal" element={<KlantenportaalPage />} />
             <Route element={<ProtectedRoutes />}>
               <Route path="/" element={<Dashboard />} />
               <Route path="/bedrijven" element={<Companies />} />

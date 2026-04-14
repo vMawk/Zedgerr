@@ -3,6 +3,8 @@
 export type Company = {
   id: string;
   user_id: string;
+  /** Gezet door API: klantenportaal actief voor dit bedrijf */
+  has_portal?: boolean;
   name: string;
   contact_person: string | null;
   email: string | null;
