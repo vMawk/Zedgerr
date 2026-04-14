@@ -1,10 +1,11 @@
 import { createContext, useCallback, useContext, useEffect, useState, ReactNode } from "react";
 import { setStoredToken, getStoredToken } from "@/lib/api";
 
-export type LocalUser = { id: string; email: string };
+/** Ingelogde gebruiker uit D1 (`users`), via JWT — geen lokale SQLite-file. */
+export type AuthUser = { id: string; email: string };
 
 interface AuthContextType {
-  user: LocalUser | null;
+  user: AuthUser | null;
   loading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string) => Promise<void>;
@@ -14,7 +15,7 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<LocalUser | null>(null);
+  const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -49,7 +50,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       throw new Error(msg || "Inloggen mislukt");
     }
-    const data = (await r.json()) as { token: string; user: LocalUser };
+    const data = (await r.json()) as { token: string; user: AuthUser };
     setStoredToken(data.token);
     setUser(data.user);
   }, []);
@@ -70,7 +71,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       throw new Error(msg || "Registreren mislukt");
     }
-    const data = (await r.json()) as { token: string; user: LocalUser };
+    const data = (await r.json()) as { token: string; user: AuthUser };
     setStoredToken(data.token);
     setUser(data.user);
   }, []);
