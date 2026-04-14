@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -6,13 +6,29 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 
+type RegistrationStatus = {
+  canRegister: boolean;
+  needsSetupCode: boolean;
+  reason: string;
+  message?: string;
+};
+
 export default function Auth() {
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [setupCode, setSetupCode] = useState("");
   const [loading, setLoading] = useState(false);
+  const [regStatus, setRegStatus] = useState<RegistrationStatus | null>(null);
   const { signIn, signUp } = useAuth();
   const { toast } = useToast();
+
+  useEffect(() => {
+    fetch("/api/auth/registration-status")
+      .then((r) => r.json() as Promise<RegistrationStatus>)
+      .then(setRegStatus)
+      .catch(() => setRegStatus(null));
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -21,7 +37,10 @@ export default function Auth() {
       if (isLogin) {
         await signIn(email, password);
       } else {
-        await signUp(email, password);
+        if (regStatus?.needsSetupCode && !setupCode.trim()) {
+          throw new Error("Vul de setupcode in voor het eerste account.");
+        }
+        await signUp(email, password, !isLogin ? setupCode : undefined);
         toast({ title: "Account aangemaakt", description: "Je bent ingelogd." });
       }
     } catch (error: any) {
@@ -42,10 +61,17 @@ export default function Auth() {
             {isLogin ? "Welkom terug" : "Account aanmaken"}
           </CardTitle>
           <CardDescription>
-            {isLogin ? "Log in om verder te gaan" : "Maak een nieuw account aan"}
+            {isLogin
+              ? "Log in om verder te gaan"
+              : regStatus?.needsSetupCode
+                ? "Eerste gebruiker: dit maakt het beheerdersaccount aan (niet hetzelfde als inloggen met een bestaand account)."
+                : "Maak een nieuw account aan"}
           </CardDescription>
         </CardHeader>
         <CardContent>
+          {regStatus?.reason === "server_not_configured" && (
+            <p className="text-sm text-destructive mb-4">{regStatus.message}</p>
+          )}
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="email">E-mailadres</Label>
@@ -55,12 +81,38 @@ export default function Auth() {
               <Label htmlFor="password">Wachtwoord</Label>
               <Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" required minLength={6} />
             </div>
-            <Button type="submit" className="w-full" disabled={loading}>
+            {!isLogin && regStatus?.needsSetupCode && (
+              <div className="space-y-2">
+                <Label htmlFor="setupCode">Setupcode (eerste account)</Label>
+                <Input
+                  id="setupCode"
+                  type="password"
+                  autoComplete="off"
+                  value={setupCode}
+                  onChange={(e) => setSetupCode(e.target.value)}
+                  placeholder="Uit serverconfig (FIRST_REGISTRATION_SECRET)"
+                  required
+                />
+              </div>
+            )}
+            <Button
+              type="submit"
+              className="w-full"
+              disabled={loading || (!isLogin && regStatus !== null && !regStatus.canRegister)}
+            >
               {loading ? "Laden..." : isLogin ? "Inloggen" : "Registreren"}
             </Button>
           </form>
           <div className="mt-4 text-center">
-            <button type="button" onClick={() => setIsLogin(!isLogin)} className="text-sm text-muted-foreground hover:text-primary transition-colors">
+            <button
+              type="button"
+              onClick={() => {
+                setIsLogin(!isLogin);
+                setSetupCode("");
+              }}
+              className="text-sm text-muted-foreground hover:text-primary transition-colors"
+              disabled={isLogin && regStatus !== null && !regStatus.canRegister}
+            >
               {isLogin ? "Nog geen account? Registreer hier" : "Al een account? Log hier in"}
             </button>
           </div>

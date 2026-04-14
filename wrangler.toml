@@ -2,7 +2,8 @@
 # 1) Maak D1: npx wrangler d1 create client-flow — plak database_id hieronder.
 # 2) Migraties: npm run db:migrate:local  /  npm run db:migrate:remote
 # 3) Productie: npx wrangler secret put JWT_SECRET  (min. 16 tekens; overschrijft [vars])
-# 4) Deploy: npm run deploy
+# 4) Eerste gebruiker: FIRST_REGISTRATION_SECRET (min. 8 tekens) — bij registreren invullen; draai om na eerste user.
+# 5) Deploy: npm run deploy
 
 name = "client-flow"
 main = "worker/index.ts"
@@ -11,6 +12,8 @@ compatibility_date = "2024-11-01"
 [vars]
 # Alleen voor lokaal / eerste deploy; in productie: wrangler secret put JWT_SECRET
 JWT_SECRET = "1495960008180958"
+# Eerste account op lege DB: verplicht bij registratie (voorkomt dat iedereen een willekeurig mailadres kiest).
+FIRST_REGISTRATION_SECRET = "REPLACE_ME"
 # Extra accounts na de eerste gebruiker: zet op "true" (of via wrangler vars)
 # ALLOW_REGISTRATION = "false"
 
