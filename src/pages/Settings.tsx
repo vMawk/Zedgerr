@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
+import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -19,7 +19,7 @@ export default function Settings() {
 
   useEffect(() => {
     if (!user) return;
-    supabase.from("business_settings").select("*").single().then(({ data }) => {
+    api.getBusinessSettings().then((data) => {
       if (data) {
         setExistingId(data.id);
         setForm({
@@ -42,17 +42,11 @@ export default function Settings() {
   const handleSave = async () => {
     if (!user) return;
     try {
-      if (existingId) {
-        const { error } = await supabase.from("business_settings").update(form).eq("id", existingId);
-        if (error) throw error;
-      } else {
-        const { data, error } = await supabase.from("business_settings").insert({ ...form, user_id: user.id }).select().single();
-        if (error) throw error;
-        if (data) setExistingId(data.id);
-      }
+      const saved = await api.putBusinessSettings(form);
+      if (saved) setExistingId(saved.id);
       toast({ title: "Instellingen opgeslagen" });
-    } catch (error: any) {
-      toast({ title: "Fout", description: error.message, variant: "destructive" });
+    } catch (error: unknown) {
+      toast({ title: "Fout", description: error instanceof Error ? error.message : String(error), variant: "destructive" });
     }
   };
 

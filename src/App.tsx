@@ -5,7 +5,6 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { AppLayout } from "@/components/AppLayout";
-import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
 import Companies from "./pages/Companies";
 import TimeEntries from "./pages/TimeEntries";
@@ -14,21 +13,32 @@ import Quotes from "./pages/Quotes";
 import Reports from "./pages/Reports";
 import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
+import Auth from "./pages/Auth";
 
 const queryClient = new QueryClient();
 
 function ProtectedRoutes() {
   const { user, loading } = useAuth();
-  if (loading) return <div className="min-h-screen flex items-center justify-center text-muted-foreground">Laden...</div>;
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background text-muted-foreground">
+        Laden…
+      </div>
+    );
+  }
   if (!user) return <Navigate to="/auth" replace />;
-  return (
-    <AppLayout />
-  );
+  return <AppLayout />;
 }
 
 function AuthRoute() {
   const { user, loading } = useAuth();
-  if (loading) return null;
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background text-muted-foreground">
+        Laden…
+      </div>
+    );
+  }
   if (user) return <Navigate to="/" replace />;
   return <Auth />;
 }

@@ -5,7 +5,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { FileText } from "lucide-react";
 
 export default function Auth() {
   const [isLogin, setIsLogin] = useState(true);
@@ -23,7 +22,7 @@ export default function Auth() {
         await signIn(email, password);
       } else {
         await signUp(email, password);
-        toast({ title: "Account aangemaakt", description: "Controleer je e-mail om je account te bevestigen." });
+        toast({ title: "Account aangemaakt", description: "Je bent ingelogd." });
       }
     } catch (error: any) {
       toast({ title: "Fout", description: error.message, variant: "destructive" });
@@ -36,8 +35,8 @@ export default function Auth() {
     <div className="min-h-screen flex items-center justify-center bg-background px-4">
       <Card className="w-full max-w-md">
         <CardHeader className="text-center space-y-2">
-          <div className="mx-auto w-12 h-12 bg-primary/10 rounded-xl flex items-center justify-center mb-2">
-            <FileText className="h-6 w-6 text-primary" />
+          <div className="mx-auto mb-3 flex justify-center">
+            <img src="/logo.png" alt="gibby.it" className="h-10 w-auto max-w-[200px] object-contain" />
           </div>
           <CardTitle className="text-2xl font-semibold">
             {isLogin ? "Welkom terug" : "Account aanmaken"}

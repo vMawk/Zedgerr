@@ -1,11 +1,10 @@
-import { createContext, useContext, useEffect, useState, ReactNode } from "react";
-import { User, Session } from "@supabase/supabase-js";
-import { supabase } from "@/integrations/supabase/client";
-import { useNavigate } from "react-router-dom";
+import { createContext, useCallback, useContext, useEffect, useState, ReactNode } from "react";
+import { setStoredToken, getStoredToken } from "@/lib/api";
+
+export type LocalUser = { id: string; email: string };
 
 interface AuthContextType {
-  user: User | null;
-  session: Session | null;
+  user: LocalUser | null;
   loading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string) => Promise<void>;
@@ -15,43 +14,74 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [session, setSession] = useState<Session | null>(null);
+  const [user, setUser] = useState<LocalUser | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      setUser(session?.user ?? null);
+    const t = getStoredToken();
+    if (!t) {
       setLoading(false);
-    });
-
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      setLoading(false);
-    });
-
-    return () => subscription.unsubscribe();
+      return;
+    }
+    fetch("/api/auth/me", { headers: { Authorization: `Bearer ${t}` } })
+      .then((r) => {
+        if (!r.ok) throw new Error("unauthorized");
+        return r.json() as Promise<{ id: string; email: string }>;
+      })
+      .then((u) => setUser({ id: u.id, email: u.email }))
+      .catch(() => setStoredToken(null))
+      .finally(() => setLoading(false));
   }, []);
 
-  const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) throw error;
-  };
+  const signIn = useCallback(async (email: string, password: string) => {
+    const r = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: email.trim(), password }),
+    });
+    if (!r.ok) {
+      let msg = await r.text();
+      try {
+        const j = JSON.parse(msg) as { error?: string };
+        if (j.error) msg = j.error;
+      } catch {
+        /* use raw */
+      }
+      throw new Error(msg || "Inloggen mislukt");
+    }
+    const data = (await r.json()) as { token: string; user: LocalUser };
+    setStoredToken(data.token);
+    setUser(data.user);
+  }, []);
 
-  const signUp = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signUp({ email, password, options: { emailRedirectTo: window.location.origin } });
-    if (error) throw error;
-  };
+  const signUp = useCallback(async (email: string, password: string) => {
+    const r = await fetch("/api/auth/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: email.trim(), password }),
+    });
+    if (!r.ok) {
+      let msg = await r.text();
+      try {
+        const j = JSON.parse(msg) as { error?: string };
+        if (j.error) msg = j.error;
+      } catch {
+        /* use raw */
+      }
+      throw new Error(msg || "Registreren mislukt");
+    }
+    const data = (await r.json()) as { token: string; user: LocalUser };
+    setStoredToken(data.token);
+    setUser(data.user);
+  }, []);
 
-  const signOut = async () => {
-    const { error } = await supabase.auth.signOut();
-    if (error) throw error;
-  };
+  const signOut = useCallback(async () => {
+    setStoredToken(null);
+    setUser(null);
+  }, []);
 
   return (
-    <AuthContext.Provider value={{ user, session, loading, signIn, signUp, signOut }}>
+    <AuthContext.Provider value={{ user, loading, signIn, signUp, signOut }}>
       {children}
     </AuthContext.Provider>
   );

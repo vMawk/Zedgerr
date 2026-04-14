@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
+import { api } from "@/lib/api";
+import type { Company, TimeEntry } from "@/lib/db-types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -11,15 +12,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import { Plus, Pencil, Trash2, Clock } from "lucide-react";
-import type { Database } from "@/integrations/supabase/types";
-
-type TimeEntry = Database["public"]["Tables"]["time_entries"]["Row"];
-type Company = Database["public"]["Tables"]["companies"]["Row"];
 
 export default function TimeEntries() {
   const { user } = useAuth();
   const { toast } = useToast();
-  const [entries, setEntries] = useState<(TimeEntry & { companies: { name: string } | null })[]>([]);
+  const [entries, setEntries] = useState<(TimeEntry & { companies: Company | null })[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [open, setOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
@@ -27,11 +24,11 @@ export default function TimeEntries() {
 
   const fetchData = async () => {
     const [entriesRes, companiesRes] = await Promise.all([
-      supabase.from("time_entries").select("*, companies(name)").order("date", { ascending: false }),
-      supabase.from("companies").select("*").order("name"),
+      api.getTimeEntries(),
+      api.getCompanies(),
     ]);
-    if (entriesRes.data) setEntries(entriesRes.data as any);
-    if (companiesRes.data) setCompanies(companiesRes.data);
+    setEntries(entriesRes);
+    setCompanies(companiesRes);
   };
 
   useEffect(() => { if (user) fetchData(); }, [user]);
@@ -44,22 +41,19 @@ export default function TimeEntries() {
       hours: parseFloat(form.hours),
       description: form.description || null,
       hourly_rate: form.hourly_rate ? parseFloat(form.hourly_rate) : null,
-      user_id: user.id,
     };
     try {
       if (editId) {
-        const { error } = await supabase.from("time_entries").update(data).eq("id", editId);
-        if (error) throw error;
+        await api.updateTimeEntry(editId, data);
       } else {
-        const { error } = await supabase.from("time_entries").insert(data);
-        if (error) throw error;
+        await api.createTimeEntry(data);
       }
       setOpen(false);
       resetForm();
       fetchData();
       toast({ title: editId ? "Uren bijgewerkt" : "Uren toegevoegd" });
-    } catch (error: any) {
-      toast({ title: "Fout", description: error.message, variant: "destructive" });
+    } catch (error: unknown) {
+      toast({ title: "Fout", description: error instanceof Error ? error.message : String(error), variant: "destructive" });
     }
   };
 
@@ -68,7 +62,7 @@ export default function TimeEntries() {
     setEditId(null);
   };
 
-  const handleEdit = (entry: TimeEntry) => {
+  const handleEdit = (entry: TimeEntry & { companies: Company | null }) => {
     setForm({
       company_id: entry.company_id,
       date: entry.date,
@@ -82,7 +76,7 @@ export default function TimeEntries() {
 
   const handleDelete = async (id: string) => {
     if (!confirm("Verwijderen?")) return;
-    await supabase.from("time_entries").delete().eq("id", id);
+    await api.deleteTimeEntry(id);
     fetchData();
   };
 
