@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useState, ReactNode } from "react";
-import { setStoredToken, getStoredToken } from "@/lib/api";
+import { setStoredToken, getStoredToken, apiUrl } from "@/lib/api";
 
 /** Ingelogde gebruiker uit D1 (`users`), via JWT — geen lokale SQLite-file. */
 export type AuthUser = { id: string; email: string };
@@ -24,7 +24,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(false);
       return;
     }
-    fetch("/api/auth/me", { headers: { Authorization: `Bearer ${t}` } })
+    fetch(apiUrl("/api/auth/me"), { headers: { Authorization: `Bearer ${t}` } })
       .then((r) => {
         if (!r.ok) throw new Error("unauthorized");
         return r.json() as Promise<{ id: string; email: string }>;
@@ -35,7 +35,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signIn = useCallback(async (email: string, password: string) => {
-    const r = await fetch("/api/auth/login", {
+    const r = await fetch(apiUrl("/api/auth/login"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email: email.trim(), password }),
@@ -62,7 +62,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
     const code = setupCode?.trim();
     if (code) payload.setup_code = code;
-    const r = await fetch("/api/auth/register", {
+    const r = await fetch(apiUrl("/api/auth/register"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),

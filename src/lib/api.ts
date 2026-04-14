@@ -1,5 +1,21 @@
 import type { BusinessSettings, Company, Invoice, InvoiceLine, Quote, TimeEntry } from "@/lib/db-types";
 
+/**
+ * Worker-API (D1 + auth). Leeg = zelfde origin (`npm run dev` → Vite proxy naar Wrangler).
+ * Cloudflare Pages: zet `VITE_API_ORIGIN=https://api.gibby.it` (Worker-route staat in wrangler.toml).
+ */
+export function apiOrigin(): string {
+  const v = import.meta.env.VITE_API_ORIGIN as string | undefined;
+  if (v && typeof v === "string" && v.trim()) return v.trim().replace(/\/$/, "");
+  return "";
+}
+
+export function apiUrl(path: string): string {
+  const o = apiOrigin();
+  const p = path.startsWith("/") ? path : `/${path}`;
+  return o ? `${o}${p}` : p;
+}
+
 const TOKEN_KEY = "client_flow_jwt";
 
 export function getStoredToken(): string | null {
@@ -19,7 +35,7 @@ function headersJson(): HeadersInit {
 }
 
 async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const r = await fetch(`/api${path}`, {
+  const r = await fetch(apiUrl(`/api${path}`), {
     method,
     headers: headersJson(),
     body: body !== undefined ? JSON.stringify(body) : undefined,

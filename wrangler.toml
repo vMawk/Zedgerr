@@ -1,13 +1,16 @@
 # Cloudflare Worker + D1 + SPA (dist/).
-# 1) Maak D1: npx wrangler d1 create client-flow — plak database_id hieronder.
-# 2) Migraties: npm run db:migrate:local  /  npm run db:migrate:remote
-# 3) Productie: npx wrangler secret put JWT_SECRET  (min. 16 tekens; overschrijft [vars])
-# 4) Eerste gebruiker: FIRST_REGISTRATION_SECRET (min. 8 tekens) — bij registreren invullen; draai om na eerste user.
-# 5) Deploy: npm run deploy
+#
+# API-host: api.gibby.it (Pages-frontend bv. op portaal.gibby.it → VITE_API_ORIGIN=https://api.gibby.it).
+# Deploy: npm run deploy
 
 name = "client-flow"
 main = "worker/index.ts"
 compatibility_date = "2024-11-01"
+
+[[routes]]
+pattern = "api.gibby.it"
+zone_name = "gibby.it"
+custom_domain = true
 
 [vars]
 # Alleen voor lokaal / eerste deploy; in productie: wrangler secret put JWT_SECRET
