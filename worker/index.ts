@@ -3,7 +3,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { hashPassword, verifyPassword } from "./auth-crypto";
-import { signUserToken, verifyUserToken } from "./jwt";
+import { signPortalToken, signUserToken, verifyPortalToken, verifyUserToken } from "./jwt";
 import { seedInvoice2026IfNeeded } from "./seed-d1";
 
 export type Env = {
@@ -14,13 +14,18 @@ export type Env = {
   ALLOW_REGISTRATION?: string;
 };
 
-type Variables = { userId: string; email?: string };
+type Variables = { userId?: string; portalCompanyId?: string; email?: string };
 
 function rowInvoiced(r: Record<string, unknown>) {
   return { ...r, invoiced: Boolean(r.invoiced) };
 }
 
-const publicApiPaths = new Set(["/api/auth/login", "/api/auth/register", "/api/auth/registration-status"]);
+const publicApiPaths = new Set([
+  "/api/auth/login",
+  "/api/auth/register",
+  "/api/auth/registration-status",
+  "/api/portal/login",
+]);
 
 const api = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -38,8 +43,23 @@ api.use("/api/*", async (c, next) => {
   if (publicApiPaths.has(path)) return next();
   const auth = c.req.header("Authorization");
   if (!auth?.startsWith("Bearer ")) return c.json({ error: "Unauthorized" }, 401);
+  const token = auth.slice(7);
+  const secret = c.env.JWT_SECRET;
+
+  if (path.startsWith("/api/portal/")) {
+    try {
+      const p = await verifyPortalToken(secret, token);
+      c.set("portalCompanyId", p.companyId);
+      if (p.email) c.set("email", p.email);
+      await next();
+    } catch {
+      return c.json({ error: "Invalid or expired token" }, 401);
+    }
+    return;
+  }
+
   try {
-    const payload = await verifyUserToken(c.env.JWT_SECRET, auth.slice(7));
+    const payload = await verifyUserToken(secret, token);
     c.set("userId", payload.sub);
     c.set("email", payload.email);
     await next();
@@ -133,7 +153,7 @@ api.post("/api/auth/login", async (c) => {
 });
 
 api.get("/api/auth/me", async (c) => {
-  const userId = c.get("userId");
+  const userId = c.get("userId")!;
   const row = await c.env.DB.prepare("SELECT id, email, created_at FROM users WHERE id = ?").bind(userId).first<{
     id: string;
     email: string;
@@ -143,9 +163,92 @@ api.get("/api/auth/me", async (c) => {
   return c.json(row);
 });
 
+// --- Klantenportaal (ingelogd als bedrijf: uren + facturen) ---
+api.post("/api/portal/login", async (c) => {
+  const secret = c.env.JWT_SECRET;
+  if (!secret || secret.length < 16) {
+    return c.json({ error: "Server misconfigured: JWT_SECRET required (min 16 chars)" }, 500);
+  }
+  let body: { email?: string; password?: string };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON" }, 400);
+  }
+  const emailRaw = (body.email ?? "").trim().toLowerCase();
+  const password = body.password ?? "";
+  if (!emailRaw || !emailRaw.includes("@")) return c.json({ error: "Invalid email" }, 400);
+  if (!password) return c.json({ error: "Invalid password" }, 400);
+
+  const row = await c.env.DB
+    .prepare(
+      `SELECT p.company_id, p.password_hash, c.name AS company_name
+       FROM company_portal_users p
+       JOIN companies c ON c.id = p.company_id
+       WHERE p.email = ?`,
+    )
+    .bind(emailRaw)
+    .first<{ company_id: string; password_hash: string; company_name: string }>();
+
+  if (!row || !(await verifyPassword(password, row.password_hash))) {
+    return c.json({ error: "Invalid email or password" }, 401);
+  }
+  const token = await signPortalToken(secret, row.company_id, emailRaw);
+  return c.json({ token, company: { id: row.company_id, name: row.company_name } });
+});
+
+api.get("/api/portal/me", async (c) => {
+  const companyId = c.get("portalCompanyId")!;
+  const row = await c.env.DB
+    .prepare(
+      `SELECT c.id, c.name, p.email AS portal_email
+       FROM companies c
+       JOIN company_portal_users p ON p.company_id = c.id
+       WHERE c.id = ?`,
+    )
+    .bind(companyId)
+    .first<{ id: string; name: string; portal_email: string }>();
+  if (!row) return c.json({ error: "Bedrijf niet gevonden" }, 404);
+  return c.json(row);
+});
+
+api.get("/api/portal/dashboard", async (c) => {
+  const companyId = c.get("portalCompanyId")!;
+  const hoursRow = await c.env.DB
+    .prepare("SELECT COALESCE(SUM(hours), 0) AS h FROM time_entries WHERE company_id = ?")
+    .bind(companyId)
+    .first<{ h: number }>();
+  const te = await c.env.DB
+    .prepare(
+      `SELECT id, date, hours, description
+       FROM time_entries
+       WHERE company_id = ?
+       ORDER BY date DESC, created_at DESC
+       LIMIT 500`,
+    )
+    .bind(companyId)
+    .all<{ id: string; date: string; hours: number; description: string | null }>();
+
+  const inv = await c.env.DB
+    .prepare(
+      `SELECT id, invoice_number, invoice_date, due_date, status, subtotal, btw_percentage, btw_amount, total, notes
+       FROM invoices
+       WHERE company_id = ?
+       ORDER BY invoice_date DESC, created_at DESC`,
+    )
+    .bind(companyId)
+    .all<Record<string, unknown>>();
+
+  return c.json({
+    totalHours: Number(hoursRow?.h ?? 0),
+    timeEntries: te.results ?? [],
+    invoices: inv.results ?? [],
+  });
+});
+
 // --- Dashboard ---
 api.get("/api/dashboard/stats", async (c) => {
-  const userId = c.get("userId");
+  const userId = c.get("userId")!;
   const now = new Date();
   const firstOfMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
   const companies = await c.env.DB.prepare("SELECT COUNT(*) as c FROM companies WHERE user_id = ?").bind(userId).first<{ c: number }>();
@@ -169,13 +272,24 @@ api.get("/api/dashboard/stats", async (c) => {
 
 // --- Companies ---
 api.get("/api/companies", async (c) => {
-  const userId = c.get("userId");
-  const { results } = await c.env.DB.prepare("SELECT * FROM companies WHERE user_id = ? ORDER BY name").bind(userId).all();
-  return c.json(results ?? []);
+  const userId = c.get("userId")!;
+  const { results } = await c.env.DB
+    .prepare(
+      `SELECT c.*,
+        (SELECT 1 FROM company_portal_users p WHERE p.company_id = c.id LIMIT 1) AS has_portal
+       FROM companies c WHERE c.user_id = ? ORDER BY c.name`,
+    )
+    .bind(userId)
+    .all();
+  const out = (results ?? []).map((r) => {
+    const x = r as Record<string, unknown>;
+    return { ...x, has_portal: Boolean(x.has_portal) };
+  });
+  return c.json(out);
 });
 
 api.post("/api/companies", async (c) => {
-  const userId = c.get("userId");
+  const userId = c.get("userId")!;
   const req = await c.req.json<Record<string, unknown>>();
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
@@ -208,7 +322,7 @@ api.post("/api/companies", async (c) => {
 });
 
 api.patch("/api/companies/:id", async (c) => {
-  const userId = c.get("userId");
+  const userId = c.get("userId")!;
   const { id } = c.req.param();
   const req = await c.req.json<Record<string, unknown>>();
   const now = new Date().toISOString();
@@ -242,14 +356,71 @@ api.patch("/api/companies/:id", async (c) => {
 });
 
 api.delete("/api/companies/:id", async (c) => {
-  const userId = c.get("userId");
+  const userId = c.get("userId")!;
   const { id } = c.req.param();
   await c.env.DB.prepare("DELETE FROM companies WHERE id = ? AND user_id = ?").bind(id, userId).run();
   return c.text("", 204);
 });
 
+api.get("/api/companies/:id/portal", async (c) => {
+  const userId = c.get("userId")!;
+  const { id } = c.req.param();
+  const owns = await c.env.DB.prepare("SELECT id FROM companies WHERE id = ? AND user_id = ?").bind(id, userId).first();
+  if (!owns) return c.json({ error: "Not found" }, 404);
+  const row = await c.env.DB.prepare("SELECT email FROM company_portal_users WHERE company_id = ?").bind(id).first<{ email: string }>();
+  return c.json({ hasPortal: Boolean(row), email: row?.email ?? null });
+});
+
+api.put("/api/companies/:id/portal", async (c) => {
+  const userId = c.get("userId")!;
+  const { id } = c.req.param();
+  const owns = await c.env.DB.prepare("SELECT id FROM companies WHERE id = ? AND user_id = ?").bind(id, userId).first();
+  if (!owns) return c.json({ error: "Not found" }, 404);
+  let body: { email?: string; password?: string };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON" }, 400);
+  }
+  const emailRaw = (body.email ?? "").trim().toLowerCase();
+  const password = body.password ?? "";
+  if (!emailRaw || !emailRaw.includes("@")) return c.json({ error: "Invalid email" }, 400);
+
+  const existing = await c.env.DB.prepare("SELECT id FROM company_portal_users WHERE company_id = ?").bind(id).first<{ id: string }>();
+
+  if (existing) {
+    if (password.length >= 6) {
+      const hash = await hashPassword(password);
+      await c.env.DB
+        .prepare("UPDATE company_portal_users SET email = ?, password_hash = ? WHERE company_id = ?")
+        .bind(emailRaw, hash, id)
+        .run();
+    } else {
+      await c.env.DB.prepare("UPDATE company_portal_users SET email = ? WHERE company_id = ?").bind(emailRaw, id).run();
+    }
+  } else {
+    if (password.length < 6) return c.json({ error: "Password must be at least 6 characters for new portal access" }, 400);
+    const hash = await hashPassword(password);
+    const pid = crypto.randomUUID();
+    await c.env.DB
+      .prepare("INSERT INTO company_portal_users (id, company_id, email, password_hash) VALUES (?, ?, ?, ?)")
+      .bind(pid, id, emailRaw, hash)
+      .run();
+  }
+  return c.json({ ok: true });
+});
+
+api.delete("/api/companies/:id/portal", async (c) => {
+  const userId = c.get("userId")!;
+  const { id } = c.req.param();
+  const owns = await c.env.DB.prepare("SELECT id FROM companies WHERE id = ? AND user_id = ?").bind(id, userId).first();
+  if (!owns) return c.json({ error: "Not found" }, 404);
+  await c.env.DB.prepare("DELETE FROM company_portal_users WHERE company_id = ?").bind(id).run();
+  return c.text("", 204);
+});
+
 api.get("/api/companies/:id", async (c) => {
-  const userId = c.get("userId");
+  const userId = c.get("userId")!;
   const { id } = c.req.param();
   const row = await c.env.DB.prepare("SELECT * FROM companies WHERE id = ? AND user_id = ?").bind(id, userId).first();
   if (!row) return c.json({ error: "Not found" }, 404);
@@ -258,7 +429,7 @@ api.get("/api/companies/:id", async (c) => {
 
 // --- Time entries ---
 api.get("/api/time-entries", async (c) => {
-  const userId = c.get("userId");
+  const userId = c.get("userId")!;
   const companyId = c.req.query("company_id");
   const invoiced = c.req.query("invoiced");
   let sql = `SELECT te.* FROM time_entries te WHERE te.user_id = ?`;
@@ -288,7 +459,7 @@ api.get("/api/time-entries", async (c) => {
 });
 
 api.post("/api/time-entries", async (c) => {
-  const userId = c.get("userId");
+  const userId = c.get("userId")!;
   const req = await c.req.json<Record<string, unknown>>();
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
@@ -314,7 +485,7 @@ api.post("/api/time-entries", async (c) => {
 });
 
 api.patch("/api/time-entries/:id", async (c) => {
-  const userId = c.get("userId");
+  const userId = c.get("userId")!;
   const { id } = c.req.param();
   const req = await c.req.json<Record<string, unknown>>();
   const now = new Date().toISOString();
@@ -330,14 +501,14 @@ api.patch("/api/time-entries/:id", async (c) => {
 });
 
 api.delete("/api/time-entries/:id", async (c) => {
-  const userId = c.get("userId");
+  const userId = c.get("userId")!;
   const { id } = c.req.param();
   await c.env.DB.prepare("DELETE FROM time_entries WHERE id = ? AND user_id = ?").bind(id, userId).run();
   return c.text("", 204);
 });
 
 api.post("/api/time-entries/mark-invoiced", async (c) => {
-  const userId = c.get("userId");
+  const userId = c.get("userId")!;
   const body = await c.req.json<{ ids: string[]; invoice_id: string }>();
   const { ids, invoice_id } = body;
   const now = new Date().toISOString();
@@ -352,7 +523,7 @@ api.post("/api/time-entries/mark-invoiced", async (c) => {
 
 // --- Reports ---
 api.get("/api/reports/time-entries", async (c) => {
-  const userId = c.get("userId");
+  const userId = c.get("userId")!;
   const from = c.req.query("from");
   const to = c.req.query("to");
   const companyId = c.req.query("company_id");
@@ -374,13 +545,13 @@ api.get("/api/reports/time-entries", async (c) => {
 
 // --- Business settings ---
 api.get("/api/business-settings", async (c) => {
-  const userId = c.get("userId");
+  const userId = c.get("userId")!;
   const row = await c.env.DB.prepare("SELECT * FROM business_settings WHERE user_id = ?").bind(userId).first();
   return c.json(row ?? null);
 });
 
 api.put("/api/business-settings", async (c) => {
-  const userId = c.get("userId");
+  const userId = c.get("userId")!;
   const req = await c.req.json<Record<string, unknown>>();
   const existing = await c.env.DB.prepare("SELECT id FROM business_settings WHERE user_id = ?").bind(userId).first<{ id: string }>();
   const now = new Date().toISOString();
@@ -441,7 +612,7 @@ api.put("/api/business-settings", async (c) => {
 
 // --- Invoices ---
 api.get("/api/invoices", async (c) => {
-  const userId = c.get("userId");
+  const userId = c.get("userId")!;
   const { results } = await c.env.DB
     .prepare(
       `SELECT i.*, c.name as company_name FROM invoices i
@@ -460,7 +631,7 @@ api.get("/api/invoices", async (c) => {
 });
 
 api.post("/api/invoices", async (c) => {
-  const userId = c.get("userId");
+  const userId = c.get("userId")!;
   const req = await c.req.json<Record<string, unknown>>();
   const id = crypto.randomUUID();
   const today = new Date().toISOString().split("T")[0];
@@ -496,7 +667,7 @@ api.post("/api/invoices", async (c) => {
 });
 
 api.delete("/api/invoices/:id", async (c) => {
-  const userId = c.get("userId");
+  const userId = c.get("userId")!;
   const { id } = c.req.param();
   const now = new Date().toISOString();
   await c.env.DB.batch([
@@ -539,7 +710,7 @@ api.post("/api/invoice-lines/batch", async (c) => {
 
 // --- Quotes ---
 api.get("/api/quotes", async (c) => {
-  const userId = c.get("userId");
+  const userId = c.get("userId")!;
   const { results } = await c.env.DB
     .prepare(
       `SELECT q.*, c.name as company_name FROM quotes q
@@ -558,7 +729,7 @@ api.get("/api/quotes", async (c) => {
 });
 
 api.post("/api/quotes", async (c) => {
-  const userId = c.get("userId");
+  const userId = c.get("userId")!;
   const req = await c.req.json<Record<string, unknown>>();
   const id = crypto.randomUUID();
   const today = new Date().toISOString().split("T")[0];

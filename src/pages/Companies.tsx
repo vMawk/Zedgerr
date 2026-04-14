@@ -9,7 +9,18 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Pencil, Trash2, Building2 } from "lucide-react";
+import { Plus, Pencil, Trash2, Building2, MonitorSmartphone, RefreshCw } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+
+function generateClientPassword(): string {
+  const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  const len = 14;
+  const arr = new Uint8Array(len);
+  crypto.getRandomValues(arr);
+  let s = "";
+  for (let i = 0; i < len; i++) s += chars[arr[i]! % chars.length];
+  return s;
+}
 
 const emptyForm: Partial<Company> = {
   name: "", contact_person: "", email: "", phone: "",
@@ -24,6 +35,9 @@ export default function Companies() {
   const [form, setForm] = useState<Partial<Company>>(emptyForm);
   const [editId, setEditId] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
+  const [portalEmail, setPortalEmail] = useState("");
+  const [portalPassword, setPortalPassword] = useState("");
+  const [portalHasPortal, setPortalHasPortal] = useState(false);
 
   const fetchCompanies = async () => {
     const data = await api.getCompanies();
@@ -34,27 +48,92 @@ export default function Companies() {
 
   const handleSave = async () => {
     if (!user || !form.name) return;
+    const pw = portalPassword.trim();
+    if (portalEmail.trim()) {
+      if (!portalHasPortal && pw.length < 6) {
+        toast({
+          title: "Klantenportaal",
+          description: "Stel een wachtwoord in voor de klant (minimaal 6 tekens) of gebruik ‘Wachtwoord genereren’.",
+          variant: "destructive",
+        });
+        return;
+      }
+      if (pw.length > 0 && pw.length < 6) {
+        toast({ title: "Klantenportaal", description: "Wachtwoord moet minimaal 6 tekens zijn.", variant: "destructive" });
+        return;
+      }
+    }
     try {
       if (editId) {
         await api.updateCompany(editId, { ...form });
+        if (portalEmail.trim()) {
+          await api.putCompanyPortal(editId, {
+            email: portalEmail.trim(),
+            password: pw || undefined,
+          });
+        }
         toast({ title: "Bedrijf bijgewerkt" });
       } else {
-        await api.createCompany({ ...form, name: form.name });
+        const created = await api.createCompany({ ...form, name: form.name });
+        if (portalEmail.trim()) {
+          await api.putCompanyPortal(created.id, {
+            email: portalEmail.trim(),
+            password: pw,
+          });
+        }
         toast({ title: "Bedrijf toegevoegd" });
       }
       setOpen(false);
       setForm(emptyForm);
       setEditId(null);
+      setPortalEmail("");
+      setPortalPassword("");
+      setPortalHasPortal(false);
       fetchCompanies();
     } catch (error: unknown) {
       toast({ title: "Fout", description: error instanceof Error ? error.message : String(error), variant: "destructive" });
     }
   };
 
-  const handleEdit = (company: Company) => {
+  const handleEdit = async (company: Company) => {
     setForm(company);
     setEditId(company.id);
+    setPortalPassword("");
+    try {
+      const p = await api.getCompanyPortal(company.id);
+      setPortalEmail(p.email ?? "");
+      setPortalHasPortal(p.hasPortal);
+    } catch {
+      setPortalEmail("");
+      setPortalHasPortal(false);
+    }
     setOpen(true);
+  };
+
+  const handleGeneratePortalPassword = async () => {
+    const pw = generateClientPassword();
+    setPortalPassword(pw);
+    try {
+      await navigator.clipboard.writeText(pw);
+      toast({ title: "Wachtwoord aangemaakt", description: "Gekopieerd naar klembord. Deel dit veilig met je klant." });
+    } catch {
+      toast({ title: "Wachtwoord aangemaakt", description: "Kopieer het wachtwoord uit het veld en deel het veilig met je klant." });
+    }
+  };
+
+  const handleRemovePortal = async () => {
+    if (!editId || !portalHasPortal) return;
+    if (!confirm("Klantenportaal uitschakelen? Het bedrijf kan dan niet meer inloggen.")) return;
+    try {
+      await api.deleteCompanyPortal(editId);
+      setPortalHasPortal(false);
+      setPortalEmail("");
+      setPortalPassword("");
+      fetchCompanies();
+      toast({ title: "Portaal uitgeschakeld" });
+    } catch (error: unknown) {
+      toast({ title: "Fout", description: error instanceof Error ? error.message : String(error), variant: "destructive" });
+    }
   };
 
   const handleDelete = async (id: string) => {
@@ -70,7 +149,19 @@ export default function Companies() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Bedrijven</h1>
-        <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) { setForm(emptyForm); setEditId(null); } }}>
+        <Dialog
+          open={open}
+          onOpenChange={(v) => {
+            setOpen(v);
+            if (!v) {
+              setForm(emptyForm);
+              setEditId(null);
+              setPortalEmail("");
+              setPortalPassword("");
+              setPortalHasPortal(false);
+            }
+          }}
+        >
           <DialogTrigger asChild>
             <Button><Plus className="mr-2 h-4 w-4" />Bedrijf toevoegen</Button>
           </DialogTrigger>
@@ -133,6 +224,55 @@ export default function Companies() {
                 <Label>Notities</Label>
                 <Textarea value={form.notes || ""} onChange={(e) => updateField("notes", e.target.value)} />
               </div>
+              <div className="border-t pt-4 space-y-3">
+                <div className="flex items-center gap-2">
+                  <MonitorSmartphone className="h-4 w-4 text-muted-foreground" />
+                  <p className="text-sm font-medium">Klantenportaal</p>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Maak hier een inlog aan voor je klant: e-mail en wachtwoord. De klant gaat naar{" "}
+                  <span className="font-mono text-foreground">/klantenportaal</span> en ziet uren en facturen voor dit bedrijf.
+                </p>
+                <div className="grid gap-2">
+                  <Label htmlFor="portal-email">E-mail voor inlog klant</Label>
+                  <Input
+                    id="portal-email"
+                    type="email"
+                    autoComplete="off"
+                    value={portalEmail}
+                    onChange={(e) => setPortalEmail(e.target.value)}
+                    placeholder="klant@bedrijf.nl"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <Label htmlFor="portal-password">Wachtwoord voor klant</Label>
+                    <Button type="button" variant="secondary" size="sm" className="h-7 text-xs shrink-0" onClick={handleGeneratePortalPassword}>
+                      <RefreshCw className="mr-1 h-3 w-3" />
+                      Genereren
+                    </Button>
+                  </div>
+                  <Input
+                    id="portal-password"
+                    type="text"
+                    autoComplete="new-password"
+                    value={portalPassword}
+                    onChange={(e) => setPortalPassword(e.target.value)}
+                    placeholder={portalHasPortal ? "Leeg laten om wachtwoord niet te wijzigen" : "Min. 6 tekens — of klik op Genereren"}
+                    className="font-mono text-sm"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    {portalHasPortal
+                      ? "Vul alleen een nieuw wachtwoord in als je het wilt wijzigen."
+                      : "Verplicht zodra je een e-mail invult. Het gegenereerde wachtwoord wordt naar je klembord gekopieerd."}
+                  </p>
+                </div>
+                {editId && portalHasPortal && (
+                  <Button type="button" variant="outline" size="sm" className="text-destructive" onClick={handleRemovePortal}>
+                    Portaal uitschakelen
+                  </Button>
+                )}
+              </div>
               <Button onClick={handleSave}>{editId ? "Opslaan" : "Toevoegen"}</Button>
             </div>
           </DialogContent>
@@ -151,7 +291,14 @@ export default function Companies() {
           {companies.map((company) => (
             <Card key={company.id}>
               <CardHeader className="flex flex-row items-start justify-between pb-2">
-                <CardTitle className="text-base">{company.name}</CardTitle>
+                <div className="space-y-1">
+                  <CardTitle className="text-base">{company.name}</CardTitle>
+                  {company.has_portal && (
+                    <Badge variant="secondary" className="text-xs font-normal">
+                      Klantenportaal
+                    </Badge>
+                  )}
+                </div>
                 <div className="flex gap-1">
                   <Button variant="ghost" size="icon" onClick={() => handleEdit(company)}>
                     <Pencil className="h-4 w-4" />
