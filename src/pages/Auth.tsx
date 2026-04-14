@@ -9,7 +9,6 @@ import { useToast } from "@/hooks/use-toast";
 
 type RegistrationStatus = {
   canRegister: boolean;
-  needsSetupCode: boolean;
   reason: string;
   message?: string;
 };
@@ -18,7 +17,6 @@ export default function Auth() {
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [setupCode, setSetupCode] = useState("");
   const [loading, setLoading] = useState(false);
   const [regStatus, setRegStatus] = useState<RegistrationStatus | null>(null);
   const { signIn, signUp } = useAuth();
@@ -38,10 +36,7 @@ export default function Auth() {
       if (isLogin) {
         await signIn(email, password);
       } else {
-        if (regStatus?.needsSetupCode && !setupCode.trim()) {
-          throw new Error("Vul de setupcode in voor het eerste account.");
-        }
-        await signUp(email, password, !isLogin ? setupCode : undefined);
+        await signUp(email, password);
         toast({ title: "Account aangemaakt", description: "Je bent ingelogd." });
       }
     } catch (error: any) {
@@ -64,14 +59,14 @@ export default function Auth() {
           <CardDescription>
             {isLogin
               ? "Log in om verder te gaan"
-              : regStatus?.needsSetupCode
-                ? "Eerste gebruiker: dit maakt het beheerdersaccount aan (niet hetzelfde als inloggen met een bestaand account)."
+              : regStatus?.reason === "first_user"
+                ? "Eerste gebruiker: maak het beheerdersaccount aan."
                 : "Maak een nieuw account aan"}
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {regStatus?.reason === "server_not_configured" && (
-            <p className="text-sm text-destructive mb-4">{regStatus.message}</p>
+          {regStatus?.reason === "registration_disabled" && regStatus.message && (
+            <p className="text-sm text-muted-foreground mb-4">{regStatus.message}</p>
           )}
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
@@ -82,20 +77,6 @@ export default function Auth() {
               <Label htmlFor="password">Wachtwoord</Label>
               <Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" required minLength={6} />
             </div>
-            {!isLogin && regStatus?.needsSetupCode && (
-              <div className="space-y-2">
-                <Label htmlFor="setupCode">Setupcode (eerste account)</Label>
-                <Input
-                  id="setupCode"
-                  type="password"
-                  autoComplete="off"
-                  value={setupCode}
-                  onChange={(e) => setSetupCode(e.target.value)}
-                  placeholder="Uit serverconfig (FIRST_REGISTRATION_SECRET)"
-                  required
-                />
-              </div>
-            )}
             <Button
               type="submit"
               className="w-full"
@@ -107,10 +88,7 @@ export default function Auth() {
           <div className="mt-4 text-center">
             <button
               type="button"
-              onClick={() => {
-                setIsLogin(!isLogin);
-                setSetupCode("");
-              }}
+              onClick={() => setIsLogin(!isLogin)}
               className="text-sm text-muted-foreground hover:text-primary transition-colors"
               disabled={isLogin && regStatus !== null && !regStatus.canRegister}
             >

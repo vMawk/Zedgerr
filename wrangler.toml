@@ -15,9 +15,7 @@ custom_domain = true
 [vars]
 # Alleen voor lokaal / eerste deploy; in productie: wrangler secret put JWT_SECRET
 JWT_SECRET = "1495960008180958"
-# Eerste account op lege DB: verplicht bij registratie (voorkomt dat iedereen een willekeurig mailadres kiest).
-FIRST_REGISTRATION_SECRET = "27f9ed8a5e2713a33e500d3e7afb54e15120194cbf43da24"
-# Extra accounts na de eerste gebruiker: zet op "true" (of via wrangler vars)
+# Eerste account: registreren als `users` leeg is. Daarna alleen nieuwe accounts als dit "true" is:
 # ALLOW_REGISTRATION = "false"
 
 [[d1_databases]]
