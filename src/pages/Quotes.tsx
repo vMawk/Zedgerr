@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
+import { api } from "@/lib/api";
+import type { Company, Quote } from "@/lib/db-types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -12,10 +13,6 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { Plus, FileCheck, Trash2 } from "lucide-react";
-import type { Database } from "@/integrations/supabase/types";
-
-type Quote = Database["public"]["Tables"]["quotes"]["Row"];
-type Company = Database["public"]["Tables"]["companies"]["Row"];
 
 interface QuoteLine {
   description: string;
@@ -34,7 +31,7 @@ const statusColors: Record<string, string> = {
 export default function Quotes() {
   const { user } = useAuth();
   const { toast } = useToast();
-  const [quotes, setQuotes] = useState<(Quote & { companies: { name: string } | null })[]>([]);
+  const [quotes, setQuotes] = useState<(Quote & { companies: { name: string | null } | null })[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [open, setOpen] = useState(false);
   const [selectedCompany, setSelectedCompany] = useState("");
@@ -43,12 +40,9 @@ export default function Quotes() {
   const [btwPercentage, setBtwPercentage] = useState("21");
 
   const fetchData = async () => {
-    const [quotesRes, companiesRes] = await Promise.all([
-      supabase.from("quotes").select("*, companies(name)").order("created_at", { ascending: false }),
-      supabase.from("companies").select("*").order("name"),
-    ]);
-    if (quotesRes.data) setQuotes(quotesRes.data as any);
-    if (companiesRes.data) setCompanies(companiesRes.data);
+    const [quotesRes, companiesRes] = await Promise.all([api.getQuotes(), api.getCompanies()]);
+    setQuotes(quotesRes);
+    setCompanies(companiesRes);
   };
 
   useEffect(() => { if (user) fetchData(); }, [user]);
@@ -81,12 +75,16 @@ export default function Quotes() {
     const quoteNumber = `O${now.getFullYear()}-${String(count).padStart(4, "0")}`;
 
     try {
-      const { data: quote, error } = await supabase.from("quotes").insert({
-        user_id: user.id, company_id: selectedCompany, quote_number: quoteNumber,
-        subtotal, btw_percentage: btw, btw_amount: btwAmount, total, notes: notes || null,
+      const quote = await api.createQuote({
+        company_id: selectedCompany,
+        quote_number: quoteNumber,
+        subtotal,
+        btw_percentage: btw,
+        btw_amount: btwAmount,
+        total,
+        notes: notes || null,
         valid_until: new Date(Date.now() + 30 * 86400000).toISOString().split("T")[0],
-      }).select().single();
-      if (error) throw error;
+      });
 
       const dbLines = lines.map((l) => ({
         quote_id: quote.id,
@@ -95,7 +93,7 @@ export default function Quotes() {
         hourly_rate: l.hourly_rate ? parseFloat(l.hourly_rate) : null,
         amount: parseFloat(l.amount) || 0,
       }));
-      await supabase.from("quote_lines").insert(dbLines);
+      await api.createQuoteLinesBatch(dbLines);
 
       setOpen(false);
       setSelectedCompany("");
@@ -103,8 +101,8 @@ export default function Quotes() {
       setNotes("");
       fetchData();
       toast({ title: "Offerte aangemaakt", description: quoteNumber });
-    } catch (error: any) {
-      toast({ title: "Fout", description: error.message, variant: "destructive" });
+    } catch (error: unknown) {
+      toast({ title: "Fout", description: error instanceof Error ? error.message : String(error), variant: "destructive" });
     }
   };
 

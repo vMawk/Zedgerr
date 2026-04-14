@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
+import { api } from "@/lib/api";
+import type { Company } from "@/lib/db-types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -9,12 +10,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { Plus, Pencil, Trash2, Building2 } from "lucide-react";
-import type { Database } from "@/integrations/supabase/types";
 
-type Company = Database["public"]["Tables"]["companies"]["Row"];
-type CompanyInsert = Database["public"]["Tables"]["companies"]["Insert"];
-
-const emptyForm: Partial<CompanyInsert> = {
+const emptyForm: Partial<Company> = {
   name: "", contact_person: "", email: "", phone: "",
   street: "", postal_code: "", city: "", country: "Nederland",
   kvk_number: "", btw_number: "", default_hourly_rate: undefined, notes: "",
@@ -24,13 +21,13 @@ export default function Companies() {
   const { user } = useAuth();
   const { toast } = useToast();
   const [companies, setCompanies] = useState<Company[]>([]);
-  const [form, setForm] = useState<Partial<CompanyInsert>>(emptyForm);
+  const [form, setForm] = useState<Partial<Company>>(emptyForm);
   const [editId, setEditId] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
 
   const fetchCompanies = async () => {
-    const { data } = await supabase.from("companies").select("*").order("name");
-    if (data) setCompanies(data);
+    const data = await api.getCompanies();
+    setCompanies(data);
   };
 
   useEffect(() => { if (user) fetchCompanies(); }, [user]);
@@ -39,20 +36,18 @@ export default function Companies() {
     if (!user || !form.name) return;
     try {
       if (editId) {
-        const { error } = await supabase.from("companies").update({ ...form }).eq("id", editId);
-        if (error) throw error;
+        await api.updateCompany(editId, { ...form });
         toast({ title: "Bedrijf bijgewerkt" });
       } else {
-        const { error } = await supabase.from("companies").insert({ ...form, user_id: user.id } as CompanyInsert);
-        if (error) throw error;
+        await api.createCompany({ ...form, name: form.name });
         toast({ title: "Bedrijf toegevoegd" });
       }
       setOpen(false);
       setForm(emptyForm);
       setEditId(null);
       fetchCompanies();
-    } catch (error: any) {
-      toast({ title: "Fout", description: error.message, variant: "destructive" });
+    } catch (error: unknown) {
+      toast({ title: "Fout", description: error instanceof Error ? error.message : String(error), variant: "destructive" });
     }
   };
 
@@ -64,12 +59,12 @@ export default function Companies() {
 
   const handleDelete = async (id: string) => {
     if (!confirm("Weet je zeker dat je dit bedrijf wilt verwijderen?")) return;
-    await supabase.from("companies").delete().eq("id", id);
+    await api.deleteCompany(id);
     fetchCompanies();
     toast({ title: "Bedrijf verwijderd" });
   };
 
-  const updateField = (field: string, value: any) => setForm((prev) => ({ ...prev, [field]: value }));
+  const updateField = (field: string, value: string | number | null | undefined) => setForm((prev) => ({ ...prev, [field]: value }));
 
   return (
     <div className="space-y-6">

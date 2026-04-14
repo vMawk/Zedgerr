@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
+import { api } from "@/lib/api";
 import { Building2, Clock, FileText, Euro } from "lucide-react";
 
 export default function Dashboard() {
@@ -10,25 +10,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (!user) return;
-    const fetchStats = async () => {
-      const now = new Date();
-      const firstOfMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
-
-      const [companiesRes, hoursRes, invoicesRes, revenueRes] = await Promise.all([
-        supabase.from("companies").select("id", { count: "exact", head: true }),
-        supabase.from("time_entries").select("hours").gte("date", firstOfMonth),
-        supabase.from("invoices").select("total").in("status", ["concept", "verzonden"]),
-        supabase.from("invoices").select("total").eq("status", "betaald"),
-      ]);
-
-      setStats({
-        companies: companiesRes.count ?? 0,
-        hoursThisMonth: hoursRes.data?.reduce((sum, e) => sum + Number(e.hours), 0) ?? 0,
-        openInvoices: invoicesRes.data?.length ?? 0,
-        revenue: revenueRes.data?.reduce((sum, e) => sum + Number(e.total), 0) ?? 0,
-      });
-    };
-    fetchStats();
+    api.getDashboardStats().then(setStats).catch(() => setStats({ companies: 0, hoursThisMonth: 0, openInvoices: 0, revenue: 0 }));
   }, [user]);
 
   const cards = [

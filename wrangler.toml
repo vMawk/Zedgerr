@@ -1,0 +1,26 @@
+# Cloudflare Worker + D1 + SPA (dist/).
+# 1) Maak D1: npx wrangler d1 create client-flow — plak database_id hieronder.
+# 2) Migraties: npm run db:migrate:local  /  npm run db:migrate:remote
+# 3) Productie: npx wrangler secret put JWT_SECRET  (min. 16 tekens; overschrijft [vars])
+# 4) Deploy: npm run deploy
+
+name = "client-flow"
+main = "worker/index.ts"
+compatibility_date = "2024-11-01"
+
+[vars]
+# Alleen voor lokaal / eerste deploy; in productie: wrangler secret put JWT_SECRET
+JWT_SECRET = "dev-only-replace-with-wrangler-secret-put-in-production-min16"
+# Extra accounts na de eerste gebruiker: zet op "true" (of via wrangler vars)
+# ALLOW_REGISTRATION = "false"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "client-flow"
+database_id = "edfd0cb4-569d-42e7-a3ff-e44583881b67"
+migrations_dir = "migrations"
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"

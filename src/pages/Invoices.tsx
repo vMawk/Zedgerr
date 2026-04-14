@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
+import { api } from "@/lib/api";
+import type { Company, Invoice, TimeEntry } from "@/lib/db-types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -11,13 +12,17 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, FileText, Download } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Plus, FileText, Download, Trash2 } from "lucide-react";
 import { generateInvoicePDF } from "@/lib/pdf";
-import type { Database } from "@/integrations/supabase/types";
-
-type Invoice = Database["public"]["Tables"]["invoices"]["Row"];
-type Company = Database["public"]["Tables"]["companies"]["Row"];
-type TimeEntry = Database["public"]["Tables"]["time_entries"]["Row"];
 
 const statusColors: Record<string, string> = {
   concept: "bg-muted text-muted-foreground",
@@ -29,7 +34,7 @@ const statusColors: Record<string, string> = {
 export default function Invoices() {
   const { user } = useAuth();
   const { toast } = useToast();
-  const [invoices, setInvoices] = useState<(Invoice & { companies: { name: string } | null })[]>([]);
+  const [invoices, setInvoices] = useState<(Invoice & { companies: { name: string | null } | null })[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [open, setOpen] = useState(false);
   const [selectedCompany, setSelectedCompany] = useState("");
@@ -37,22 +42,20 @@ export default function Invoices() {
   const [selectedEntries, setSelectedEntries] = useState<string[]>([]);
   const [notes, setNotes] = useState("");
   const [btwPercentage, setBtwPercentage] = useState("21");
+  const [invoiceToDelete, setInvoiceToDelete] = useState<Invoice | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const fetchData = async () => {
-    const [invoicesRes, companiesRes] = await Promise.all([
-      supabase.from("invoices").select("*, companies(name)").order("created_at", { ascending: false }),
-      supabase.from("companies").select("*").order("name"),
-    ]);
-    if (invoicesRes.data) setInvoices(invoicesRes.data as any);
-    if (companiesRes.data) setCompanies(companiesRes.data);
+    const [invList, compList] = await Promise.all([api.getInvoices(), api.getCompanies()]);
+    setInvoices(invList);
+    setCompanies(compList);
   };
 
   useEffect(() => { if (user) fetchData(); }, [user]);
 
   useEffect(() => {
     if (!selectedCompany) { setUninvoicedEntries([]); return; }
-    supabase.from("time_entries").select("*, companies(*)").eq("company_id", selectedCompany).eq("invoiced", false).order("date")
-      .then(({ data }) => { if (data) setUninvoicedEntries(data as any); });
+    api.getTimeEntries({ company_id: selectedCompany, invoiced: false }).then(setUninvoicedEntries);
   }, [selectedCompany]);
 
   const generateInvoiceNumber = () => {
@@ -78,12 +81,17 @@ export default function Invoices() {
     const invoiceNumber = generateInvoiceNumber();
 
     try {
-      const { data: invoice, error } = await supabase.from("invoices").insert({
-        user_id: user.id, company_id: selectedCompany, invoice_number: invoiceNumber,
-        subtotal, btw_percentage: btw, btw_amount: btwAmount, total, notes: notes || null,
+      const invoice = await api.createInvoice({
+        company_id: selectedCompany,
+        invoice_number: invoiceNumber,
+        subtotal,
+        btw_percentage: btw,
+        btw_amount: btwAmount,
+        total,
+        notes: notes || null,
+        advance_payment: 0,
         due_date: new Date(Date.now() + 30 * 86400000).toISOString().split("T")[0],
-      }).select().single();
-      if (error) throw error;
+      });
 
       const lines = entries.map((e) => ({
         invoice_id: invoice.id,
@@ -94,8 +102,8 @@ export default function Invoices() {
         amount: Number(e.hours) * Number(e.hourly_rate ?? company.default_hourly_rate ?? 0),
         time_entry_id: e.id,
       }));
-      await supabase.from("invoice_lines").insert(lines);
-      await supabase.from("time_entries").update({ invoiced: true, invoice_id: invoice.id }).in("id", selectedEntries);
+      await api.createInvoiceLinesBatch(lines);
+      await api.markTimeEntriesInvoiced({ ids: selectedEntries, invoice_id: invoice.id });
 
       setOpen(false);
       setSelectedCompany("");
@@ -103,18 +111,33 @@ export default function Invoices() {
       setNotes("");
       fetchData();
       toast({ title: "Factuur aangemaakt", description: invoiceNumber });
-    } catch (error: any) {
-      toast({ title: "Fout", description: error.message, variant: "destructive" });
+    } catch (error: unknown) {
+      toast({ title: "Fout", description: error instanceof Error ? error.message : String(error), variant: "destructive" });
     }
   };
 
-  const handleDownloadPDF = async (invoice: Invoice & { companies: { name: string } | null }) => {
+  const handleDownloadPDF = async (invoice: Invoice & { companies: { name: string | null } | null }) => {
     const [linesRes, settingsRes, companyRes] = await Promise.all([
-      supabase.from("invoice_lines").select("*").eq("invoice_id", invoice.id).order("date"),
-      supabase.from("business_settings").select("*").single(),
-      supabase.from("companies").select("*").eq("id", invoice.company_id).single(),
+      api.getInvoiceLines(invoice.id),
+      api.getBusinessSettings(),
+      api.getCompany(invoice.company_id),
     ]);
-    generateInvoicePDF(invoice, linesRes.data || [], settingsRes.data, companyRes.data);
+    await generateInvoicePDF(invoice, linesRes, settingsRes, companyRes);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!invoiceToDelete) return;
+    setDeleting(true);
+    try {
+      await api.deleteInvoice(invoiceToDelete.id);
+      setInvoiceToDelete(null);
+      fetchData();
+      toast({ title: "Factuur verwijderd", description: "Gekoppelde uren staan weer open om te factureren." });
+    } catch (error: unknown) {
+      toast({ title: "Fout bij verwijderen", description: error instanceof Error ? error.message : String(error), variant: "destructive" });
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const toggleEntry = (id: string) => {
@@ -192,8 +215,9 @@ export default function Invoices() {
                 <TableHead>Bedrijf</TableHead>
                 <TableHead>Datum</TableHead>
                 <TableHead>Totaal</TableHead>
+                <TableHead className="whitespace-nowrap">Voorschot</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead className="w-20"></TableHead>
+                <TableHead className="w-28 text-right">Acties</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -203,13 +227,29 @@ export default function Invoices() {
                   <TableCell>{invoice.companies?.name}</TableCell>
                   <TableCell>{new Date(invoice.invoice_date).toLocaleDateString("nl-NL")}</TableCell>
                   <TableCell>€{Number(invoice.total).toLocaleString("nl-NL", { minimumFractionDigits: 2 })}</TableCell>
+                  <TableCell className="text-muted-foreground text-sm">
+                    {Number(invoice.advance_payment ?? 0) > 0
+                      ? `€${Number(invoice.advance_payment).toLocaleString("nl-NL", { minimumFractionDigits: 2 })}`
+                      : "—"}
+                  </TableCell>
                   <TableCell>
                     <Badge variant="secondary" className={statusColors[invoice.status]}>{invoice.status}</Badge>
                   </TableCell>
-                  <TableCell>
-                    <Button variant="ghost" size="icon" onClick={() => handleDownloadPDF(invoice)}>
-                      <Download className="h-4 w-4" />
-                    </Button>
+                  <TableCell className="text-right">
+                    <div className="flex justify-end gap-1">
+                      <Button variant="ghost" size="icon" onClick={() => handleDownloadPDF(invoice)} title="PDF downloaden">
+                        <Download className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                        onClick={() => setInvoiceToDelete(invoice)}
+                        title="Factuur verwijderen"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
@@ -217,6 +257,24 @@ export default function Invoices() {
           </Table>
         </Card>
       )}
+
+      <AlertDialog open={!!invoiceToDelete} onOpenChange={(open) => { if (!open) setInvoiceToDelete(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Factuur verwijderen?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Factuur <span className="font-medium text-foreground">{invoiceToDelete?.invoice_number}</span> wordt permanent
+              verwijderd. Uren die op deze factuur stonden worden weer vrijgegeven, zodat je ze opnieuw kunt factureren.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Annuleren</AlertDialogCancel>
+            <Button variant="destructive" onClick={handleConfirmDelete} disabled={deleting}>
+              {deleting ? "Bezig…" : "Verwijderen"}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

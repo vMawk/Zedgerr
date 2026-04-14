@@ -9,6 +9,12 @@ lerna-debug.log*
 
 node_modules
 dist
+
+# Wrangler local D1 / cache
+.wrangler
+
+# Lokale SQLite (Express API)
+data/
 dist-ssr
 *.local
 

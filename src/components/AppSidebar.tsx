@@ -1,7 +1,7 @@
 import { LayoutDashboard, Building2, Clock, FileText, FileCheck, BarChart3, Settings, LogOut } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
-import { useLocation } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
+import { cn } from "@/lib/utils";
 import {
   Sidebar,
   SidebarContent,
@@ -28,20 +28,28 @@ const settingsItems = [
   { title: "Instellingen", url: "/instellingen", icon: Settings },
 ];
 
+const LOGO_SRC = "/logo.png";
+
 export function AppSidebar() {
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
-  const location = useLocation();
   const { signOut } = useAuth();
 
   return (
     <Sidebar collapsible="icon">
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel className="px-3 py-2">
-            {!collapsed && (
-              <span className="text-base font-semibold text-foreground tracking-tight">ZZP Tool</span>
-            )}
+          <SidebarGroupLabel className="px-3 py-3">
+            <div className={cn("flex items-center", collapsed ? "justify-center" : "justify-start")}>
+              <img
+                src={LOGO_SRC}
+                alt="gibby.it"
+                className={cn(
+                  "h-auto w-auto max-w-full object-contain object-left",
+                  collapsed ? "h-7 max-w-[1.75rem]" : "h-9",
+                )}
+              />
+            </div>
           </SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
