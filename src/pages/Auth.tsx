@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { apiUrl } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,7 +25,7 @@ export default function Auth() {
   const { toast } = useToast();
 
   useEffect(() => {
-    fetch("/api/auth/registration-status")
+    fetch(apiUrl("/api/auth/registration-status"))
       .then((r) => r.json() as Promise<RegistrationStatus>)
       .then(setRegStatus)
       .catch(() => setRegStatus(null));
