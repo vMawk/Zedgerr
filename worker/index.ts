@@ -603,6 +603,22 @@ api.post("/api/quote-lines/batch", async (c) => {
   return c.json({ ok: true });
 });
 
+/** D1-fouten (o.a. ontbrekende tabellen) anders als kale "Internal Server Error" zonder JSON. */
+api.onError((err, c) => {
+  console.error(err);
+  const msg = err instanceof Error ? err.message : String(err);
+  if (msg.includes("no such table")) {
+    return c.json(
+      {
+        error:
+          "Database niet klaar: D1-migraties ontbreken. Voer uit: npm run db:migrate:remote (productie) of npm run db:migrate:local (lokaal).",
+      },
+      503,
+    );
+  }
+  return c.json({ error: "Serverfout" }, 500);
+});
+
 // --- Deploy: static SPA + API ---
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
