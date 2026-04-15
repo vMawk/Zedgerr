@@ -410,7 +410,10 @@ export default function Invoices() {
             </TableHeader>
             <TableBody>
               {invoices.map((invoice) => (
-                <TableRow key={invoice.id}>
+                <TableRow
+                  key={invoice.id}
+                  className={invoice.status === "vervallen" ? "opacity-55 text-muted-foreground" : undefined}
+                >
                   <TableCell className="font-medium">{invoice.invoice_number}</TableCell>
                   <TableCell>{invoice.companies?.name}</TableCell>
                   <TableCell>{new Date(invoice.invoice_date).toLocaleDateString("nl-NL")}</TableCell>
