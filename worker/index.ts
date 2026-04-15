@@ -660,6 +660,32 @@ api.get("/api/invoices/exists", async (c) => {
   return c.json({ exists: Boolean(row) });
 });
 
+api.get("/api/invoices/to-send", async (c) => {
+  const userId = c.get("userId")!;
+  const month = c.req.query("month"); // YYYY-MM
+  if (!month || !/^\d{4}-\d{2}$/.test(month)) return c.json({ error: "month required (YYYY-MM)" }, 400);
+  const from = `${month}-01`;
+  const to = `${month}-31`;
+  const { results } = await c.env.DB
+    .prepare(
+      `SELECT i.id, i.invoice_number, i.total, c.name as company_name
+       FROM invoices i
+       LEFT JOIN companies c ON c.id = i.company_id
+       WHERE i.user_id = ? AND i.status = 'concept' AND i.invoice_date >= ? AND i.invoice_date <= ?
+       ORDER BY i.invoice_date DESC, i.created_at DESC
+       LIMIT 25`,
+    )
+    .bind(userId, from, to)
+    .all<Record<string, unknown>>();
+  const list = (results ?? []).map((r) => ({
+    id: r.id,
+    invoice_number: r.invoice_number,
+    total: r.total,
+    company_name: r.company_name ?? null,
+  }));
+  return c.json({ count: list.length, invoices: list });
+});
+
 api.post("/api/invoices", async (c) => {
   const userId = c.get("userId")!;
   const req = await c.req.json<Record<string, unknown>>();
@@ -835,7 +861,9 @@ api.post("/api/invoices/:id/split", async (c) => {
   const origDesc = (origLine?.description ?? "").trim() || `Factuur ${invoice.invoice_number}`;
 
   const today = new Date().toISOString().split("T")[0]!;
-  const baseDue = firstDue ?? invoice.due_date ?? addDaysIso(today, 30);
+  const invDate = invoice.invoice_date || today;
+  // Vervaldatum termijnen: standaard 30 dagen na factuurdatum, en daarna telkens +30 dagen.
+  const baseDue = firstDue ?? addDaysIso(invDate, intervalDays);
   const isPrivate = invoice.invoice_type === "private";
   const subtotalParts = splitEqual(Number(invoice.subtotal), parts);
   const year = new Date().getFullYear();
@@ -864,7 +892,7 @@ api.post("/api/invoices/:id/split", async (c) => {
             created_at, updated_at
           ) VALUES (?, ?, ?, ?, ?, ?, 'concept', ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
         )
-        .bind(newId, userId, invoice.company_id, newNr, today, due, sub, btwPct, btwAmt, tot, newNotes, isPrivate ? "private" : "business", id, now, now),
+        .bind(newId, userId, invoice.company_id, newNr, invDate, due, sub, btwPct, btwAmt, tot, newNotes, isPrivate ? "private" : "business", id, now, now),
     );
     stmts.push(
       c.env.DB
@@ -873,7 +901,7 @@ api.post("/api/invoices/:id/split", async (c) => {
             id, invoice_id, time_entry_id, description, date, hours, hourly_rate, amount, created_at
           ) VALUES (?, ?, NULL, ?, ?, NULL, NULL, ?, datetime('now'))`,
         )
-        .bind(crypto.randomUUID(), newId, termDesc, today, sub),
+        .bind(crypto.randomUUID(), newId, termDesc, invDate, sub),
     );
     createdIds.push(newId);
   }

@@ -99,6 +99,11 @@ export const api = {
 
   getInvoices: () => req<(Invoice & { companies: { name: string | null } | null })[]>("GET", "/invoices"),
   invoicesExistForMonth: (month: string) => req<{ exists: boolean }>("GET", `/invoices/exists?month=${encodeURIComponent(month)}`),
+  invoicesToSend: (month: string) =>
+    req<{ count: number; invoices: { id: string; invoice_number: string; total: number; company_name: string | null }[] }>(
+      "GET",
+      `/invoices/to-send?month=${encodeURIComponent(month)}`,
+    ),
   createInvoice: (body: Record<string, unknown>) => req<Invoice>("POST", "/invoices", body),
   splitInvoice: (id: string, body?: { parts?: number; interval_days?: number; first_due_date?: string }) =>
     req<{ ok: boolean; created_invoice_ids: string[] }>("POST", `/invoices/${id}/split`, body ?? {}),

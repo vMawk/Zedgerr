@@ -11,6 +11,7 @@ export default function Dashboard() {
   const { user } = useAuth();
   const [stats, setStats] = useState({ companies: 0, hoursThisMonth: 0, openInvoices: 0, revenue: 0 });
   const [needsMonthInvoice, setNeedsMonthInvoice] = useState(false);
+  const [toSendCount, setToSendCount] = useState(0);
 
   useEffect(() => {
     if (!user) return;
@@ -24,6 +25,7 @@ export default function Dashboard() {
     const threshold = 25;
     if (day < threshold) {
       setNeedsMonthInvoice(false);
+      setToSendCount(0);
       return;
     }
     const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
@@ -31,6 +33,10 @@ export default function Dashboard() {
       .invoicesExistForMonth(month)
       .then((r) => setNeedsMonthInvoice(!r.exists))
       .catch(() => setNeedsMonthInvoice(false));
+    api
+      .invoicesToSend(month)
+      .then((r) => setToSendCount(r.count))
+      .catch(() => setToSendCount(0));
   }, [user]);
 
   const cards = [
@@ -43,6 +49,19 @@ export default function Dashboard() {
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-semibold">Dashboard</h1>
+      {toSendCount > 0 && (
+        <Alert>
+          <AlertTitle>Facturen klaar om te versturen</AlertTitle>
+          <AlertDescription className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p>
+              Je hebt <span className="font-medium text-foreground">{toSendCount}</span> conceptfactuur{toSendCount === 1 ? "" : "en"} voor deze maand.
+            </p>
+            <Button asChild size="sm" className="w-fit">
+              <NavLink to="/facturen">Naar facturen</NavLink>
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
       {needsMonthInvoice && (
         <Alert>
           <AlertTitle>Einde van de maand nadert</AlertTitle>
