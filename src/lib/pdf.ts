@@ -146,8 +146,14 @@ export async function generateInvoicePDF(
   doc.setFont("helvetica", "bold");
   doc.setFontSize(12);
   const totalLabelY = isPrivate ? finalY : finalY + 14;
-  doc.text(isPrivate ? "Totaal (all-in):" : "Totaal:", rightX - 40, totalLabelY);
+  // Extra ruimte tussen label en bedrag (kolommen)
+  doc.text(isPrivate ? "Totaal (all-in)" : "Totaal:", rightX - 60, totalLabelY);
   doc.text(`€${Number(invoice.total).toFixed(2)}`, rightX, totalLabelY, { align: "right" });
+  if (isPrivate) {
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.text("Vrijgesteld van BTW (particulier)", rightX, totalLabelY + 6, { align: "right" });
+  }
 
   const advance = isPrivate ? 0 : Number(invoice.advance_payment ?? 0);
   let paymentBlockY = finalY + 30;
