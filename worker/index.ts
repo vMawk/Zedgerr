@@ -231,7 +231,20 @@ api.get("/api/portal/dashboard", async (c) => {
 
   const inv = await c.env.DB
     .prepare(
-      `SELECT id, invoice_number, invoice_date, due_date, status, subtotal, btw_percentage, btw_amount, total, notes
+      `SELECT
+        id,
+        invoice_number,
+        CASE
+          WHEN split_from_invoice_id IS NOT NULL AND due_date IS NOT NULL THEN date(due_date, '-30 day')
+          ELSE invoice_date
+        END AS invoice_date,
+        due_date,
+        status,
+        subtotal,
+        btw_percentage,
+        btw_amount,
+        total,
+        notes
        FROM invoices
        WHERE company_id = ?
        ORDER BY invoice_date DESC, created_at DESC`,
