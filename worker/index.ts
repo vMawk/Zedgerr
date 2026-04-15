@@ -828,6 +828,12 @@ api.post("/api/invoices/:id/split", async (c) => {
   const already = await c.env.DB.prepare("SELECT 1 FROM invoices WHERE split_from_invoice_id = ? LIMIT 1").bind(id).first();
   if (already) return c.json({ error: "Invoice already split" }, 409);
 
+  const origLine = await c.env.DB
+    .prepare("SELECT description FROM invoice_lines WHERE invoice_id = ? ORDER BY created_at LIMIT 1")
+    .bind(id)
+    .first<{ description: string }>();
+  const origDesc = (origLine?.description ?? "").trim() || `Factuur ${invoice.invoice_number}`;
+
   const today = new Date().toISOString().split("T")[0]!;
   const baseDue = firstDue ?? invoice.due_date ?? addDaysIso(today, 30);
   const isPrivate = invoice.invoice_type === "private";
@@ -846,6 +852,7 @@ api.post("/api/invoices/:id/split", async (c) => {
     const newId = crypto.randomUUID();
     const newNr = await nextInvoiceNumberForYear(c.env.DB, userId, year, i);
     const termNote = `Termijn ${i + 1}/${parts} (gesplitst vanaf ${invoice.invoice_number})`;
+    const termDesc = `${origDesc} — termijn ${i + 1}/${parts}`;
     const newNotes = [invoice.notes, termNote].filter(Boolean).join("\n");
 
     stmts.push(
@@ -866,7 +873,7 @@ api.post("/api/invoices/:id/split", async (c) => {
             id, invoice_id, time_entry_id, description, date, hours, hourly_rate, amount, created_at
           ) VALUES (?, ?, NULL, ?, ?, NULL, NULL, ?, datetime('now'))`,
         )
-        .bind(crypto.randomUUID(), newId, termNote, today, sub),
+        .bind(crypto.randomUUID(), newId, termDesc, today, sub),
     );
     createdIds.push(newId);
   }
