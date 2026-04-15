@@ -583,6 +583,44 @@ api.get("/api/reports/time-entries", async (c) => {
   return c.json(results ?? []);
 });
 
+// --- Daily notes ---
+api.get("/api/notes/daily", async (c) => {
+  const userId = c.get("userId")!;
+  const date = c.req.query("date");
+  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return c.json({ error: "date required (YYYY-MM-DD)" }, 400);
+  const row = await c.env.DB
+    .prepare("SELECT id, note_date, content, updated_at FROM daily_notes WHERE user_id = ? AND note_date = ?")
+    .bind(userId, date)
+    .first<{ id: string; note_date: string; content: string; updated_at: string }>();
+  return c.json(row ?? { note_date: date, content: "", updated_at: null });
+});
+
+api.put("/api/notes/daily", async (c) => {
+  const userId = c.get("userId")!;
+  const req = await c.req.json<Record<string, unknown>>();
+  const date = String(req.date ?? "");
+  const content = String(req.content ?? "");
+  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return c.json({ error: "date required (YYYY-MM-DD)" }, 400);
+  const now = new Date().toISOString();
+  const existing = await c.env.DB
+    .prepare("SELECT id FROM daily_notes WHERE user_id = ? AND note_date = ?")
+    .bind(userId, date)
+    .first<{ id: string }>();
+  if (existing) {
+    await c.env.DB.prepare("UPDATE daily_notes SET content = ?, updated_at = ? WHERE id = ?").bind(content, now, existing.id).run();
+  } else {
+    await c.env.DB
+      .prepare("INSERT INTO daily_notes (id, user_id, note_date, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)")
+      .bind(crypto.randomUUID(), userId, date, content, now, now)
+      .run();
+  }
+  const row = await c.env.DB
+    .prepare("SELECT id, note_date, content, updated_at FROM daily_notes WHERE user_id = ? AND note_date = ?")
+    .bind(userId, date)
+    .first();
+  return c.json(row);
+});
+
 // --- Business settings ---
 api.get("/api/business-settings", async (c) => {
   const userId = c.get("userId")!;
