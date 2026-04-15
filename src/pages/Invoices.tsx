@@ -48,6 +48,7 @@ export default function Invoices() {
   const [notes, setNotes] = useState("");
   const [btwPercentage, setBtwPercentage] = useState("21");
   const [invoiceType, setInvoiceType] = useState<"business" | "private">("business");
+  const [invoiceDate, setInvoiceDate] = useState(() => new Date().toISOString().split("T")[0]);
   const [invoiceToDelete, setInvoiceToDelete] = useState<Invoice | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -113,11 +114,13 @@ export default function Invoices() {
     const btwAmount = invoiceType === "private" ? 0 : subtotal * (btw / 100);
     const total = invoiceType === "private" ? subtotal : subtotal + btwAmount;
     const invoiceNumber = generateInvoiceNumber();
+    const invDate = invoiceDate || new Date().toISOString().split("T")[0];
 
     try {
       const invoice = await api.createInvoice({
         company_id: selectedCompany,
         invoice_number: invoiceNumber,
+        invoice_date: invDate,
         subtotal,
         btw_percentage: btw,
         btw_amount: btwAmount,
@@ -143,7 +146,7 @@ export default function Invoices() {
               {
                 invoice_id: invoice.id,
                 description: serviceDescription.trim() || "Dienst",
-                date: new Date().toISOString().split("T")[0],
+                date: invDate,
                 hours: null,
                 hourly_rate: null,
                 amount: svcAmt,
@@ -164,6 +167,7 @@ export default function Invoices() {
       setCreateMode("hours");
       setNotes("");
       setInvoiceType("business");
+      setInvoiceDate(new Date().toISOString().split("T")[0]);
       fetchData();
       toast({ title: "Factuur aangemaakt", description: invoiceNumber });
     } catch (error: unknown) {
@@ -268,6 +272,10 @@ export default function Invoices() {
               <DialogTitle>Nieuwe factuur</DialogTitle>
             </DialogHeader>
             <div className="grid gap-4 py-4">
+              <div className="grid gap-2">
+                <Label>Factuurdatum</Label>
+                <Input type="date" value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} />
+              </div>
               <div className="grid gap-2">
                 <Label>Factuurtype</Label>
                 <Select value={invoiceType} onValueChange={(v) => setInvoiceType(v as "business" | "private")}>
