@@ -148,7 +148,10 @@ export default function PortalDashboard() {
                     </TableHeader>
                     <TableBody>
                       {data.invoices.map((inv) => (
-                        <TableRow key={inv.id}>
+                        <TableRow
+                          key={inv.id}
+                          className={inv.status === "vervallen" ? "opacity-55 text-muted-foreground" : undefined}
+                        >
                           <TableCell className="font-medium whitespace-nowrap">{inv.invoice_number}</TableCell>
                           <TableCell className="whitespace-nowrap">{new Date(inv.invoice_date).toLocaleDateString("nl-NL")}</TableCell>
                           <TableCell className="whitespace-nowrap">
