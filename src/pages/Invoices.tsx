@@ -31,6 +31,13 @@ const statusColors: Record<string, string> = {
   vervallen: "bg-destructive/10 text-destructive",
 };
 
+function statusLabel(status: string, notes: string | null): string {
+  if (status === "vervallen" && (notes ?? "").toLowerCase().includes("gesplitst")) {
+    return "gesplitst in kleinere, dus vervallen";
+  }
+  return status;
+}
+
 export default function Invoices() {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -414,7 +421,9 @@ export default function Invoices() {
                       : "—"}
                   </TableCell>
                   <TableCell>
-                    <Badge variant="secondary" className={statusColors[invoice.status]}>{invoice.status}</Badge>
+                    <Badge variant="secondary" className={statusColors[invoice.status]}>
+                      {statusLabel(invoice.status, invoice.notes)}
+                    </Badge>
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-1">

@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { usePortalAuth } from "@/lib/portal-auth";
-import { portalFetchDashboard, type PortalDashboard } from "@/lib/portal-api";
+import { portalFetchDashboard, portalFetchInvoicePdfData, type PortalDashboard } from "@/lib/portal-api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
-import { LogOut, Clock, FileText } from "lucide-react";
+import { LogOut, Clock, FileText, Download } from "lucide-react";
+import { generateInvoicePDF } from "@/lib/pdf";
 
 function invoiceStatusLabel(status: string): string {
   const m: Record<string, string> = {
@@ -21,6 +22,7 @@ export default function PortalDashboard() {
   const { toast } = useToast();
   const [data, setData] = useState<PortalDashboard | null>(null);
   const [loading, setLoading] = useState(true);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
   useEffect(() => {
     portalFetchDashboard()
@@ -35,6 +37,18 @@ export default function PortalDashboard() {
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- eenmalig laden
   }, []);
+
+  const handleDownloadInvoice = async (invoiceId: string) => {
+    setDownloadingId(invoiceId);
+    try {
+      const d = await portalFetchInvoicePdfData(invoiceId);
+      await generateInvoicePDF(d.invoice, d.lines, d.settings, d.company);
+    } catch (e: unknown) {
+      toast({ title: "Fout", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
+    } finally {
+      setDownloadingId(null);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -126,18 +140,34 @@ export default function PortalDashboard() {
                       <TableRow>
                         <TableHead>Nummer</TableHead>
                         <TableHead>Datum</TableHead>
+                        <TableHead>Vervaldatum</TableHead>
                         <TableHead>Status</TableHead>
                         <TableHead className="text-right">Totaal</TableHead>
+                        <TableHead className="w-16 text-right">PDF</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {data.invoices.map((inv) => (
                         <TableRow key={inv.id}>
                           <TableCell className="font-medium whitespace-nowrap">{inv.invoice_number}</TableCell>
-                          <TableCell className="whitespace-nowrap">{inv.invoice_date}</TableCell>
+                          <TableCell className="whitespace-nowrap">{new Date(inv.invoice_date).toLocaleDateString("nl-NL")}</TableCell>
+                          <TableCell className="whitespace-nowrap">
+                            {inv.due_date ? new Date(inv.due_date).toLocaleDateString("nl-NL") : "—"}
+                          </TableCell>
                           <TableCell>{invoiceStatusLabel(inv.status)}</TableCell>
                           <TableCell className="text-right tabular-nums">
                             €{Number(inv.total).toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => handleDownloadInvoice(inv.id)}
+                              disabled={downloadingId === inv.id}
+                              title="PDF downloaden"
+                            >
+                              <Download className="h-4 w-4" />
+                            </Button>
                           </TableCell>
                         </TableRow>
                       ))}

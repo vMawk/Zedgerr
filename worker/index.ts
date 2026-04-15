@@ -246,6 +246,33 @@ api.get("/api/portal/dashboard", async (c) => {
   });
 });
 
+api.get("/api/portal/invoices/:id/pdf-data", async (c) => {
+  const companyId = c.get("portalCompanyId")!;
+  const { id } = c.req.param();
+
+  const invoice = await c.env.DB
+    .prepare(
+      `SELECT * FROM invoices
+       WHERE id = ? AND company_id = ?`,
+    )
+    .bind(id, companyId)
+    .first<Record<string, unknown>>();
+  if (!invoice) return c.json({ error: "Factuur niet gevonden" }, 404);
+
+  const { results: lines } = await c.env.DB
+    .prepare("SELECT * FROM invoice_lines WHERE invoice_id = ? ORDER BY date")
+    .bind(id)
+    .all<Record<string, unknown>>();
+
+  const company = await c.env.DB.prepare("SELECT * FROM companies WHERE id = ?").bind(companyId).first<Record<string, unknown>>();
+  const owner = await c.env.DB.prepare("SELECT user_id FROM companies WHERE id = ?").bind(companyId).first<{ user_id: string }>();
+  const settings = owner?.user_id
+    ? await c.env.DB.prepare("SELECT * FROM business_settings WHERE user_id = ?").bind(owner.user_id).first<Record<string, unknown>>()
+    : null;
+
+  return c.json({ invoice, lines: lines ?? [], company: company ?? null, settings });
+});
+
 // --- Dashboard ---
 api.get("/api/dashboard/stats", async (c) => {
   const userId = c.get("userId")!;
@@ -872,11 +899,12 @@ api.post("/api/invoices/:id/split", async (c) => {
   const createdIds: string[] = [];
   const stmts: ReturnType<D1Database["prepare"]>[] = [];
   for (let i = 0; i < parts; i++) {
+    const termInvoiceDate = addDaysIso(invDate, intervalDays * i);
     const sub = subtotalParts[i]!;
     const btwPct = isPrivate ? 0 : Number(invoice.btw_percentage);
     const btwAmt = isPrivate ? 0 : round2(sub * (btwPct / 100));
     const tot = isPrivate ? sub : round2(sub + btwAmt);
-    const due = addDaysIso(baseDue, intervalDays * i);
+    const due = firstDue ? addDaysIso(baseDue, intervalDays * i) : addDaysIso(termInvoiceDate, intervalDays);
     const newId = crypto.randomUUID();
     const newNr = await nextInvoiceNumberForYear(c.env.DB, userId, year, i);
     const termNote = `Termijn ${i + 1}/${parts} (gesplitst vanaf ${invoice.invoice_number})`;
@@ -892,7 +920,7 @@ api.post("/api/invoices/:id/split", async (c) => {
             created_at, updated_at
           ) VALUES (?, ?, ?, ?, ?, ?, 'concept', ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
         )
-        .bind(newId, userId, invoice.company_id, newNr, invDate, due, sub, btwPct, btwAmt, tot, newNotes, isPrivate ? "private" : "business", id, now, now),
+        .bind(newId, userId, invoice.company_id, newNr, termInvoiceDate, due, sub, btwPct, btwAmt, tot, newNotes, isPrivate ? "private" : "business", id, now, now),
     );
     stmts.push(
       c.env.DB
@@ -901,7 +929,7 @@ api.post("/api/invoices/:id/split", async (c) => {
             id, invoice_id, time_entry_id, description, date, hours, hourly_rate, amount, created_at
           ) VALUES (?, ?, NULL, ?, ?, NULL, NULL, ?, datetime('now'))`,
         )
-        .bind(crypto.randomUUID(), newId, termDesc, invDate, sub),
+        .bind(crypto.randomUUID(), newId, termDesc, termInvoiceDate, sub),
     );
     createdIds.push(newId);
   }
@@ -1075,6 +1103,13 @@ api.patch("/api/quotes/:id", async (c) => {
 
   const row = await c.env.DB.prepare("SELECT * FROM quotes WHERE id = ? AND user_id = ?").bind(id, userId).first();
   return c.json(row);
+});
+
+api.delete("/api/quotes/:id", async (c) => {
+  const userId = c.get("userId")!;
+  const { id } = c.req.param();
+  await c.env.DB.prepare("DELETE FROM quotes WHERE id = ? AND user_id = ?").bind(id, userId).run();
+  return c.body(null, 204);
 });
 
 api.get("/api/quote-lines", async (c) => {

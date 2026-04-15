@@ -152,6 +152,17 @@ export default function Quotes() {
     }
   };
 
+  const handleDeleteQuote = async (q: Quote) => {
+    if (!confirm(`Offerte ${q.quote_number} verwijderen?`)) return;
+    try {
+      await api.deleteQuote(q.id);
+      await fetchData();
+      toast({ title: "Offerte verwijderd" });
+    } catch (e: unknown) {
+      toast({ title: "Fout", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -254,6 +265,15 @@ export default function Quotes() {
                       </Button>
                       <Button variant="ghost" size="icon" onClick={() => handleDownloadPDF(quote)} title="PDF downloaden">
                         <Download className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                        onClick={() => handleDeleteQuote(quote)}
+                        title="Offerte verwijderen"
+                      >
+                        <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>
                   </TableCell>
