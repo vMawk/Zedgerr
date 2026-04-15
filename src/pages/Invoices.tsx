@@ -21,7 +21,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Plus, FileText, Download, Trash2, Pencil } from "lucide-react";
+import { Plus, FileText, Download, Trash2, Pencil, Split } from "lucide-react";
 import { generateInvoicePDF } from "@/lib/pdf";
 
 const statusColors: Record<string, string> = {
@@ -47,6 +47,7 @@ export default function Invoices() {
   const [serviceDescription, setServiceDescription] = useState("");
   const [notes, setNotes] = useState("");
   const [btwPercentage, setBtwPercentage] = useState("21");
+  const [invoiceType, setInvoiceType] = useState<"business" | "private">("business");
   const [invoiceToDelete, setInvoiceToDelete] = useState<Invoice | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -56,6 +57,12 @@ export default function Invoices() {
   const [editDueDate, setEditDueDate] = useState("");
   const [editStatus, setEditStatus] = useState("concept");
   const [editNotes, setEditNotes] = useState("");
+  const [editInvoiceType, setEditInvoiceType] = useState<"business" | "private">("business");
+  const [splitOpen, setSplitOpen] = useState(false);
+  const [invoiceToSplit, setInvoiceToSplit] = useState<(Invoice & { companies: { name: string | null } | null }) | null>(null);
+  const [splitParts, setSplitParts] = useState("3");
+  const [splitIntervalDays, setSplitIntervalDays] = useState("30");
+  const [splitFirstDueDate, setSplitFirstDueDate] = useState("");
 
   const fetchData = async () => {
     const [invList, compList, svcList] = await Promise.all([api.getInvoices(), api.getCompanies(), api.getServices()]);
@@ -102,9 +109,9 @@ export default function Invoices() {
         : Number.isFinite(svcAmt)
           ? svcAmt
           : NaN;
-    const btw = parseFloat(btwPercentage);
-    const btwAmount = subtotal * (btw / 100);
-    const total = subtotal + btwAmount;
+    const btw = invoiceType === "private" ? 0 : parseFloat(btwPercentage);
+    const btwAmount = invoiceType === "private" ? 0 : subtotal * (btw / 100);
+    const total = invoiceType === "private" ? subtotal : subtotal + btwAmount;
     const invoiceNumber = generateInvoiceNumber();
 
     try {
@@ -118,6 +125,7 @@ export default function Invoices() {
         notes: notes || null,
         advance_payment: 0,
         due_date: new Date(Date.now() + 30 * 86400000).toISOString().split("T")[0],
+        invoice_type: invoiceType,
       });
 
       const lines =
@@ -155,6 +163,7 @@ export default function Invoices() {
       setServiceDescription("");
       setCreateMode("hours");
       setNotes("");
+      setInvoiceType("business");
       fetchData();
       toast({ title: "Factuur aangemaakt", description: invoiceNumber });
     } catch (error: unknown) {
@@ -193,6 +202,7 @@ export default function Invoices() {
     setEditDueDate(inv.due_date ?? "");
     setEditStatus(inv.status);
     setEditNotes(inv.notes ?? "");
+    setEditInvoiceType((inv.invoice_type as "business" | "private") || "business");
     setEditOpen(true);
   };
 
@@ -205,11 +215,37 @@ export default function Invoices() {
         due_date: editDueDate ? editDueDate : null,
         status: editStatus,
         notes: editNotes.trim() ? editNotes.trim() : null,
+        invoice_type: editInvoiceType,
       });
       setEditOpen(false);
       setInvoiceToEdit(null);
       await fetchData();
       toast({ title: "Factuur bijgewerkt" });
+    } catch (e: unknown) {
+      toast({ title: "Fout", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
+    }
+  };
+
+  const openSplit = (inv: Invoice & { companies: { name: string | null } | null }) => {
+    setInvoiceToSplit(inv);
+    setSplitParts("3");
+    setSplitIntervalDays("30");
+    setSplitFirstDueDate(inv.due_date ?? "");
+    setSplitOpen(true);
+  };
+
+  const handleConfirmSplit = async () => {
+    if (!invoiceToSplit) return;
+    try {
+      await api.splitInvoice(invoiceToSplit.id, {
+        parts: Number(splitParts),
+        interval_days: Number(splitIntervalDays),
+        first_due_date: splitFirstDueDate ? splitFirstDueDate : undefined,
+      });
+      setSplitOpen(false);
+      setInvoiceToSplit(null);
+      await fetchData();
+      toast({ title: "Factuur gesplitst", description: `Termijnen aangemaakt en originele factuur op ‘vervallen’ gezet.` });
     } catch (e: unknown) {
       toast({ title: "Fout", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
     }
@@ -232,6 +268,21 @@ export default function Invoices() {
               <DialogTitle>Nieuwe factuur</DialogTitle>
             </DialogHeader>
             <div className="grid gap-4 py-4">
+              <div className="grid gap-2">
+                <Label>Factuurtype</Label>
+                <Select value={invoiceType} onValueChange={(v) => setInvoiceType(v as "business" | "private")}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="business">Zakelijk (met BTW)</SelectItem>
+                    <SelectItem value="private">Particulier (vrijgesteld van BTW)</SelectItem>
+                  </SelectContent>
+                </Select>
+                {invoiceType === "private" && (
+                  <p className="text-xs text-muted-foreground">
+                    BTW wordt automatisch 0%. Op de PDF komt “Vrijgesteld van BTW” en de privé-afzender uit Instellingen.
+                  </p>
+                )}
+              </div>
               <div className="grid gap-2">
                 <Label>Type factuur</Label>
                 <Select value={createMode} onValueChange={(v) => setCreateMode(v as "hours" | "service")}>
@@ -299,7 +350,7 @@ export default function Invoices() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">
                   <Label>BTW-percentage</Label>
-                  <Input type="number" value={btwPercentage} onChange={(e) => setBtwPercentage(e.target.value)} />
+                  <Input type="number" value={invoiceType === "private" ? "0" : btwPercentage} onChange={(e) => setBtwPercentage(e.target.value)} disabled={invoiceType === "private"} />
                 </div>
               </div>
               <div className="grid gap-2">
@@ -362,6 +413,9 @@ export default function Invoices() {
                       <Button variant="ghost" size="icon" onClick={() => openEdit(invoice)} title="Bewerken">
                         <Pencil className="h-4 w-4" />
                       </Button>
+                      <Button variant="ghost" size="icon" onClick={() => openSplit(invoice)} title="Splitsen in termijnen">
+                        <Split className="h-4 w-4" />
+                      </Button>
                       <Button variant="ghost" size="icon" onClick={() => handleDownloadPDF(invoice)} title="PDF downloaden">
                         <Download className="h-4 w-4" />
                       </Button>
@@ -408,6 +462,16 @@ export default function Invoices() {
           </DialogHeader>
           <div className="grid gap-4 py-2">
             <div className="grid gap-2">
+              <Label>Factuurtype</Label>
+              <Select value={editInvoiceType} onValueChange={(v) => setEditInvoiceType(v as "business" | "private")}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="business">Zakelijk (met BTW)</SelectItem>
+                  <SelectItem value="private">Particulier (vrijgesteld van BTW)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
               <Label>Factuurnummer</Label>
               <Input value={editInvoiceNumber} onChange={(e) => setEditInvoiceNumber(e.target.value)} />
             </div>
@@ -438,6 +502,37 @@ export default function Invoices() {
               <Textarea value={editNotes} onChange={(e) => setEditNotes(e.target.value)} />
             </div>
             <Button onClick={handleSaveEdit}>Opslaan</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={splitOpen} onOpenChange={(v) => { setSplitOpen(v); if (!v) setInvoiceToSplit(null); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Splitsen in termijnen</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-4 py-2">
+            <p className="text-sm text-muted-foreground">
+              Dit maakt losse conceptfacturen aan (gelijk verdeeld) en zet de originele factuur op <span className="font-medium text-foreground">vervallen</span>.
+            </p>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label>Aantal termijnen</Label>
+                <Input type="number" min={2} max={12} value={splitParts} onChange={(e) => setSplitParts(e.target.value)} />
+              </div>
+              <div className="grid gap-2">
+                <Label>Dagen tussen termijnen</Label>
+                <Input type="number" min={1} max={365} value={splitIntervalDays} onChange={(e) => setSplitIntervalDays(e.target.value)} />
+              </div>
+            </div>
+            <div className="grid gap-2">
+              <Label>Eerste vervaldatum</Label>
+              <Input type="date" value={splitFirstDueDate} onChange={(e) => setSplitFirstDueDate(e.target.value)} />
+              <p className="text-xs text-muted-foreground">Leeg laten = we gebruiken de huidige vervaldatum of zetten standaard +30 dagen.</p>
+            </div>
+            <Button onClick={handleConfirmSplit} disabled={!invoiceToSplit}>
+              Splitsen
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

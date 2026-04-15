@@ -560,7 +560,9 @@ api.put("/api/business-settings", async (c) => {
       .prepare(
         `UPDATE business_settings SET
           company_name = ?, contact_person = ?, email = ?, phone = ?, street = ?, postal_code = ?, city = ?, country = ?,
-          kvk_number = ?, btw_number = ?, iban = ?, updated_at = ?
+          kvk_number = ?, btw_number = ?, iban = ?,
+          private_name = ?, private_street = ?, private_postal_code = ?, private_city = ?, private_country = ?,
+          updated_at = ?
          WHERE id = ?`,
       )
       .bind(
@@ -575,6 +577,11 @@ api.put("/api/business-settings", async (c) => {
         req.kvk_number ?? null,
         req.btw_number ?? null,
         req.iban ?? null,
+        req.private_name ?? null,
+        req.private_street ?? null,
+        req.private_postal_code ?? null,
+        req.private_city ?? null,
+        req.private_country ?? null,
         now,
         existing.id,
       )
@@ -585,8 +592,13 @@ api.put("/api/business-settings", async (c) => {
   const id = crypto.randomUUID();
   await c.env.DB
     .prepare(
-      `INSERT INTO business_settings (id, user_id, company_name, contact_person, email, phone, street, postal_code, city, country, kvk_number, btw_number, iban, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO business_settings (
+        id, user_id,
+        company_name, contact_person, email, phone, street, postal_code, city, country, kvk_number, btw_number, iban,
+        private_name, private_street, private_postal_code, private_city, private_country,
+        created_at, updated_at
+      )
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       id,
@@ -602,6 +614,11 @@ api.put("/api/business-settings", async (c) => {
       req.kvk_number ?? null,
       req.btw_number ?? null,
       req.iban ?? null,
+      req.private_name ?? null,
+      req.private_street ?? null,
+      req.private_postal_code ?? null,
+      req.private_city ?? null,
+      req.private_country ?? null,
       now,
       now,
     )
@@ -630,6 +647,19 @@ api.get("/api/invoices", async (c) => {
   return c.json(mapped);
 });
 
+api.get("/api/invoices/exists", async (c) => {
+  const userId = c.get("userId")!;
+  const month = c.req.query("month"); // YYYY-MM
+  if (!month || !/^\d{4}-\d{2}$/.test(month)) return c.json({ error: "month required (YYYY-MM)" }, 400);
+  const from = `${month}-01`;
+  const to = `${month}-31`;
+  const row = await c.env.DB
+    .prepare("SELECT 1 as x FROM invoices WHERE user_id = ? AND invoice_date >= ? AND invoice_date <= ? LIMIT 1")
+    .bind(userId, from, to)
+    .first<{ x: number }>();
+  return c.json({ exists: Boolean(row) });
+});
+
 api.post("/api/invoices", async (c) => {
   const userId = c.get("userId")!;
   const req = await c.req.json<Record<string, unknown>>();
@@ -639,10 +669,15 @@ api.post("/api/invoices", async (c) => {
   const invoice_date = (req.invoice_date as string) || today;
   const status = (req.status as string) || "concept";
   const advance = req.advance_payment != null ? Number(req.advance_payment) : 0;
+  const invoiceType = (req.invoice_type as string) === "private" ? "private" : "business";
+  const btwPct = invoiceType === "private" ? 0 : Number(req.btw_percentage);
+  const subtotal = Number(req.subtotal);
+  const btwAmount = invoiceType === "private" ? 0 : Number(req.btw_amount);
+  const total = invoiceType === "private" ? subtotal : Number(req.total);
   await c.env.DB
     .prepare(
-      `INSERT INTO invoices (id, user_id, company_id, invoice_number, invoice_date, due_date, status, subtotal, btw_percentage, btw_amount, total, advance_payment, notes, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO invoices (id, user_id, company_id, invoice_number, invoice_date, due_date, status, subtotal, btw_percentage, btw_amount, total, advance_payment, notes, invoice_type, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       id,
@@ -652,12 +687,13 @@ api.post("/api/invoices", async (c) => {
       invoice_date,
       req.due_date ?? null,
       status,
-      req.subtotal,
-      req.btw_percentage,
-      req.btw_amount,
-      req.total,
+      subtotal,
+      btwPct,
+      btwAmount,
+      total,
       advance,
       req.notes ?? null,
+      invoiceType,
       now,
       now,
     )
@@ -672,8 +708,24 @@ api.patch("/api/invoices/:id", async (c) => {
   const req = await c.req.json<Record<string, unknown>>();
   const now = new Date().toISOString();
 
-  const existing = await c.env.DB.prepare("SELECT id FROM invoices WHERE id = ? AND user_id = ?").bind(id, userId).first();
+  const existing = await c.env.DB
+    .prepare("SELECT id, invoice_type, subtotal, btw_percentage, btw_amount, total FROM invoices WHERE id = ? AND user_id = ?")
+    .bind(id, userId)
+    .first<{
+      id: string;
+      invoice_type: string;
+      subtotal: number;
+      btw_percentage: number;
+      btw_amount: number;
+      total: number;
+    }>();
   if (!existing) return c.json({ error: "Not found" }, 404);
+
+  const nextType = (req.invoice_type as string) ? (((req.invoice_type as string) === "private") ? "private" : "business") : (existing.invoice_type || "business");
+  const nextSubtotal = req.subtotal != null ? Number(req.subtotal) : Number(existing.subtotal);
+  const nextBtwPct = nextType === "private" ? 0 : (req.btw_percentage != null ? Number(req.btw_percentage) : Number(existing.btw_percentage));
+  const nextBtwAmt = nextType === "private" ? 0 : (req.btw_amount != null ? Number(req.btw_amount) : Number(existing.btw_amount));
+  const nextTotal = nextType === "private" ? nextSubtotal : (req.total != null ? Number(req.total) : Number(existing.total));
 
   await c.env.DB
     .prepare(
@@ -683,6 +735,11 @@ api.patch("/api/invoices/:id", async (c) => {
         due_date = COALESCE(?, due_date),
         status = COALESCE(?, status),
         notes = COALESCE(?, notes),
+        subtotal = ?,
+        btw_percentage = ?,
+        btw_amount = ?,
+        total = ?,
+        invoice_type = ?,
         updated_at = ?
        WHERE id = ? AND user_id = ?`,
     )
@@ -692,6 +749,11 @@ api.patch("/api/invoices/:id", async (c) => {
       req.due_date ?? null,
       req.status ?? null,
       req.notes ?? null,
+      nextSubtotal,
+      nextBtwPct,
+      nextBtwAmt,
+      nextTotal,
+      nextType,
       now,
       id,
       userId,
@@ -700,6 +762,124 @@ api.patch("/api/invoices/:id", async (c) => {
 
   const row = await c.env.DB.prepare("SELECT * FROM invoices WHERE id = ? AND user_id = ?").bind(id, userId).first();
   return c.json(row);
+});
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+function splitEqual(total: number, parts: number): number[] {
+  const base = Math.floor((total / parts) * 100) / 100;
+  const out = Array.from({ length: parts }, () => base);
+  const sum = out.reduce((a, b) => a + b, 0);
+  const diff = round2(total - sum);
+  out[out.length - 1] = round2(out[out.length - 1]! + diff);
+  return out;
+}
+
+function addDaysIso(dateIso: string, days: number): string {
+  const d = new Date(`${dateIso}T00:00:00.000Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().split("T")[0]!;
+}
+
+async function nextInvoiceNumberForYear(db: D1Database, userId: string, year: number, offset: number): Promise<string> {
+  const prefix = `F${year}-`;
+  const row = await db
+    .prepare("SELECT COUNT(*) as c FROM invoices WHERE user_id = ? AND invoice_number LIKE ?")
+    .bind(userId, `${prefix}%`)
+    .first<{ c: number }>();
+  const n = (row?.c ?? 0) + 1 + offset;
+  return `${prefix}${String(n).padStart(4, "0")}`;
+}
+
+api.post("/api/invoices/:id/split", async (c) => {
+  const userId = c.get("userId")!;
+  const { id } = c.req.param();
+  const body = await c.req.json<{ parts?: number; interval_days?: number; first_due_date?: string }>();
+  const parts = Number(body.parts ?? 3);
+  const intervalDays = Number(body.interval_days ?? 30);
+  const firstDue = body.first_due_date;
+
+  if (!Number.isInteger(parts) || parts < 2 || parts > 12) return c.json({ error: "parts must be 2..12" }, 400);
+  if (!Number.isInteger(intervalDays) || intervalDays < 1 || intervalDays > 365) return c.json({ error: "interval_days must be 1..365" }, 400);
+  if (firstDue && !/^\d{4}-\d{2}-\d{2}$/.test(firstDue)) return c.json({ error: "first_due_date must be YYYY-MM-DD" }, 400);
+
+  const invoice = await c.env.DB
+    .prepare(
+      "SELECT id, company_id, invoice_number, invoice_date, due_date, status, subtotal, btw_percentage, total, notes, invoice_type FROM invoices WHERE id = ? AND user_id = ?",
+    )
+    .bind(id, userId)
+    .first<{
+      id: string;
+      company_id: string;
+      invoice_number: string;
+      invoice_date: string;
+      due_date: string | null;
+      status: string;
+      subtotal: number;
+      btw_percentage: number;
+      total: number;
+      notes: string | null;
+      invoice_type: string;
+    }>();
+  if (!invoice) return c.json({ error: "Not found" }, 404);
+
+  const already = await c.env.DB.prepare("SELECT 1 FROM invoices WHERE split_from_invoice_id = ? LIMIT 1").bind(id).first();
+  if (already) return c.json({ error: "Invoice already split" }, 409);
+
+  const today = new Date().toISOString().split("T")[0]!;
+  const baseDue = firstDue ?? invoice.due_date ?? addDaysIso(today, 30);
+  const isPrivate = invoice.invoice_type === "private";
+  const subtotalParts = splitEqual(Number(invoice.subtotal), parts);
+  const year = new Date().getFullYear();
+  const now = new Date().toISOString();
+
+  const createdIds: string[] = [];
+  const stmts: ReturnType<D1Database["prepare"]>[] = [];
+  for (let i = 0; i < parts; i++) {
+    const sub = subtotalParts[i]!;
+    const btwPct = isPrivate ? 0 : Number(invoice.btw_percentage);
+    const btwAmt = isPrivate ? 0 : round2(sub * (btwPct / 100));
+    const tot = isPrivate ? sub : round2(sub + btwAmt);
+    const due = addDaysIso(baseDue, intervalDays * i);
+    const newId = crypto.randomUUID();
+    const baseNr = await nextInvoiceNumberForYear(c.env.DB, userId, year, i);
+    const newNr = `${baseNr}-${i + 1}of${parts}`;
+    const termNote = `Termijn ${i + 1}/${parts} (gesplitst vanaf ${invoice.invoice_number})`;
+    const newNotes = [invoice.notes, termNote].filter(Boolean).join("\n");
+
+    stmts.push(
+      c.env.DB
+        .prepare(
+          `INSERT INTO invoices (
+            id, user_id, company_id, invoice_number, invoice_date, due_date, status,
+            subtotal, btw_percentage, btw_amount, total, advance_payment, notes, invoice_type, split_from_invoice_id,
+            created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, 'concept', ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
+        )
+        .bind(newId, userId, invoice.company_id, newNr, today, due, sub, btwPct, btwAmt, tot, newNotes, isPrivate ? "private" : "business", id, now, now),
+    );
+    stmts.push(
+      c.env.DB
+        .prepare(
+          `INSERT INTO invoice_lines (
+            id, invoice_id, time_entry_id, description, date, hours, hourly_rate, amount, created_at
+          ) VALUES (?, ?, NULL, ?, ?, NULL, NULL, ?, datetime('now'))`,
+        )
+        .bind(crypto.randomUUID(), newId, termNote, today, sub),
+    );
+    createdIds.push(newId);
+  }
+
+  stmts.push(
+    c.env.DB
+      .prepare("UPDATE invoices SET status = 'vervallen', notes = ?, updated_at = ? WHERE id = ? AND user_id = ?")
+      .bind([invoice.notes, `Gesplitst in ${parts} termijnen op ${today}.`].filter(Boolean).join("\n"), now, id, userId),
+  );
+
+  await c.env.DB.batch(stmts);
+  return c.json({ ok: true, created_invoice_ids: createdIds });
 });
 
 api.delete("/api/invoices/:id", async (c) => {

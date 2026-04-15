@@ -98,10 +98,24 @@ export const api = {
   putBusinessSettings: (body: Record<string, unknown>) => req<BusinessSettings>("PUT", "/business-settings", body),
 
   getInvoices: () => req<(Invoice & { companies: { name: string | null } | null })[]>("GET", "/invoices"),
+  invoicesExistForMonth: (month: string) => req<{ exists: boolean }>("GET", `/invoices/exists?month=${encodeURIComponent(month)}`),
   createInvoice: (body: Record<string, unknown>) => req<Invoice>("POST", "/invoices", body),
+  splitInvoice: (id: string, body?: { parts?: number; interval_days?: number; first_due_date?: string }) =>
+    req<{ ok: boolean; created_invoice_ids: string[] }>("POST", `/invoices/${id}/split`, body ?? {}),
   updateInvoice: (
     id: string,
-    body: { invoice_number?: string; invoice_date?: string; due_date?: string | null; status?: string; notes?: string | null },
+    body: {
+      invoice_number?: string;
+      invoice_date?: string;
+      due_date?: string | null;
+      status?: string;
+      notes?: string | null;
+      invoice_type?: "business" | "private";
+      subtotal?: number;
+      btw_percentage?: number;
+      btw_amount?: number;
+      total?: number;
+    },
   ) => req<Invoice>("PATCH", `/invoices/${id}`, body),
   deleteInvoice: (id: string) => req<void>("DELETE", `/invoices/${id}`),
   getInvoiceLines: (invoiceId: string) => req<InvoiceLine[]>("GET", `/invoice-lines?invoice_id=${encodeURIComponent(invoiceId)}`),

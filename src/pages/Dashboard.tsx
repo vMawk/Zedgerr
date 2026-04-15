@@ -1,16 +1,36 @@
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { Building2, Clock, FileText, Euro } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { NavLink } from "@/components/NavLink";
 
 export default function Dashboard() {
   const { user } = useAuth();
   const [stats, setStats] = useState({ companies: 0, hoursThisMonth: 0, openInvoices: 0, revenue: 0 });
+  const [needsMonthInvoice, setNeedsMonthInvoice] = useState(false);
 
   useEffect(() => {
     if (!user) return;
     api.getDashboardStats().then(setStats).catch(() => setStats({ companies: 0, hoursThisMonth: 0, openInvoices: 0, revenue: 0 }));
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    const now = new Date();
+    const day = now.getDate();
+    const threshold = 25;
+    if (day < threshold) {
+      setNeedsMonthInvoice(false);
+      return;
+    }
+    const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    api
+      .invoicesExistForMonth(month)
+      .then((r) => setNeedsMonthInvoice(!r.exists))
+      .catch(() => setNeedsMonthInvoice(false));
   }, [user]);
 
   const cards = [
@@ -23,6 +43,17 @@ export default function Dashboard() {
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-semibold">Dashboard</h1>
+      {needsMonthInvoice && (
+        <Alert>
+          <AlertTitle>Einde van de maand nadert</AlertTitle>
+          <AlertDescription className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p>Je hebt nog geen factuur voor deze maand aangemaakt.</p>
+            <Button asChild size="sm" className="w-fit">
+              <NavLink to="/facturen">Factuur aanmaken</NavLink>
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {cards.map((card) => (
           <Card key={card.title}>

@@ -18,6 +18,7 @@ export default function Settings() {
     company_name: "", contact_person: "", email: "", phone: "",
     street: "", postal_code: "", city: "", country: "Nederland",
     kvk_number: "", btw_number: "", iban: "",
+    private_name: "", private_street: "", private_postal_code: "", private_city: "", private_country: "Nederland",
   });
   const [existingId, setExistingId] = useState<string | null>(null);
   const [services, setServices] = useState<Service[]>([]);
@@ -43,6 +44,11 @@ export default function Settings() {
           kvk_number: data.kvk_number || "",
           btw_number: data.btw_number || "",
           iban: data.iban || "",
+          private_name: data.private_name || "",
+          private_street: data.private_street || "",
+          private_postal_code: data.private_postal_code || "",
+          private_city: data.private_city || "",
+          private_country: data.private_country || "Nederland",
         });
       }
     });
@@ -172,6 +178,38 @@ export default function Settings() {
           <div className="grid gap-2">
             <Label>IBAN</Label>
             <Input value={form.iban} onChange={(e) => updateField("iban", e.target.value)} />
+          </div>
+          <Button onClick={handleSave}>Opslaan</Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Privégegevens</CardTitle>
+          <CardDescription>Voor particuliere facturen (uitkering aan jezelf, vrijgesteld van BTW)</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-2">
+            <Label>Naam</Label>
+            <Input value={form.private_name} onChange={(e) => updateField("private_name", e.target.value)} placeholder="Voornaam Achternaam" />
+          </div>
+          <div className="grid gap-2">
+            <Label>Straat</Label>
+            <Input value={form.private_street} onChange={(e) => updateField("private_street", e.target.value)} />
+          </div>
+          <div className="grid grid-cols-3 gap-4">
+            <div className="grid gap-2">
+              <Label>Postcode</Label>
+              <Input value={form.private_postal_code} onChange={(e) => updateField("private_postal_code", e.target.value)} />
+            </div>
+            <div className="grid gap-2">
+              <Label>Plaats</Label>
+              <Input value={form.private_city} onChange={(e) => updateField("private_city", e.target.value)} />
+            </div>
+            <div className="grid gap-2">
+              <Label>Land</Label>
+              <Input value={form.private_country} onChange={(e) => updateField("private_country", e.target.value)} />
+            </div>
           </div>
           <Button onClick={handleSave}>Opslaan</Button>
         </CardContent>
