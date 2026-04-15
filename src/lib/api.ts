@@ -1,4 +1,4 @@
-import type { BusinessSettings, Company, Invoice, InvoiceLine, Quote, QuoteLine, Service, TimeEntry } from "@/lib/db-types";
+import type { BusinessSettings, Company, DailyNote, Invoice, InvoiceLine, Quote, QuoteLine, Service, TimeEntry } from "@/lib/db-types";
 
 /**
  * Worker-API (D1 + auth). Leeg = zelfde origin (`npm run dev` → Vite proxy naar Wrangler).
@@ -93,6 +93,9 @@ export const api = {
       }[]
     >("GET", `/reports/time-entries?${p}`);
   },
+
+  getDailyNote: (date: string) => req<DailyNote>("GET", `/notes/daily?date=${encodeURIComponent(date)}`),
+  putDailyNote: (date: string, content: string) => req<DailyNote>("PUT", "/notes/daily", { date, content }),
 
   getBusinessSettings: () => req<BusinessSettings | null>("GET", "/business-settings"),
   putBusinessSettings: (body: Record<string, unknown>) => req<BusinessSettings>("PUT", "/business-settings", body),

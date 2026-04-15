@@ -125,3 +125,10 @@ export type Service = {
   created_at: string;
   updated_at: string;
 };
+
+export type DailyNote = {
+  id: string;
+  note_date: string;
+  content: string;
+  updated_at: string | null;
+};
