@@ -138,6 +138,7 @@ export const api = {
     id: string,
     body: { quote_number?: string; quote_date?: string; valid_until?: string | null; status?: string; notes?: string | null },
   ) => req<Quote>("PATCH", `/quotes/${id}`, body),
+  deleteQuote: (id: string) => req<void>("DELETE", `/quotes/${id}`),
   getQuoteLines: (quoteId: string) => req<QuoteLine[]>("GET", `/quote-lines?quote_id=${encodeURIComponent(quoteId)}`),
   createQuoteLinesBatch: (lines: Record<string, unknown>[]) =>
     req<{ ok: boolean }>("POST", "/quote-lines/batch", { lines }),

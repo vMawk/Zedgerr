@@ -1,4 +1,5 @@
 import { apiUrl } from "@/lib/api";
+import type { BusinessSettings, Company, Invoice, InvoiceLine } from "@/lib/db-types";
 
 const PORTAL_TOKEN_KEY = "client_flow_portal_jwt";
 
@@ -80,4 +81,28 @@ export async function portalFetchMe(): Promise<{ id: string; name: string; porta
   }
   if (!r.ok) throw new Error((await r.text()) || "Fout");
   return r.json() as Promise<{ id: string; name: string; portal_email: string }>;
+}
+
+export async function portalFetchInvoicePdfData(invoiceId: string): Promise<{
+  invoice: Invoice;
+  lines: InvoiceLine[];
+  company: Company | null;
+  settings: BusinessSettings | null;
+}> {
+  const t = getPortalToken();
+  if (!t) throw new Error("Niet ingelogd");
+  const r = await fetch(portalApiUrl(`/portal/invoices/${encodeURIComponent(invoiceId)}/pdf-data`), {
+    headers: { Authorization: `Bearer ${t}` },
+  });
+  if (r.status === 401) {
+    setPortalToken(null);
+    throw new Error("Sessie verlopen");
+  }
+  if (!r.ok) throw new Error((await r.text()) || "Fout");
+  return r.json() as Promise<{
+    invoice: Invoice;
+    lines: InvoiceLine[];
+    company: Company | null;
+    settings: BusinessSettings | null;
+  }>;
 }
