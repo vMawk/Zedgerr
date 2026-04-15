@@ -412,7 +412,13 @@ export default function Invoices() {
               {invoices.map((invoice) => (
                 <TableRow
                   key={invoice.id}
-                  className={invoice.status === "vervallen" ? "opacity-55 text-muted-foreground" : undefined}
+                  className={
+                    invoice.status === "vervallen"
+                      ? "opacity-55 text-muted-foreground"
+                      : invoice.status === "betaald"
+                        ? "bg-emerald-500/8"
+                        : undefined
+                  }
                 >
                   <TableCell className="font-medium">{invoice.invoice_number}</TableCell>
                   <TableCell>{invoice.companies?.name}</TableCell>
