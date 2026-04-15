@@ -45,14 +45,22 @@ export async function generateInvoicePDF(
 
   const logo = await loadInvoiceLogo();
 
-  const ownInfo = [
-    settings?.street,
-    [settings?.postal_code, settings?.city].filter(Boolean).join(" "),
-    settings?.email,
-    settings?.phone,
-    settings?.kvk_number ? `KvK: ${settings.kvk_number}` : null,
-    settings?.btw_number ? `BTW: ${settings.btw_number}` : null,
-  ].filter(Boolean);
+  const isPrivate = invoice.invoice_type === "private";
+  const ownInfo = isPrivate
+    ? [
+        settings?.private_name,
+        settings?.private_street,
+        [settings?.private_postal_code, settings?.private_city].filter(Boolean).join(" "),
+        settings?.private_country,
+      ].filter(Boolean)
+    : [
+        settings?.street,
+        [settings?.postal_code, settings?.city].filter(Boolean).join(" "),
+        settings?.email,
+        settings?.phone,
+        settings?.kvk_number ? `KvK: ${settings.kvk_number}` : null,
+        settings?.btw_number ? `BTW: ${settings.btw_number}` : null,
+      ].filter(Boolean);
 
   // Header — logo + own business info (geen merk-/bedrijfsnaamtekst)
   const logoTop = 14;
@@ -125,8 +133,13 @@ export async function generateInvoicePDF(
   doc.text("Subtotaal:", rightX - 40, finalY);
   doc.text(`€${Number(invoice.subtotal).toFixed(2)}`, rightX, finalY, { align: "right" });
 
-  doc.text(`BTW (${Number(invoice.btw_percentage)}%):`, rightX - 40, finalY + 6);
-  doc.text(`€${Number(invoice.btw_amount).toFixed(2)}`, rightX, finalY + 6, { align: "right" });
+  if (isPrivate) {
+    doc.text("BTW:", rightX - 40, finalY + 6);
+    doc.text("Vrijgesteld van BTW", rightX, finalY + 6, { align: "right" });
+  } else {
+    doc.text(`BTW (${Number(invoice.btw_percentage)}%):`, rightX - 40, finalY + 6);
+    doc.text(`€${Number(invoice.btw_amount).toFixed(2)}`, rightX, finalY + 6, { align: "right" });
+  }
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(12);

@@ -49,6 +49,7 @@ export type Invoice = {
   total: number;
   advance_payment: number;
   notes: string | null;
+  invoice_type: "business" | "private";
   created_at: string;
   updated_at: string;
 };
@@ -79,6 +80,11 @@ export type BusinessSettings = {
   kvk_number: string | null;
   btw_number: string | null;
   iban: string | null;
+  private_name: string | null;
+  private_street: string | null;
+  private_postal_code: string | null;
+  private_city: string | null;
+  private_country: string | null;
   logo_url: string | null;
   created_at: string;
   updated_at: string;
