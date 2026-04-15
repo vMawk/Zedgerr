@@ -84,6 +84,13 @@ export async function generateInvoicePDF(
   if (invoice.due_date) {
     doc.text(`Vervaldatum: ${new Date(invoice.due_date).toLocaleDateString("nl-NL")}`, pageWidth - 20, 52, { align: "right" });
   }
+  if (invoice.status === "betaald") {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(14);
+    doc.text("BETAALD", pageWidth - 20, 60, { align: "right" });
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+  }
 
   // Client info
   const clientY = yOwnStart + ownInfo.length * 4.5 + 15;
