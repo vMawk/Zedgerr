@@ -54,20 +54,15 @@ export async function generateInvoicePDF(
     settings?.btw_number ? `BTW: ${settings.btw_number}` : null,
   ].filter(Boolean);
 
-  // Header — gibby.it logo + own business info
+  // Header — logo + own business info (geen merk-/bedrijfsnaamtekst)
   const logoTop = 14;
   if (logo) {
     doc.addImage(logo.dataUrl, "PNG", 20, logoTop, logo.wMm, logo.hMm);
   }
 
-  const yCompany = logo ? logoTop + logo.hMm + 4 : 30;
-  doc.setFontSize(20);
-  doc.setFont("helvetica", "bold");
-  doc.text(settings?.company_name || "Mijn Bedrijf", 20, yCompany);
-
   doc.setFontSize(9);
   doc.setFont("helvetica", "normal");
-  const yOwnStart = yCompany + 8;
+  const yOwnStart = logo ? logoTop + (logo?.hMm ?? 0) + 10 : 30;
   ownInfo.forEach((line, i) => doc.text(line as string, 20, yOwnStart + i * 4.5));
 
   // Invoice title
@@ -188,14 +183,9 @@ export async function generateQuotePDF(
     doc.addImage(logo.dataUrl, "PNG", 20, logoTop, logo.wMm, logo.hMm);
   }
 
-  const yCompany = logo ? logoTop + logo.hMm + 4 : 30;
-  doc.setFontSize(20);
-  doc.setFont("helvetica", "bold");
-  doc.text(settings?.company_name || "Mijn Bedrijf", 20, yCompany);
-
   doc.setFontSize(9);
   doc.setFont("helvetica", "normal");
-  const yOwnStart = yCompany + 8;
+  const yOwnStart = logo ? logoTop + (logo?.hMm ?? 0) + 10 : 30;
   ownInfo.forEach((line, i) => doc.text(line as string, 20, yOwnStart + i * 4.5));
 
   doc.setFontSize(24);
