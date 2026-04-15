@@ -13,6 +13,7 @@ function invoiceStatusLabel(status: string): string {
     concept: "Concept",
     verzonden: "Open / verzonden",
     betaald: "Betaald",
+    vervallen: "Gesplitst",
   };
   return m[status] ?? status;
 }
@@ -166,7 +167,7 @@ export default function PortalDashboard() {
                               variant="ghost"
                               size="icon"
                               onClick={() => handleDownloadInvoice(inv.id)}
-                              disabled={downloadingId === inv.id}
+                              disabled={downloadingId === inv.id || inv.status === "vervallen"}
                               title="PDF downloaden"
                             >
                               <Download className="h-4 w-4" />
