@@ -43,9 +43,8 @@ export async function generateInvoicePDF(
   const doc = new jsPDF();
   const pageWidth = doc.internal.pageSize.getWidth();
 
-  const logo = await loadInvoiceLogo();
-
   const isPrivate = invoice.invoice_type === "private";
+  const logo = isPrivate ? null : await loadInvoiceLogo();
   const ownInfo = isPrivate
     ? [
         settings?.private_name,
@@ -130,23 +129,20 @@ export async function generateInvoicePDF(
   const rightX = pageWidth - 20;
 
   doc.setFontSize(10);
-  doc.text("Subtotaal:", rightX - 40, finalY);
-  doc.text(`€${Number(invoice.subtotal).toFixed(2)}`, rightX, finalY, { align: "right" });
-
-  if (isPrivate) {
-    doc.text("BTW:", rightX - 40, finalY + 6);
-    doc.text("Vrijgesteld van BTW", rightX, finalY + 6, { align: "right" });
-  } else {
+  if (!isPrivate) {
+    doc.text("Subtotaal:", rightX - 40, finalY);
+    doc.text(`€${Number(invoice.subtotal).toFixed(2)}`, rightX, finalY, { align: "right" });
     doc.text(`BTW (${Number(invoice.btw_percentage)}%):`, rightX - 40, finalY + 6);
     doc.text(`€${Number(invoice.btw_amount).toFixed(2)}`, rightX, finalY + 6, { align: "right" });
   }
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(12);
-  doc.text("Totaal:", rightX - 40, finalY + 14);
-  doc.text(`€${Number(invoice.total).toFixed(2)}`, rightX, finalY + 14, { align: "right" });
+  const totalLabelY = isPrivate ? finalY : finalY + 14;
+  doc.text(isPrivate ? "Totaal (all-in):" : "Totaal:", rightX - 40, totalLabelY);
+  doc.text(`€${Number(invoice.total).toFixed(2)}`, rightX, totalLabelY, { align: "right" });
 
-  const advance = Number(invoice.advance_payment ?? 0);
+  const advance = isPrivate ? 0 : Number(invoice.advance_payment ?? 0);
   let paymentBlockY = finalY + 30;
   if (advance > 0) {
     const rest = Number(invoice.total) - advance;

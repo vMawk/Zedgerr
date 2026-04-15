@@ -677,7 +677,7 @@ api.post("/api/invoices", async (c) => {
   await c.env.DB
     .prepare(
       `INSERT INTO invoices (id, user_id, company_id, invoice_number, invoice_date, due_date, status, subtotal, btw_percentage, btw_amount, total, advance_payment, notes, invoice_type, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       id,
@@ -844,8 +844,7 @@ api.post("/api/invoices/:id/split", async (c) => {
     const tot = isPrivate ? sub : round2(sub + btwAmt);
     const due = addDaysIso(baseDue, intervalDays * i);
     const newId = crypto.randomUUID();
-    const baseNr = await nextInvoiceNumberForYear(c.env.DB, userId, year, i);
-    const newNr = `${baseNr}-${i + 1}of${parts}`;
+    const newNr = await nextInvoiceNumberForYear(c.env.DB, userId, year, i);
     const termNote = `Termijn ${i + 1}/${parts} (gesplitst vanaf ${invoice.invoice_number})`;
     const newNotes = [invoice.notes, termNote].filter(Boolean).join("\n");
 
