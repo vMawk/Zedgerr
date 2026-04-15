@@ -1,4 +1,4 @@
-import type { BusinessSettings, Company, Invoice, InvoiceLine, Quote, TimeEntry } from "@/lib/db-types";
+import type { BusinessSettings, Company, Invoice, InvoiceLine, Quote, QuoteLine, Service, TimeEntry } from "@/lib/db-types";
 
 /**
  * Worker-API (D1 + auth). Leeg = zelfde origin (`npm run dev` → Vite proxy naar Wrangler).
@@ -99,13 +99,27 @@ export const api = {
 
   getInvoices: () => req<(Invoice & { companies: { name: string | null } | null })[]>("GET", "/invoices"),
   createInvoice: (body: Record<string, unknown>) => req<Invoice>("POST", "/invoices", body),
+  updateInvoice: (
+    id: string,
+    body: { invoice_number?: string; invoice_date?: string; due_date?: string | null; status?: string; notes?: string | null },
+  ) => req<Invoice>("PATCH", `/invoices/${id}`, body),
   deleteInvoice: (id: string) => req<void>("DELETE", `/invoices/${id}`),
   getInvoiceLines: (invoiceId: string) => req<InvoiceLine[]>("GET", `/invoice-lines?invoice_id=${encodeURIComponent(invoiceId)}`),
   createInvoiceLinesBatch: (lines: Record<string, unknown>[]) =>
     req<{ ok: boolean }>("POST", "/invoice-lines/batch", { lines }),
 
+  getServices: () => req<Service[]>("GET", "/services"),
+  createService: (body: { name: string; amount: number }) => req<Service>("POST", "/services", body),
+  updateService: (id: string, body: { name: string; amount: number }) => req<Service>("PATCH", `/services/${id}`, body),
+  deleteService: (id: string) => req<void>("DELETE", `/services/${id}`),
+
   getQuotes: () => req<(Quote & { companies: { name: string | null } | null })[]>("GET", "/quotes"),
   createQuote: (body: Record<string, unknown>) => req<Quote>("POST", "/quotes", body),
+  updateQuote: (
+    id: string,
+    body: { quote_number?: string; quote_date?: string; valid_until?: string | null; status?: string; notes?: string | null },
+  ) => req<Quote>("PATCH", `/quotes/${id}`, body),
+  getQuoteLines: (quoteId: string) => req<QuoteLine[]>("GET", `/quote-lines?quote_id=${encodeURIComponent(quoteId)}`),
   createQuoteLinesBatch: (lines: Record<string, unknown>[]) =>
     req<{ ok: boolean }>("POST", "/quote-lines/batch", { lines }),
 };

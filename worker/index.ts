@@ -359,7 +359,7 @@ api.delete("/api/companies/:id", async (c) => {
   const userId = c.get("userId")!;
   const { id } = c.req.param();
   await c.env.DB.prepare("DELETE FROM companies WHERE id = ? AND user_id = ?").bind(id, userId).run();
-  return c.text("", 204);
+  return c.body(null, 204);
 });
 
 api.get("/api/companies/:id/portal", async (c) => {
@@ -416,7 +416,7 @@ api.delete("/api/companies/:id/portal", async (c) => {
   const owns = await c.env.DB.prepare("SELECT id FROM companies WHERE id = ? AND user_id = ?").bind(id, userId).first();
   if (!owns) return c.json({ error: "Not found" }, 404);
   await c.env.DB.prepare("DELETE FROM company_portal_users WHERE company_id = ?").bind(id).run();
-  return c.text("", 204);
+  return c.body(null, 204);
 });
 
 api.get("/api/companies/:id", async (c) => {
@@ -504,7 +504,7 @@ api.delete("/api/time-entries/:id", async (c) => {
   const userId = c.get("userId")!;
   const { id } = c.req.param();
   await c.env.DB.prepare("DELETE FROM time_entries WHERE id = ? AND user_id = ?").bind(id, userId).run();
-  return c.text("", 204);
+  return c.body(null, 204);
 });
 
 api.post("/api/time-entries/mark-invoiced", async (c) => {
@@ -666,6 +666,42 @@ api.post("/api/invoices", async (c) => {
   return c.json(row);
 });
 
+api.patch("/api/invoices/:id", async (c) => {
+  const userId = c.get("userId")!;
+  const { id } = c.req.param();
+  const req = await c.req.json<Record<string, unknown>>();
+  const now = new Date().toISOString();
+
+  const existing = await c.env.DB.prepare("SELECT id FROM invoices WHERE id = ? AND user_id = ?").bind(id, userId).first();
+  if (!existing) return c.json({ error: "Not found" }, 404);
+
+  await c.env.DB
+    .prepare(
+      `UPDATE invoices SET
+        invoice_number = COALESCE(?, invoice_number),
+        invoice_date = COALESCE(?, invoice_date),
+        due_date = COALESCE(?, due_date),
+        status = COALESCE(?, status),
+        notes = COALESCE(?, notes),
+        updated_at = ?
+       WHERE id = ? AND user_id = ?`,
+    )
+    .bind(
+      req.invoice_number ?? null,
+      req.invoice_date ?? null,
+      req.due_date ?? null,
+      req.status ?? null,
+      req.notes ?? null,
+      now,
+      id,
+      userId,
+    )
+    .run();
+
+  const row = await c.env.DB.prepare("SELECT * FROM invoices WHERE id = ? AND user_id = ?").bind(id, userId).first();
+  return c.json(row);
+});
+
 api.delete("/api/invoices/:id", async (c) => {
   const userId = c.get("userId")!;
   const { id } = c.req.param();
@@ -674,7 +710,7 @@ api.delete("/api/invoices/:id", async (c) => {
     c.env.DB.prepare("UPDATE time_entries SET invoiced = 0, invoice_id = NULL, updated_at = ? WHERE invoice_id = ? AND user_id = ?").bind(now, id, userId),
     c.env.DB.prepare("DELETE FROM invoices WHERE id = ? AND user_id = ?").bind(id, userId),
   ]);
-  return c.text("", 204);
+  return c.body(null, 204);
 });
 
 api.get("/api/invoice-lines", async (c) => {
@@ -682,6 +718,47 @@ api.get("/api/invoice-lines", async (c) => {
   if (!invoiceId) return c.json({ error: "invoice_id required" }, 400);
   const { results } = await c.env.DB.prepare("SELECT * FROM invoice_lines WHERE invoice_id = ? ORDER BY date").bind(invoiceId).all();
   return c.json(results ?? []);
+});
+
+// --- Diensten ---
+api.get("/api/services", async (c) => {
+  const userId = c.get("userId")!;
+  const { results } = await c.env.DB.prepare("SELECT * FROM services WHERE user_id = ? ORDER BY name").bind(userId).all();
+  return c.json(results ?? []);
+});
+
+api.post("/api/services", async (c) => {
+  const userId = c.get("userId")!;
+  const req = await c.req.json<Record<string, unknown>>();
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  await c.env.DB
+    .prepare("INSERT INTO services (id, user_id, name, amount, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)")
+    .bind(id, userId, req.name, req.amount, now, now)
+    .run();
+  const row = await c.env.DB.prepare("SELECT * FROM services WHERE id = ?").bind(id).first();
+  return c.json(row);
+});
+
+api.patch("/api/services/:id", async (c) => {
+  const userId = c.get("userId")!;
+  const { id } = c.req.param();
+  const req = await c.req.json<Record<string, unknown>>();
+  const now = new Date().toISOString();
+  await c.env.DB
+    .prepare("UPDATE services SET name = ?, amount = ?, updated_at = ? WHERE id = ? AND user_id = ?")
+    .bind(req.name, req.amount, now, id, userId)
+    .run();
+  const row = await c.env.DB.prepare("SELECT * FROM services WHERE id = ? AND user_id = ?").bind(id, userId).first();
+  if (!row) return c.json({ error: "Not found" }, 404);
+  return c.json(row);
+});
+
+api.delete("/api/services/:id", async (c) => {
+  const userId = c.get("userId")!;
+  const { id } = c.req.param();
+  await c.env.DB.prepare("DELETE FROM services WHERE id = ? AND user_id = ?").bind(id, userId).run();
+  return c.body(null, 204);
 });
 
 api.post("/api/invoice-lines/batch", async (c) => {
@@ -757,6 +834,40 @@ api.post("/api/quotes", async (c) => {
     .run();
   const row = await c.env.DB.prepare("SELECT * FROM quotes WHERE id = ?").bind(id).first();
   return c.json(row);
+});
+
+api.patch("/api/quotes/:id", async (c) => {
+  const userId = c.get("userId")!;
+  const { id } = c.req.param();
+  const req = await c.req.json<Record<string, unknown>>();
+  const now = new Date().toISOString();
+
+  const existing = await c.env.DB.prepare("SELECT id FROM quotes WHERE id = ? AND user_id = ?").bind(id, userId).first();
+  if (!existing) return c.json({ error: "Not found" }, 404);
+
+  await c.env.DB
+    .prepare(
+      `UPDATE quotes SET
+        quote_number = COALESCE(?, quote_number),
+        quote_date = COALESCE(?, quote_date),
+        valid_until = COALESCE(?, valid_until),
+        status = COALESCE(?, status),
+        notes = COALESCE(?, notes),
+        updated_at = ?
+       WHERE id = ? AND user_id = ?`,
+    )
+    .bind(req.quote_number ?? null, req.quote_date ?? null, req.valid_until ?? null, req.status ?? null, req.notes ?? null, now, id, userId)
+    .run();
+
+  const row = await c.env.DB.prepare("SELECT * FROM quotes WHERE id = ? AND user_id = ?").bind(id, userId).first();
+  return c.json(row);
+});
+
+api.get("/api/quote-lines", async (c) => {
+  const quoteId = c.req.query("quote_id");
+  if (!quoteId) return c.json({ error: "quote_id required" }, 400);
+  const { results } = await c.env.DB.prepare("SELECT * FROM quote_lines WHERE quote_id = ? ORDER BY created_at").bind(quoteId).all();
+  return c.json(results ?? []);
 });
 
 api.post("/api/quote-lines/batch", async (c) => {

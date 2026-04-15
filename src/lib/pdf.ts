@@ -1,6 +1,6 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-import type { BusinessSettings, Company, Invoice, InvoiceLine } from "@/lib/db-types";
+import type { BusinessSettings, Company, Invoice, InvoiceLine, Quote, QuoteLine } from "@/lib/db-types";
 
 /** Gibby.it wordmark — same asset as in the app (`public/gibby-logo.png`). */
 async function loadInvoiceLogo(): Promise<{ dataUrl: string; wMm: number; hMm: number } | null> {
@@ -161,4 +161,116 @@ export async function generateInvoicePDF(
   }
 
   doc.save(`${invoice.invoice_number}.pdf`);
+}
+
+export async function generateQuotePDF(
+  quote: Quote,
+  lines: QuoteLine[],
+  settings: BusinessSettings | null,
+  company: Company | null,
+) {
+  const doc = new jsPDF();
+  const pageWidth = doc.internal.pageSize.getWidth();
+
+  const logo = await loadInvoiceLogo();
+
+  const ownInfo = [
+    settings?.street,
+    [settings?.postal_code, settings?.city].filter(Boolean).join(" "),
+    settings?.email,
+    settings?.phone,
+    settings?.kvk_number ? `KvK: ${settings.kvk_number}` : null,
+    settings?.btw_number ? `BTW: ${settings.btw_number}` : null,
+  ].filter(Boolean);
+
+  const logoTop = 14;
+  if (logo) {
+    doc.addImage(logo.dataUrl, "PNG", 20, logoTop, logo.wMm, logo.hMm);
+  }
+
+  const yCompany = logo ? logoTop + logo.hMm + 4 : 30;
+  doc.setFontSize(20);
+  doc.setFont("helvetica", "bold");
+  doc.text(settings?.company_name || "Mijn Bedrijf", 20, yCompany);
+
+  doc.setFontSize(9);
+  doc.setFont("helvetica", "normal");
+  const yOwnStart = yCompany + 8;
+  ownInfo.forEach((line, i) => doc.text(line as string, 20, yOwnStart + i * 4.5));
+
+  doc.setFontSize(24);
+  doc.setFont("helvetica", "bold");
+  doc.text("OFFERTE", pageWidth - 20, 30, { align: "right" });
+
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "normal");
+  doc.text(`Offertenummer: ${quote.quote_number}`, pageWidth - 20, 40, { align: "right" });
+  doc.text(`Datum: ${new Date(quote.quote_date).toLocaleDateString("nl-NL")}`, pageWidth - 20, 46, { align: "right" });
+  if (quote.valid_until) {
+    doc.text(`Geldig t/m: ${new Date(quote.valid_until).toLocaleDateString("nl-NL")}`, pageWidth - 20, 52, { align: "right" });
+  }
+
+  const clientY = yOwnStart + ownInfo.length * 4.5 + 15;
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "bold");
+  doc.text("Offerte aan:", 20, clientY);
+  doc.setFont("helvetica", "normal");
+  const clientInfo = [
+    company?.name,
+    company?.contact_person ? `t.a.v. ${company.contact_person}` : null,
+    company?.street,
+    [company?.postal_code, company?.city].filter(Boolean).join(" "),
+    company?.btw_number ? `BTW: ${company.btw_number}` : null,
+  ].filter(Boolean);
+  clientInfo.forEach((line, i) => doc.text(line as string, 20, clientY + 6 + i * 5));
+
+  const tableData = lines.map((line) => [
+    line.description,
+    line.hours != null ? Number(line.hours).toFixed(2) : "",
+    line.hourly_rate != null ? `€${Number(line.hourly_rate).toFixed(2)}` : "",
+    `€${Number(line.amount).toFixed(2)}`,
+  ]);
+
+  autoTable(doc, {
+    startY: clientY + 6 + clientInfo.length * 5 + 10,
+    head: [["Omschrijving", "Uren", "Tarief", "Bedrag"]],
+    body: tableData,
+    theme: "plain",
+    headStyles: { fillColor: [245, 245, 245], textColor: [60, 60, 60], fontStyle: "bold", fontSize: 9 },
+    bodyStyles: { fontSize: 9 },
+    columnStyles: {
+      1: { cellWidth: 20, halign: "right" },
+      2: { cellWidth: 25, halign: "right" },
+      3: { cellWidth: 25, halign: "right" },
+    },
+  });
+
+  const finalY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 10;
+  const rightX = pageWidth - 20;
+
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "normal");
+  doc.text("Subtotaal:", rightX - 40, finalY);
+  doc.text(`€${Number(quote.subtotal).toFixed(2)}`, rightX, finalY, { align: "right" });
+
+  doc.text(`BTW (${Number(quote.btw_percentage)}%):`, rightX - 40, finalY + 6);
+  doc.text(`€${Number(quote.btw_amount).toFixed(2)}`, rightX, finalY + 6, { align: "right" });
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(12);
+  doc.text("Totaal:", rightX - 40, finalY + 14);
+  doc.text(`€${Number(quote.total).toFixed(2)}`, rightX, finalY + 14, { align: "right" });
+
+  if (quote.notes) {
+    const y = finalY + 30;
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.text("Notities", 20, y);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    const wrapped = doc.splitTextToSize(String(quote.notes), pageWidth - 40);
+    doc.text(wrapped, 20, y + 6);
+  }
+
+  doc.save(`${quote.quote_number}.pdf`);
 }

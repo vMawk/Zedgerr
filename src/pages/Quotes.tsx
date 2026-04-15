@@ -12,7 +12,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, FileCheck, Trash2 } from "lucide-react";
+import { Plus, FileCheck, Trash2, Download, Pencil } from "lucide-react";
+import { generateQuotePDF } from "@/lib/pdf";
 
 interface QuoteLine {
   description: string;
@@ -38,6 +39,13 @@ export default function Quotes() {
   const [lines, setLines] = useState<QuoteLine[]>([{ description: "", hours: "", hourly_rate: "", amount: "" }]);
   const [notes, setNotes] = useState("");
   const [btwPercentage, setBtwPercentage] = useState("21");
+  const [editOpen, setEditOpen] = useState(false);
+  const [quoteToEdit, setQuoteToEdit] = useState<(Quote & { companies: { name: string | null } | null }) | null>(null);
+  const [editQuoteNumber, setEditQuoteNumber] = useState("");
+  const [editQuoteDate, setEditQuoteDate] = useState("");
+  const [editValidUntil, setEditValidUntil] = useState("");
+  const [editStatus, setEditStatus] = useState("concept");
+  const [editNotes, setEditNotes] = useState("");
 
   const fetchData = async () => {
     const [quotesRes, companiesRes] = await Promise.all([api.getQuotes(), api.getCompanies()]);
@@ -103,6 +111,44 @@ export default function Quotes() {
       toast({ title: "Offerte aangemaakt", description: quoteNumber });
     } catch (error: unknown) {
       toast({ title: "Fout", description: error instanceof Error ? error.message : String(error), variant: "destructive" });
+    }
+  };
+
+  const handleDownloadPDF = async (quote: Quote & { companies: { name: string | null } | null }) => {
+    const [linesRes, settingsRes, companyRes] = await Promise.all([
+      api.getQuoteLines(quote.id),
+      api.getBusinessSettings(),
+      api.getCompany(quote.company_id),
+    ]);
+    await generateQuotePDF(quote, linesRes, settingsRes, companyRes);
+  };
+
+  const openEdit = (q: Quote & { companies: { name: string | null } | null }) => {
+    setQuoteToEdit(q);
+    setEditQuoteNumber(q.quote_number);
+    setEditQuoteDate(q.quote_date);
+    setEditValidUntil(q.valid_until ?? "");
+    setEditStatus(q.status);
+    setEditNotes(q.notes ?? "");
+    setEditOpen(true);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!quoteToEdit) return;
+    try {
+      await api.updateQuote(quoteToEdit.id, {
+        quote_number: editQuoteNumber.trim() || quoteToEdit.quote_number,
+        quote_date: editQuoteDate,
+        valid_until: editValidUntil ? editValidUntil : null,
+        status: editStatus,
+        notes: editNotes.trim() ? editNotes.trim() : null,
+      });
+      setEditOpen(false);
+      setQuoteToEdit(null);
+      await fetchData();
+      toast({ title: "Offerte bijgewerkt" });
+    } catch (e: unknown) {
+      toast({ title: "Fout", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
     }
   };
 
@@ -188,6 +234,7 @@ export default function Quotes() {
                 <TableHead>Datum</TableHead>
                 <TableHead>Totaal</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead className="w-20 text-right">Acties</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -200,12 +247,63 @@ export default function Quotes() {
                   <TableCell>
                     <Badge variant="secondary" className={statusColors[quote.status]}>{quote.status}</Badge>
                   </TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex justify-end gap-1">
+                      <Button variant="ghost" size="icon" onClick={() => openEdit(quote)} title="Bewerken">
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon" onClick={() => handleDownloadPDF(quote)} title="PDF downloaden">
+                        <Download className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
         </Card>
       )}
+
+      <Dialog open={editOpen} onOpenChange={(v) => { setEditOpen(v); if (!v) setQuoteToEdit(null); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Offerte bewerken</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-4 py-2">
+            <div className="grid gap-2">
+              <Label>Offertenummer</Label>
+              <Input value={editQuoteNumber} onChange={(e) => setEditQuoteNumber(e.target.value)} />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label>Offertedatum</Label>
+                <Input type="date" value={editQuoteDate} onChange={(e) => setEditQuoteDate(e.target.value)} />
+              </div>
+              <div className="grid gap-2">
+                <Label>Geldig t/m</Label>
+                <Input type="date" value={editValidUntil} onChange={(e) => setEditValidUntil(e.target.value)} />
+              </div>
+            </div>
+            <div className="grid gap-2">
+              <Label>Status</Label>
+              <Select value={editStatus} onValueChange={setEditStatus}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="concept">concept</SelectItem>
+                  <SelectItem value="verzonden">verzonden</SelectItem>
+                  <SelectItem value="geaccepteerd">geaccepteerd</SelectItem>
+                  <SelectItem value="afgewezen">afgewezen</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label>Notities</Label>
+              <Textarea value={editNotes} onChange={(e) => setEditNotes(e.target.value)} />
+            </div>
+            <Button onClick={handleSaveEdit}>Opslaan</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
