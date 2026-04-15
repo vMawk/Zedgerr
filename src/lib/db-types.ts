@@ -100,3 +100,22 @@ export type Quote = {
   created_at: string;
   updated_at: string;
 };
+
+export type QuoteLine = {
+  id: string;
+  quote_id: string;
+  description: string;
+  hours: number | null;
+  hourly_rate: number | null;
+  amount: number;
+  created_at: string;
+};
+
+export type Service = {
+  id: string;
+  user_id: string;
+  name: string;
+  amount: number;
+  created_at: string;
+  updated_at: string;
+};

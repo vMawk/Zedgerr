@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
-import type { Company, Invoice, TimeEntry } from "@/lib/db-types";
+import type { Company, Invoice, Service, TimeEntry } from "@/lib/db-types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -21,7 +21,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Plus, FileText, Download, Trash2 } from "lucide-react";
+import { Plus, FileText, Download, Trash2, Pencil } from "lucide-react";
 import { generateInvoicePDF } from "@/lib/pdf";
 
 const statusColors: Record<string, string> = {
@@ -36,19 +36,32 @@ export default function Invoices() {
   const { toast } = useToast();
   const [invoices, setInvoices] = useState<(Invoice & { companies: { name: string | null } | null })[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
+  const [services, setServices] = useState<Service[]>([]);
   const [open, setOpen] = useState(false);
   const [selectedCompany, setSelectedCompany] = useState("");
   const [uninvoicedEntries, setUninvoicedEntries] = useState<(TimeEntry & { companies: Company | null })[]>([]);
   const [selectedEntries, setSelectedEntries] = useState<string[]>([]);
+  const [createMode, setCreateMode] = useState<"hours" | "service">("hours");
+  const [selectedService, setSelectedService] = useState("");
+  const [serviceAmount, setServiceAmount] = useState("");
+  const [serviceDescription, setServiceDescription] = useState("");
   const [notes, setNotes] = useState("");
   const [btwPercentage, setBtwPercentage] = useState("21");
   const [invoiceToDelete, setInvoiceToDelete] = useState<Invoice | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [invoiceToEdit, setInvoiceToEdit] = useState<(Invoice & { companies: { name: string | null } | null }) | null>(null);
+  const [editInvoiceNumber, setEditInvoiceNumber] = useState("");
+  const [editInvoiceDate, setEditInvoiceDate] = useState("");
+  const [editDueDate, setEditDueDate] = useState("");
+  const [editStatus, setEditStatus] = useState("concept");
+  const [editNotes, setEditNotes] = useState("");
 
   const fetchData = async () => {
-    const [invList, compList] = await Promise.all([api.getInvoices(), api.getCompanies()]);
+    const [invList, compList, svcList] = await Promise.all([api.getInvoices(), api.getCompanies(), api.getServices()]);
     setInvoices(invList);
     setCompanies(compList);
+    setServices(svcList);
   };
 
   useEffect(() => { if (user) fetchData(); }, [user]);
@@ -58,6 +71,14 @@ export default function Invoices() {
     api.getTimeEntries({ company_id: selectedCompany, invoiced: false }).then(setUninvoicedEntries);
   }, [selectedCompany]);
 
+  useEffect(() => {
+    if (!selectedService) return;
+    const svc = services.find((s) => s.id === selectedService);
+    if (!svc) return;
+    setServiceAmount(String(svc.amount));
+    setServiceDescription(svc.name);
+  }, [selectedService, services]);
+
   const generateInvoiceNumber = () => {
     const now = new Date();
     const year = now.getFullYear();
@@ -66,15 +87,21 @@ export default function Invoices() {
   };
 
   const handleCreate = async () => {
-    if (!user || !selectedCompany || selectedEntries.length === 0) return;
+    if (!user || !selectedCompany) return;
     const company = companies.find((c) => c.id === selectedCompany);
     if (!company) return;
 
     const entries = uninvoicedEntries.filter((e) => selectedEntries.includes(e.id));
-    const subtotal = entries.reduce((sum, e) => {
-      const rate = e.hourly_rate ?? company.default_hourly_rate ?? 0;
-      return sum + Number(e.hours) * Number(rate);
-    }, 0);
+    const svcAmt = Number(serviceAmount);
+    const subtotal =
+      createMode === "hours"
+        ? entries.reduce((sum, e) => {
+            const rate = e.hourly_rate ?? company.default_hourly_rate ?? 0;
+            return sum + Number(e.hours) * Number(rate);
+          }, 0)
+        : Number.isFinite(svcAmt)
+          ? svcAmt
+          : NaN;
     const btw = parseFloat(btwPercentage);
     const btwAmount = subtotal * (btw / 100);
     const total = subtotal + btwAmount;
@@ -93,21 +120,40 @@ export default function Invoices() {
         due_date: new Date(Date.now() + 30 * 86400000).toISOString().split("T")[0],
       });
 
-      const lines = entries.map((e) => ({
-        invoice_id: invoice.id,
-        description: e.description || "Werkzaamheden",
-        date: e.date,
-        hours: e.hours,
-        hourly_rate: e.hourly_rate ?? company.default_hourly_rate ?? 0,
-        amount: Number(e.hours) * Number(e.hourly_rate ?? company.default_hourly_rate ?? 0),
-        time_entry_id: e.id,
-      }));
+      const lines =
+        createMode === "hours"
+          ? entries.map((e) => ({
+              invoice_id: invoice.id,
+              description: e.description || "Werkzaamheden",
+              date: e.date,
+              hours: e.hours,
+              hourly_rate: e.hourly_rate ?? company.default_hourly_rate ?? 0,
+              amount: Number(e.hours) * Number(e.hourly_rate ?? company.default_hourly_rate ?? 0),
+              time_entry_id: e.id,
+            }))
+          : [
+              {
+                invoice_id: invoice.id,
+                description: serviceDescription.trim() || "Dienst",
+                date: new Date().toISOString().split("T")[0],
+                hours: null,
+                hourly_rate: null,
+                amount: svcAmt,
+                time_entry_id: null,
+              },
+            ];
       await api.createInvoiceLinesBatch(lines);
-      await api.markTimeEntriesInvoiced({ ids: selectedEntries, invoice_id: invoice.id });
+      if (createMode === "hours") {
+        await api.markTimeEntriesInvoiced({ ids: selectedEntries, invoice_id: invoice.id });
+      }
 
       setOpen(false);
       setSelectedCompany("");
       setSelectedEntries([]);
+      setSelectedService("");
+      setServiceAmount("");
+      setServiceDescription("");
+      setCreateMode("hours");
       setNotes("");
       fetchData();
       toast({ title: "Factuur aangemaakt", description: invoiceNumber });
@@ -140,6 +186,35 @@ export default function Invoices() {
     }
   };
 
+  const openEdit = (inv: Invoice & { companies: { name: string | null } | null }) => {
+    setInvoiceToEdit(inv);
+    setEditInvoiceNumber(inv.invoice_number);
+    setEditInvoiceDate(inv.invoice_date);
+    setEditDueDate(inv.due_date ?? "");
+    setEditStatus(inv.status);
+    setEditNotes(inv.notes ?? "");
+    setEditOpen(true);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!invoiceToEdit) return;
+    try {
+      await api.updateInvoice(invoiceToEdit.id, {
+        invoice_number: editInvoiceNumber.trim() || invoiceToEdit.invoice_number,
+        invoice_date: editInvoiceDate,
+        due_date: editDueDate ? editDueDate : null,
+        status: editStatus,
+        notes: editNotes.trim() ? editNotes.trim() : null,
+      });
+      setEditOpen(false);
+      setInvoiceToEdit(null);
+      await fetchData();
+      toast({ title: "Factuur bijgewerkt" });
+    } catch (e: unknown) {
+      toast({ title: "Fout", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
+    }
+  };
+
   const toggleEntry = (id: string) => {
     setSelectedEntries((prev) => prev.includes(id) ? prev.filter((e) => e !== id) : [...prev, id]);
   };
@@ -158,6 +233,16 @@ export default function Invoices() {
             </DialogHeader>
             <div className="grid gap-4 py-4">
               <div className="grid gap-2">
+                <Label>Type factuur</Label>
+                <Select value={createMode} onValueChange={(v) => setCreateMode(v as "hours" | "service")}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="hours">Op basis van uren</SelectItem>
+                    <SelectItem value="service">Op basis van dienst (vast bedrag)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2">
                 <Label>Bedrijf</Label>
                 <Select value={selectedCompany} onValueChange={setSelectedCompany}>
                   <SelectTrigger><SelectValue placeholder="Selecteer bedrijf" /></SelectTrigger>
@@ -167,7 +252,7 @@ export default function Invoices() {
                 </Select>
               </div>
 
-              {uninvoicedEntries.length > 0 && (
+              {createMode === "hours" && uninvoicedEntries.length > 0 && (
                 <div className="grid gap-2">
                   <Label>Selecteer uren</Label>
                   <div className="border rounded-md max-h-48 overflow-y-auto">
@@ -183,6 +268,34 @@ export default function Invoices() {
                 </div>
               )}
 
+              {createMode === "service" && (
+                <div className="grid gap-4">
+                  <div className="grid gap-2">
+                    <Label>Dienst</Label>
+                    <Select value={selectedService} onValueChange={setSelectedService}>
+                      <SelectTrigger><SelectValue placeholder={services.length ? "Kies dienst" : "Geen diensten (maak aan bij Instellingen)"} /></SelectTrigger>
+                      <SelectContent>
+                        {services.map((s) => (
+                          <SelectItem key={s.id} value={s.id}>
+                            {s.name} — €{Number(s.amount).toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="grid gap-2">
+                      <Label>Omschrijving (op factuurregel)</Label>
+                      <Input value={serviceDescription} onChange={(e) => setServiceDescription(e.target.value)} placeholder="Bijv. Website onderhoud" />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label>Bedrag (excl. BTW)</Label>
+                      <Input type="number" step="0.01" value={serviceAmount} onChange={(e) => setServiceAmount(e.target.value)} placeholder="250.00" />
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">
                   <Label>BTW-percentage</Label>
@@ -193,7 +306,16 @@ export default function Invoices() {
                 <Label>Notities</Label>
                 <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} />
               </div>
-              <Button onClick={handleCreate} disabled={selectedEntries.length === 0}>Factuur aanmaken</Button>
+              <Button
+                onClick={handleCreate}
+                disabled={
+                  createMode === "hours"
+                    ? selectedEntries.length === 0
+                    : !selectedCompany || !serviceDescription.trim() || !Number.isFinite(Number(serviceAmount))
+                }
+              >
+                Factuur aanmaken
+              </Button>
             </div>
           </DialogContent>
         </Dialog>
@@ -237,6 +359,9 @@ export default function Invoices() {
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-1">
+                      <Button variant="ghost" size="icon" onClick={() => openEdit(invoice)} title="Bewerken">
+                        <Pencil className="h-4 w-4" />
+                      </Button>
                       <Button variant="ghost" size="icon" onClick={() => handleDownloadPDF(invoice)} title="PDF downloaden">
                         <Download className="h-4 w-4" />
                       </Button>
@@ -275,6 +400,47 @@ export default function Invoices() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Dialog open={editOpen} onOpenChange={(v) => { setEditOpen(v); if (!v) setInvoiceToEdit(null); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Factuur bewerken</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-4 py-2">
+            <div className="grid gap-2">
+              <Label>Factuurnummer</Label>
+              <Input value={editInvoiceNumber} onChange={(e) => setEditInvoiceNumber(e.target.value)} />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label>Factuurdatum</Label>
+                <Input type="date" value={editInvoiceDate} onChange={(e) => setEditInvoiceDate(e.target.value)} />
+              </div>
+              <div className="grid gap-2">
+                <Label>Vervaldatum</Label>
+                <Input type="date" value={editDueDate} onChange={(e) => setEditDueDate(e.target.value)} />
+              </div>
+            </div>
+            <div className="grid gap-2">
+              <Label>Status</Label>
+              <Select value={editStatus} onValueChange={setEditStatus}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="concept">concept</SelectItem>
+                  <SelectItem value="verzonden">verzonden</SelectItem>
+                  <SelectItem value="betaald">betaald</SelectItem>
+                  <SelectItem value="vervallen">vervallen</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label>Notities</Label>
+              <Textarea value={editNotes} onChange={(e) => setEditNotes(e.target.value)} />
+            </div>
+            <Button onClick={handleSaveEdit}>Opslaan</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
