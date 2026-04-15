@@ -33,7 +33,7 @@ const statusColors: Record<string, string> = {
 
 function statusLabel(status: string, notes: string | null): string {
   if (status === "vervallen" && (notes ?? "").toLowerCase().includes("gesplitst")) {
-    return "gesplitst in kleinere, dus vervallen";
+    return "gesplitst";
   }
   return status;
 }
@@ -436,7 +436,13 @@ export default function Invoices() {
                       <Button variant="ghost" size="icon" onClick={() => openSplit(invoice)} title="Splitsen in termijnen">
                         <Split className="h-4 w-4" />
                       </Button>
-                      <Button variant="ghost" size="icon" onClick={() => handleDownloadPDF(invoice)} title="PDF downloaden">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => handleDownloadPDF(invoice)}
+                        title="PDF downloaden"
+                        disabled={invoice.status === "vervallen"}
+                      >
                         <Download className="h-4 w-4" />
                       </Button>
                       <Button
