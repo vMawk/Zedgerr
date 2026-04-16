@@ -16,6 +16,7 @@ export type Company = {
   kvk_number: string | null;
   btw_number: string | null;
   default_hourly_rate: number | null;
+  advance_balance: number;
   notes: string | null;
   created_at: string;
   updated_at: string;

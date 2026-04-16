@@ -25,7 +25,7 @@ function generateClientPassword(): string {
 const emptyForm: Partial<Company> = {
   name: "", contact_person: "", email: "", phone: "",
   street: "", postal_code: "", city: "", country: "Nederland",
-  kvk_number: "", btw_number: "", default_hourly_rate: undefined, notes: "",
+  kvk_number: "", btw_number: "", default_hourly_rate: undefined, advance_balance: 0, notes: "",
 };
 
 export default function Companies() {
@@ -221,6 +221,16 @@ export default function Companies() {
                 <Input type="number" step="0.01" value={form.default_hourly_rate ?? ""} onChange={(e) => updateField("default_hourly_rate", e.target.value ? parseFloat(e.target.value) : null)} />
               </div>
               <div className="grid gap-2">
+                <Label>Beschikbaar voorschot (€)</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={form.advance_balance ?? 0}
+                  onChange={(e) => updateField("advance_balance", e.target.value ? Math.max(0, parseFloat(e.target.value)) : 0)}
+                />
+              </div>
+              <div className="grid gap-2">
                 <Label>Notities</Label>
                 <Textarea value={form.notes || ""} onChange={(e) => updateField("notes", e.target.value)} />
               </div>
@@ -314,6 +324,9 @@ export default function Companies() {
                 {company.phone && <p>{company.phone}</p>}
                 {company.city && <p>{company.city}</p>}
                 {company.default_hourly_rate && <p className="font-medium text-foreground">€{Number(company.default_hourly_rate).toFixed(2)}/uur</p>}
+                <p className="font-medium text-foreground">
+                  Voorschot: €{Number(company.advance_balance ?? 0).toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </p>
               </CardContent>
             </Card>
           ))}

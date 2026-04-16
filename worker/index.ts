@@ -20,6 +20,12 @@ function rowInvoiced(r: Record<string, unknown>) {
   return { ...r, invoiced: Boolean(r.invoiced) };
 }
 
+function toMoney(value: unknown, fallback = 0): number {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.round(n * 100) / 100;
+}
+
 const publicApiPaths = new Set([
   "/api/auth/login",
   "/api/auth/register",
@@ -333,10 +339,11 @@ api.post("/api/companies", async (c) => {
   const req = await c.req.json<Record<string, unknown>>();
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
+  const advanceBalance = Math.max(0, toMoney(req.advance_balance, 0));
   await c.env.DB
     .prepare(
-      `INSERT INTO companies (id, user_id, name, contact_person, email, phone, street, postal_code, city, country, kvk_number, btw_number, default_hourly_rate, notes, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO companies (id, user_id, name, contact_person, email, phone, street, postal_code, city, country, kvk_number, btw_number, default_hourly_rate, notes, advance_balance, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       id,
@@ -353,6 +360,7 @@ api.post("/api/companies", async (c) => {
       req.btw_number ?? null,
       req.default_hourly_rate ?? null,
       req.notes ?? null,
+      advanceBalance,
       now,
       now,
     )
@@ -366,11 +374,19 @@ api.patch("/api/companies/:id", async (c) => {
   const { id } = c.req.param();
   const req = await c.req.json<Record<string, unknown>>();
   const now = new Date().toISOString();
+  const existing = await c.env.DB
+    .prepare("SELECT id, advance_balance FROM companies WHERE id = ? AND user_id = ?")
+    .bind(id, userId)
+    .first<{ id: string; advance_balance: number }>();
+  if (!existing) return c.json({ error: "Not found" }, 404);
+  const advanceBalance = req.advance_balance === undefined
+    ? Math.max(0, toMoney(existing.advance_balance, 0))
+    : Math.max(0, toMoney(req.advance_balance, 0));
   await c.env.DB
     .prepare(
       `UPDATE companies SET
         name = ?, contact_person = ?, email = ?, phone = ?, street = ?, postal_code = ?, city = ?, country = ?,
-        kvk_number = ?, btw_number = ?, default_hourly_rate = ?, notes = ?, updated_at = ?
+        kvk_number = ?, btw_number = ?, default_hourly_rate = ?, notes = ?, advance_balance = ?, updated_at = ?
        WHERE id = ? AND user_id = ?`,
     )
     .bind(
@@ -386,6 +402,7 @@ api.patch("/api/companies/:id", async (c) => {
       req.btw_number ?? null,
       req.default_hourly_rate ?? null,
       req.notes ?? null,
+      advanceBalance,
       now,
       id,
       userId,
@@ -775,33 +792,55 @@ api.post("/api/invoices", async (c) => {
   const advance = req.advance_payment != null ? Number(req.advance_payment) : 0;
   const invoiceType = (req.invoice_type as string) === "private" ? "private" : "business";
   const btwPct = invoiceType === "private" ? 0 : Number(req.btw_percentage);
-  const subtotal = Number(req.subtotal);
+  const subtotal = toMoney(req.subtotal);
   const btwAmount = invoiceType === "private" ? 0 : Number(req.btw_amount);
-  const total = invoiceType === "private" ? subtotal : Number(req.total);
-  await c.env.DB
-    .prepare(
-      `INSERT INTO invoices (id, user_id, company_id, invoice_number, invoice_date, due_date, status, subtotal, btw_percentage, btw_amount, total, advance_payment, notes, invoice_type, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .bind(
-      id,
-      userId,
-      req.company_id,
-      req.invoice_number,
-      invoice_date,
-      req.due_date ?? null,
-      status,
-      subtotal,
-      btwPct,
-      btwAmount,
-      total,
-      advance,
-      req.notes ?? null,
-      invoiceType,
-      now,
-      now,
-    )
-    .run();
+  const total = invoiceType === "private" ? subtotal : toMoney(req.total);
+  const company = await c.env.DB
+    .prepare("SELECT id, advance_balance FROM companies WHERE id = ? AND user_id = ?")
+    .bind(req.company_id, userId)
+    .first<{ id: string; advance_balance: number }>();
+  if (!company) return c.json({ error: "Bedrijf niet gevonden" }, 404);
+
+  const companyAdvanceBalance = Math.max(0, toMoney(company.advance_balance, 0));
+  const requestedAdvance = Math.max(0, toMoney(advance, 0));
+  const appliedAdvance = Math.min(requestedAdvance, total, companyAdvanceBalance);
+  const updatedAdvanceBalance = toMoney(companyAdvanceBalance - appliedAdvance, 0);
+
+  if (requestedAdvance > companyAdvanceBalance + 0.0001) {
+    return c.json({ error: "Voorschot hoger dan beschikbaar klantvoorschot" }, 400);
+  }
+  if (requestedAdvance > total + 0.0001) {
+    return c.json({ error: "Voorschot hoger dan factuurtotaal" }, 400);
+  }
+
+  await c.env.DB.batch([
+    c.env.DB
+      .prepare(
+        `INSERT INTO invoices (id, user_id, company_id, invoice_number, invoice_date, due_date, status, subtotal, btw_percentage, btw_amount, total, advance_payment, notes, invoice_type, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        id,
+        userId,
+        req.company_id,
+        req.invoice_number,
+        invoice_date,
+        req.due_date ?? null,
+        status,
+        subtotal,
+        btwPct,
+        btwAmount,
+        total,
+        appliedAdvance,
+        req.notes ?? null,
+        invoiceType,
+        now,
+        now,
+      ),
+    c.env.DB
+      .prepare("UPDATE companies SET advance_balance = ?, updated_at = ? WHERE id = ? AND user_id = ?")
+      .bind(updatedAdvanceBalance, now, req.company_id, userId),
+  ]);
   const row = await c.env.DB.prepare("SELECT * FROM invoices WHERE id = ?").bind(id).first();
   return c.json(row);
 });
@@ -999,8 +1038,17 @@ api.delete("/api/invoices/:id", async (c) => {
   const userId = c.get("userId")!;
   const { id } = c.req.param();
   const now = new Date().toISOString();
+  const invoice = await c.env.DB
+    .prepare("SELECT id, company_id, advance_payment FROM invoices WHERE id = ? AND user_id = ?")
+    .bind(id, userId)
+    .first<{ id: string; company_id: string; advance_payment: number }>();
+  if (!invoice) return c.json({ error: "Not found" }, 404);
+  const restoreAdvance = Math.max(0, toMoney(invoice.advance_payment, 0));
   await c.env.DB.batch([
     c.env.DB.prepare("UPDATE time_entries SET invoiced = 0, invoice_id = NULL, updated_at = ? WHERE invoice_id = ? AND user_id = ?").bind(now, id, userId),
+    c.env.DB
+      .prepare("UPDATE companies SET advance_balance = ROUND(COALESCE(advance_balance, 0) + ?, 2), updated_at = ? WHERE id = ? AND user_id = ?")
+      .bind(restoreAdvance, now, invoice.company_id, userId),
     c.env.DB.prepare("DELETE FROM invoices WHERE id = ? AND user_id = ?").bind(id, userId),
   ]);
   return c.body(null, 204);
