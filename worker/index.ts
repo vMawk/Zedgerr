@@ -807,10 +807,10 @@ api.post("/api/invoices", async (c) => {
   const updatedAdvanceBalance = toMoney(companyAdvanceBalance - appliedAdvance, 0);
 
   if (requestedAdvance > companyAdvanceBalance + 0.0001) {
-    return c.json({ error: "Voorschot hoger dan beschikbaar klantvoorschot" }, 400);
+    return c.json({ error: "Krediet hoger dan beschikbaar klantkrediet" }, 400);
   }
   if (requestedAdvance > total + 0.0001) {
-    return c.json({ error: "Voorschot hoger dan factuurtotaal" }, 400);
+    return c.json({ error: "Krediet hoger dan factuurtotaal" }, 400);
   }
 
   await c.env.DB.batch([

@@ -221,7 +221,7 @@ export default function Companies() {
                 <Input type="number" step="0.01" value={form.default_hourly_rate ?? ""} onChange={(e) => updateField("default_hourly_rate", e.target.value ? parseFloat(e.target.value) : null)} />
               </div>
               <div className="grid gap-2">
-                <Label>Beschikbaar voorschot (€)</Label>
+                <Label>Beschikbaar krediet (€)</Label>
                 <Input
                   type="number"
                   min="0"
@@ -325,7 +325,7 @@ export default function Companies() {
                 {company.city && <p>{company.city}</p>}
                 {company.default_hourly_rate && <p className="font-medium text-foreground">€{Number(company.default_hourly_rate).toFixed(2)}/uur</p>}
                 <p className="font-medium text-foreground">
-                  Voorschot: €{Number(company.advance_balance ?? 0).toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  Krediet: €{Number(company.advance_balance ?? 0).toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </p>
               </CardContent>
             </Card>

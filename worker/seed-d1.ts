@@ -58,7 +58,7 @@ export async function seedInvoice2026IfNeeded(db: D1Database, userId: string): P
       BTW_AMT,
       TOTAL_INCL,
       ADVANCE,
-      "Voorschot €150,00. Ontvangen na voorschot €472,50. Totaal factuur €622,50 (incl. BTW).",
+      "Krediet €150,00. Ontvangen na krediet €472,50. Totaal factuur €622,50 (incl. BTW).",
       now,
       now,
     )

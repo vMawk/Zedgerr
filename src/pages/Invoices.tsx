@@ -186,7 +186,7 @@ export default function Invoices() {
         title: "Factuur aangemaakt",
         description:
           appliedAdvance > 0
-            ? `${invoiceNumber} • voorschot €${appliedAdvance.toLocaleString("nl-NL", { minimumFractionDigits: 2 })} verrekend`
+            ? `${invoiceNumber} • krediet €${appliedAdvance.toLocaleString("nl-NL", { minimumFractionDigits: 2 })} verrekend`
             : invoiceNumber,
       });
     } catch (error: unknown) {
@@ -407,9 +407,9 @@ export default function Invoices() {
                 return (
                   <div className="rounded-md border bg-muted/30 p-3 text-sm space-y-1">
                     <p>Totaal: <span className="font-medium">€{grossTotal.toLocaleString("nl-NL", { minimumFractionDigits: 2 })}</span></p>
-                    <p>Beschikbaar voorschot: <span className="font-medium">€{availableAdvance.toLocaleString("nl-NL", { minimumFractionDigits: 2 })}</span></p>
-                    <p>Voorschot op deze factuur: <span className="font-medium">€{appliedAdvance.toLocaleString("nl-NL", { minimumFractionDigits: 2 })}</span></p>
-                    <p>Te betalen na voorschot: <span className="font-medium">€{netTotal.toLocaleString("nl-NL", { minimumFractionDigits: 2 })}</span></p>
+                    <p>Beschikbaar krediet: <span className="font-medium">€{availableAdvance.toLocaleString("nl-NL", { minimumFractionDigits: 2 })}</span></p>
+                    <p>Krediet op deze factuur: <span className="font-medium">€{appliedAdvance.toLocaleString("nl-NL", { minimumFractionDigits: 2 })}</span></p>
+                    <p>Te betalen na krediet: <span className="font-medium">€{netTotal.toLocaleString("nl-NL", { minimumFractionDigits: 2 })}</span></p>
                   </div>
                 );
               })()}
@@ -444,7 +444,7 @@ export default function Invoices() {
                 <TableHead>Bedrijf</TableHead>
                 <TableHead>Datum</TableHead>
                 <TableHead>Totaal</TableHead>
-                <TableHead className="whitespace-nowrap">Voorschot</TableHead>
+                <TableHead className="whitespace-nowrap">Krediet</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="w-28 text-right">Acties</TableHead>
               </TableRow>
@@ -531,7 +531,7 @@ export default function Invoices() {
             <AlertDialogDescription>
               Factuur <span className="font-medium text-foreground">{invoiceToDelete?.invoice_number}</span> wordt permanent
               verwijderd. Uren die op deze factuur stonden worden weer vrijgegeven, zodat je ze opnieuw kunt factureren.
-              Gebruikt voorschot wordt ook teruggezet op de klant.
+              Gebruikt krediet wordt ook teruggezet op de klant.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

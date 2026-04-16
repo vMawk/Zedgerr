@@ -131,43 +131,54 @@ export async function generateInvoicePDF(
     },
   });
 
-  // Totals
+  // Totals (sequentieel opgebouwd om overlap te voorkomen)
   const finalY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 10;
   const rightX = pageWidth - 20;
+  const labelX = rightX - 70;
+  const lineHeight = 6;
+  let totalsY = finalY;
 
   doc.setFontSize(10);
+  doc.setFont("helvetica", "normal");
   if (!isPrivate) {
-    doc.text("Subtotaal:", rightX - 40, finalY);
-    doc.text(`€${Number(invoice.subtotal).toFixed(2)}`, rightX, finalY, { align: "right" });
-    doc.text(`BTW (${Number(invoice.btw_percentage)}%):`, rightX - 40, finalY + 6);
-    doc.text(`€${Number(invoice.btw_amount).toFixed(2)}`, rightX, finalY + 6, { align: "right" });
+    doc.text("Subtotaal:", labelX, totalsY);
+    doc.text(`€${Number(invoice.subtotal).toFixed(2)}`, rightX, totalsY, { align: "right" });
+    totalsY += lineHeight;
+    doc.text(`BTW (${Number(invoice.btw_percentage)}%):`, labelX, totalsY);
+    doc.text(`€${Number(invoice.btw_amount).toFixed(2)}`, rightX, totalsY, { align: "right" });
+    totalsY += lineHeight + 2;
   }
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(12);
-  const totalLabelY = isPrivate ? finalY : finalY + 14;
-  // Extra ruimte tussen label en bedrag (kolommen)
-  doc.text(isPrivate ? "Totaal (all-in)" : "Totaal:", rightX - 60, totalLabelY);
-  doc.text(`€${Number(invoice.total).toFixed(2)}`, rightX, totalLabelY, { align: "right" });
+  doc.text(isPrivate ? "Totaal (all-in):" : "Totaal:", labelX, totalsY);
+  doc.text(`€${Number(invoice.total).toFixed(2)}`, rightX, totalsY, { align: "right" });
+  totalsY += lineHeight + 2;
+
   if (isPrivate) {
     doc.setFont("helvetica", "normal");
     doc.setFontSize(9);
-    doc.text("Vrijgesteld van BTW (particulier)", rightX, totalLabelY + 6, { align: "right" });
+    doc.text("Vrijgesteld van BTW (particulier)", rightX, totalsY, { align: "right" });
+    totalsY += lineHeight;
   }
 
-  const advance = Number(invoice.advance_payment ?? 0);
-  let paymentBlockY = finalY + 30;
-  if (advance > 0) {
-    const rest = Number(invoice.total) - advance;
+  const rawAdvance = Math.max(0, Number(invoice.advance_payment ?? 0));
+  const safeAdvance = Math.min(rawAdvance, Number(invoice.total));
+  if (safeAdvance > 0) {
+    const rest = Math.max(0, Number(invoice.total) - safeAdvance);
+    totalsY += 2;
     doc.setFont("helvetica", "normal");
     doc.setFontSize(10);
-    doc.text("Reeds ontvangen voorschot:", rightX - 40, finalY + 22);
-    doc.text(`€${advance.toFixed(2)}`, rightX, finalY + 22, { align: "right" });
+    doc.text("Reeds verrekend krediet:", labelX, totalsY);
+    doc.text(`€${safeAdvance.toFixed(2)}`, rightX, totalsY, { align: "right" });
+    totalsY += lineHeight;
     doc.setFont("helvetica", "bold");
-    doc.text("Te ontvangen na voorschot:", rightX - 40, finalY + 30);
-    doc.text(`€${rest.toFixed(2)}`, rightX, finalY + 30, { align: "right" });
-    paymentBlockY = finalY + 44;
+    doc.text("Te ontvangen na krediet:", labelX, totalsY);
+    doc.text(`€${rest.toFixed(2)}`, rightX, totalsY, { align: "right" });
+    totalsY += lineHeight;
   }
+
+  const paymentBlockY = totalsY + 8;
 
   // Payment info
   if (settings?.iban) {
