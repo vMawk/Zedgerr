@@ -16,7 +16,22 @@ type InvoiceWithCompany = Invoice & { companies: { name: string | null } | null 
 type ReportEntry = { hours: number; hourly_rate: number | null; company_name: string | null; default_hourly_rate: number | null };
 type TimeEntryWithCompany = TimeEntry & { companies: Company | null };
 
-const STATUS_COLORS: Record<string, string> = { concept: "#3b82f6", verzonden: "#f59e0b", betaald: "#10b981", vervallen: "#ef4444" };
+const STATUS_COLORS: Record<string, string> = {
+  concept: "#3b82f6",
+  verzonden: "#f59e0b",
+  betaald: "#10b981",
+  vervallen: "#ef4444",
+  /** Originele factuur na splitsen — niet als ‘vervallen’ tellen in dit overzicht */
+  gesplitst: "#6366f1",
+};
+
+/** Zelfde logica als facturenlijst: gesplitste hoofdfactuur niet als vervallen tonen. */
+function invoiceStatusForDashboard(inv: Invoice): string {
+  if (inv.status === "vervallen" && (inv.notes ?? "").toLowerCase().includes("gesplitst")) {
+    return "gesplitst";
+  }
+  return inv.status;
+}
 const periodLabels: Record<PeriodPreset, string> = { "30d": "Laatste 30 dagen", "90d": "Laatste 90 dagen", ytd: "Jaar tot nu", "12m": "Laatste 12 maanden" };
 
 function monthKeyFromDate(dateIso: string): string {
@@ -127,7 +142,10 @@ export default function Dashboard() {
 
   const statusDistribution = useMemo(() => {
     const grouped = new Map<string, number>();
-    for (const inv of filteredInvoices) grouped.set(inv.status, (grouped.get(inv.status) ?? 0) + 1);
+    for (const inv of filteredInvoices) {
+      const key = invoiceStatusForDashboard(inv);
+      grouped.set(key, (grouped.get(key) ?? 0) + 1);
+    }
     return [...grouped.entries()].map(([status, count]) => ({ status, count, fill: STATUS_COLORS[status] ?? "#94a3b8" }));
   }, [filteredInvoices]);
 
@@ -164,6 +182,7 @@ export default function Dashboard() {
     verzonden: { label: "Verzonden", color: STATUS_COLORS.verzonden },
     betaald: { label: "Betaald", color: STATUS_COLORS.betaald },
     vervallen: { label: "Vervallen", color: STATUS_COLORS.vervallen },
+    gesplitst: { label: "Gesplitst", color: STATUS_COLORS.gesplitst },
   };
   const topCustomersConfig: ChartConfig = { revenue: { label: "Omzet", color: "#8b5cf6" } };
 
