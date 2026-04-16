@@ -790,6 +790,8 @@ api.post("/api/invoices", async (c) => {
   const invoice_date = (req.invoice_date as string) || today;
   const status = (req.status as string) || "concept";
   const advance = req.advance_payment != null ? Number(req.advance_payment) : 0;
+  const advanceLabelRaw = String(req.advance_label ?? "krediet").toLowerCase();
+  const advanceLabel = advanceLabelRaw === "voorschot" ? "voorschot" : "krediet";
   const invoiceType = (req.invoice_type as string) === "private" ? "private" : "business";
   const btwPct = invoiceType === "private" ? 0 : Number(req.btw_percentage);
   const subtotal = toMoney(req.subtotal);
@@ -816,8 +818,8 @@ api.post("/api/invoices", async (c) => {
   await c.env.DB.batch([
     c.env.DB
       .prepare(
-        `INSERT INTO invoices (id, user_id, company_id, invoice_number, invoice_date, due_date, status, subtotal, btw_percentage, btw_amount, total, advance_payment, notes, invoice_type, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO invoices (id, user_id, company_id, invoice_number, invoice_date, due_date, status, subtotal, btw_percentage, btw_amount, total, advance_payment, advance_label, notes, invoice_type, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         id,
@@ -832,6 +834,7 @@ api.post("/api/invoices", async (c) => {
         btwAmount,
         total,
         appliedAdvance,
+        advanceLabel,
         req.notes ?? null,
         invoiceType,
         now,
@@ -950,7 +953,7 @@ api.post("/api/invoices/:id/split", async (c) => {
 
   const invoice = await c.env.DB
     .prepare(
-      "SELECT id, company_id, invoice_number, invoice_date, due_date, status, subtotal, btw_percentage, total, notes, invoice_type FROM invoices WHERE id = ? AND user_id = ?",
+      "SELECT id, company_id, invoice_number, invoice_date, due_date, status, subtotal, btw_percentage, total, notes, invoice_type, advance_label FROM invoices WHERE id = ? AND user_id = ?",
     )
     .bind(id, userId)
     .first<{
@@ -965,8 +968,11 @@ api.post("/api/invoices/:id/split", async (c) => {
       total: number;
       notes: string | null;
       invoice_type: string;
+      advance_label: string | null;
     }>();
   if (!invoice) return c.json({ error: "Not found" }, 404);
+
+  const splitAdvanceLabel = String(invoice.advance_label ?? "krediet").toLowerCase() === "voorschot" ? "voorschot" : "krediet";
 
   const already = await c.env.DB.prepare("SELECT 1 FROM invoices WHERE split_from_invoice_id = ? LIMIT 1").bind(id).first();
   if (already) return c.json({ error: "Invoice already split" }, 409);
@@ -1006,11 +1012,11 @@ api.post("/api/invoices/:id/split", async (c) => {
         .prepare(
           `INSERT INTO invoices (
             id, user_id, company_id, invoice_number, invoice_date, due_date, status,
-            subtotal, btw_percentage, btw_amount, total, advance_payment, notes, invoice_type, split_from_invoice_id,
+            subtotal, btw_percentage, btw_amount, total, advance_payment, advance_label, notes, invoice_type, split_from_invoice_id,
             created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, 'concept', ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
+          ) VALUES (?, ?, ?, ?, ?, ?, 'concept', ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
         )
-        .bind(newId, userId, invoice.company_id, newNr, termInvoiceDate, due, sub, btwPct, btwAmt, tot, newNotes, isPrivate ? "private" : "business", id, now, now),
+        .bind(newId, userId, invoice.company_id, newNr, termInvoiceDate, due, sub, btwPct, btwAmt, tot, splitAdvanceLabel, newNotes, isPrivate ? "private" : "business", id, now, now),
     );
     stmts.push(
       c.env.DB

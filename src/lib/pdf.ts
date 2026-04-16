@@ -2,6 +2,14 @@ import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import type { BusinessSettings, Company, Invoice, InvoiceLine, Quote, QuoteLine } from "@/lib/db-types";
 
+function invoiceAdvancePdfLabels(invoice: Invoice): { received: string; after: string } {
+  const mode = invoice.advance_label === "voorschot" ? "voorschot" : "krediet";
+  if (mode === "voorschot") {
+    return { received: "Reeds ontvangen voorschot:", after: "Te ontvangen na voorschot:" };
+  }
+  return { received: "Reeds verrekend krediet:", after: "Te ontvangen na krediet:" };
+}
+
 /** Gibby.it wordmark — same asset as in the app (`public/gibby-logo.png`). */
 async function loadInvoiceLogo(): Promise<{ dataUrl: string; wMm: number; hMm: number } | null> {
   try {
@@ -166,14 +174,15 @@ export async function generateInvoicePDF(
   const safeAdvance = Math.min(rawAdvance, Number(invoice.total));
   if (safeAdvance > 0) {
     const rest = Math.max(0, Number(invoice.total) - safeAdvance);
+    const advLabels = invoiceAdvancePdfLabels(invoice);
     totalsY += 2;
     doc.setFont("helvetica", "normal");
     doc.setFontSize(10);
-    doc.text("Reeds verrekend krediet:", labelX, totalsY);
+    doc.text(advLabels.received, labelX, totalsY);
     doc.text(`€${safeAdvance.toFixed(2)}`, rightX, totalsY, { align: "right" });
     totalsY += lineHeight;
     doc.setFont("helvetica", "bold");
-    doc.text("Te ontvangen na krediet:", labelX, totalsY);
+    doc.text(advLabels.after, labelX, totalsY);
     doc.text(`€${rest.toFixed(2)}`, rightX, totalsY, { align: "right" });
     totalsY += lineHeight;
   }
