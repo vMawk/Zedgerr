@@ -49,6 +49,8 @@ export type Invoice = {
   btw_amount: number;
   total: number;
   advance_payment: number;
+  /** Tekst op PDF: krediet of voorschot (default krediet als ontbreekt) */
+  advance_label?: "krediet" | "voorschot";
   notes: string | null;
   invoice_type: "business" | "private";
   created_at: string;

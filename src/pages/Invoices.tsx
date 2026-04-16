@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Plus, FileText, Download, Trash2, Pencil, Split } from "lucide-react";
 import { generateInvoicePDF } from "@/lib/pdf";
+import { Checkbox } from "@/components/ui/checkbox";
 
 const statusColors: Record<string, string> = {
   concept: "bg-muted text-muted-foreground",
@@ -75,6 +76,8 @@ export default function Invoices() {
   const [splitParts, setSplitParts] = useState("3");
   const [splitIntervalDays, setSplitIntervalDays] = useState("30");
   const [splitFirstDueDate, setSplitFirstDueDate] = useState("");
+  const [applyAdvance, setApplyAdvance] = useState(true);
+  const [advanceLabel, setAdvanceLabel] = useState<"krediet" | "voorschot">("krediet");
 
   const fetchData = async () => {
     const [invList, compList, svcList] = await Promise.all([api.getInvoices(), api.getCompanies(), api.getServices()]);
@@ -125,7 +128,7 @@ export default function Invoices() {
     const btwAmount = invoiceType === "private" ? 0 : round2(subtotal * (btw / 100));
     const total = invoiceType === "private" ? round2(subtotal) : round2(subtotal + btwAmount);
     const companyAdvance = round2(Math.max(0, Number(company.advance_balance ?? 0)));
-    const appliedAdvance = round2(Math.min(companyAdvance, total));
+    const appliedAdvance = applyAdvance ? round2(Math.min(companyAdvance, total)) : 0;
     const invoiceNumber = generateInvoiceNumber();
     const invDate = invoiceDate || new Date().toISOString().split("T")[0];
 
@@ -140,6 +143,7 @@ export default function Invoices() {
         total,
         notes: notes || null,
         advance_payment: appliedAdvance,
+        advance_label: advanceLabel,
         due_date: new Date(Date.now() + 30 * 86400000).toISOString().split("T")[0],
         invoice_type: invoiceType,
       });
@@ -181,12 +185,14 @@ export default function Invoices() {
       setNotes("");
       setInvoiceType("business");
       setInvoiceDate(new Date().toISOString().split("T")[0]);
+      setApplyAdvance(true);
+      setAdvanceLabel("krediet");
       fetchData();
       toast({
         title: "Factuur aangemaakt",
         description:
           appliedAdvance > 0
-            ? `${invoiceNumber} • krediet €${appliedAdvance.toLocaleString("nl-NL", { minimumFractionDigits: 2 })} verrekend`
+            ? `${invoiceNumber} • ${advanceLabel === "voorschot" ? "Voorschot" : "Krediet"} €${appliedAdvance.toLocaleString("nl-NL", { minimumFractionDigits: 2 })} verrekend`
             : invoiceNumber,
       });
     } catch (error: unknown) {
@@ -282,7 +288,16 @@ export default function Invoices() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Facturen</h1>
-        <Dialog open={open} onOpenChange={setOpen}>
+        <Dialog
+          open={open}
+          onOpenChange={(v) => {
+            setOpen(v);
+            if (!v) {
+              setApplyAdvance(true);
+              setAdvanceLabel("krediet");
+            }
+          }}
+        >
           <DialogTrigger asChild>
             <Button><Plus className="mr-2 h-4 w-4" />Factuur aanmaken</Button>
           </DialogTrigger>
@@ -329,6 +344,44 @@ export default function Invoices() {
                   </SelectContent>
                 </Select>
               </div>
+
+              {selectedCompany && (
+                <div className="rounded-md border p-3 space-y-3">
+                  <div className="flex items-start gap-3">
+                    <Checkbox
+                      id="apply-advance"
+                      checked={applyAdvance}
+                      onCheckedChange={(c) => setApplyAdvance(c === true)}
+                      className="mt-1"
+                    />
+                    <div className="grid gap-1 flex-1">
+                      <Label htmlFor="apply-advance" className="font-medium leading-snug">
+                        Klantsaldo verrekenen
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        Zo niet, dan blijft het saldo op de klant staan en wordt er niets op deze factuur afgetrokken.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="grid gap-2 pl-7 sm:pl-0">
+                    <Label>Op de factuur (PDF) tonen als</Label>
+                    <Select
+                      value={advanceLabel}
+                      onValueChange={(v) => setAdvanceLabel(v as "krediet" | "voorschot")}
+                      disabled={!applyAdvance}
+                    >
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="krediet">Krediet</SelectItem>
+                        <SelectItem value="voorschot">Voorschot</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    {!applyAdvance && (
+                      <p className="text-xs text-muted-foreground">Woordkeuze is alleen van toepassing als je saldo verrekent.</p>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {createMode === "hours" && uninvoicedEntries.length > 0 && (
                 <div className="grid gap-2">
@@ -402,14 +455,24 @@ export default function Invoices() {
                 const vatAmount = invoiceType === "private" ? 0 : round2(subtotal * (vat / 100));
                 const grossTotal = invoiceType === "private" ? round2(subtotal) : round2(subtotal + vatAmount);
                 const availableAdvance = round2(Math.max(0, Number(company.advance_balance ?? 0)));
-                const appliedAdvance = round2(Math.min(availableAdvance, grossTotal));
+                const appliedAdvance = applyAdvance ? round2(Math.min(availableAdvance, grossTotal)) : 0;
                 const netTotal = round2(grossTotal - appliedAdvance);
+                const labelWord = advanceLabel === "voorschot" ? "voorschot" : "krediet";
                 return (
                   <div className="rounded-md border bg-muted/30 p-3 text-sm space-y-1">
                     <p>Totaal: <span className="font-medium">€{grossTotal.toLocaleString("nl-NL", { minimumFractionDigits: 2 })}</span></p>
-                    <p>Beschikbaar krediet: <span className="font-medium">€{availableAdvance.toLocaleString("nl-NL", { minimumFractionDigits: 2 })}</span></p>
-                    <p>Krediet op deze factuur: <span className="font-medium">€{appliedAdvance.toLocaleString("nl-NL", { minimumFractionDigits: 2 })}</span></p>
-                    <p>Te betalen na krediet: <span className="font-medium">€{netTotal.toLocaleString("nl-NL", { minimumFractionDigits: 2 })}</span></p>
+                    <p>Beschikbaar saldo: <span className="font-medium">€{availableAdvance.toLocaleString("nl-NL", { minimumFractionDigits: 2 })}</span></p>
+                    {applyAdvance ? (
+                      <>
+                        <p>
+                          Verrekend op deze factuur ({labelWord}):{" "}
+                          <span className="font-medium">€{appliedAdvance.toLocaleString("nl-NL", { minimumFractionDigits: 2 })}</span>
+                        </p>
+                        <p>Te betalen: <span className="font-medium">€{netTotal.toLocaleString("nl-NL", { minimumFractionDigits: 2 })}</span></p>
+                      </>
+                    ) : (
+                      <p className="text-muted-foreground">Geen saldo-verrekening — te betalen: <span className="font-medium text-foreground">€{grossTotal.toLocaleString("nl-NL", { minimumFractionDigits: 2 })}</span></p>
+                    )}
                   </div>
                 );
               })()}
@@ -444,7 +507,7 @@ export default function Invoices() {
                 <TableHead>Bedrijf</TableHead>
                 <TableHead>Datum</TableHead>
                 <TableHead>Totaal</TableHead>
-                <TableHead className="whitespace-nowrap">Krediet</TableHead>
+                <TableHead className="whitespace-nowrap">Verrekend</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="w-28 text-right">Acties</TableHead>
               </TableRow>
