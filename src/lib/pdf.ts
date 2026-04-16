@@ -155,7 +155,7 @@ export async function generateInvoicePDF(
     doc.text("Vrijgesteld van BTW (particulier)", rightX, totalLabelY + 6, { align: "right" });
   }
 
-  const advance = isPrivate ? 0 : Number(invoice.advance_payment ?? 0);
+  const advance = Number(invoice.advance_payment ?? 0);
   let paymentBlockY = finalY + 30;
   if (advance > 0) {
     const rest = Number(invoice.total) - advance;

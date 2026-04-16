@@ -38,6 +38,10 @@ function statusLabel(status: string, notes: string | null): string {
   return status;
 }
 
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
 export default function Invoices() {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -118,8 +122,10 @@ export default function Invoices() {
           ? svcAmt
           : NaN;
     const btw = invoiceType === "private" ? 0 : parseFloat(btwPercentage);
-    const btwAmount = invoiceType === "private" ? 0 : subtotal * (btw / 100);
-    const total = invoiceType === "private" ? subtotal : subtotal + btwAmount;
+    const btwAmount = invoiceType === "private" ? 0 : round2(subtotal * (btw / 100));
+    const total = invoiceType === "private" ? round2(subtotal) : round2(subtotal + btwAmount);
+    const companyAdvance = round2(Math.max(0, Number(company.advance_balance ?? 0)));
+    const appliedAdvance = round2(Math.min(companyAdvance, total));
     const invoiceNumber = generateInvoiceNumber();
     const invDate = invoiceDate || new Date().toISOString().split("T")[0];
 
@@ -133,7 +139,7 @@ export default function Invoices() {
         btw_amount: btwAmount,
         total,
         notes: notes || null,
-        advance_payment: 0,
+        advance_payment: appliedAdvance,
         due_date: new Date(Date.now() + 30 * 86400000).toISOString().split("T")[0],
         invoice_type: invoiceType,
       });
@@ -176,7 +182,13 @@ export default function Invoices() {
       setInvoiceType("business");
       setInvoiceDate(new Date().toISOString().split("T")[0]);
       fetchData();
-      toast({ title: "Factuur aangemaakt", description: invoiceNumber });
+      toast({
+        title: "Factuur aangemaakt",
+        description:
+          appliedAdvance > 0
+            ? `${invoiceNumber} • voorschot €${appliedAdvance.toLocaleString("nl-NL", { minimumFractionDigits: 2 })} verrekend`
+            : invoiceNumber,
+      });
     } catch (error: unknown) {
       toast({ title: "Fout", description: error instanceof Error ? error.message : String(error), variant: "destructive" });
     }
@@ -372,6 +384,35 @@ export default function Invoices() {
                 <Label>Notities</Label>
                 <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} />
               </div>
+              {selectedCompany && (() => {
+                const company = companies.find((c) => c.id === selectedCompany);
+                if (!company) return null;
+                const selectedHoursEntries = uninvoicedEntries.filter((e) => selectedEntries.includes(e.id));
+                const svcAmt = Number(serviceAmount);
+                const subtotal =
+                  createMode === "hours"
+                    ? selectedHoursEntries.reduce((sum, e) => {
+                        const rate = e.hourly_rate ?? company.default_hourly_rate ?? 0;
+                        return sum + Number(e.hours) * Number(rate);
+                      }, 0)
+                    : Number.isFinite(svcAmt)
+                      ? svcAmt
+                      : 0;
+                const vat = invoiceType === "private" ? 0 : parseFloat(btwPercentage || "0");
+                const vatAmount = invoiceType === "private" ? 0 : round2(subtotal * (vat / 100));
+                const grossTotal = invoiceType === "private" ? round2(subtotal) : round2(subtotal + vatAmount);
+                const availableAdvance = round2(Math.max(0, Number(company.advance_balance ?? 0)));
+                const appliedAdvance = round2(Math.min(availableAdvance, grossTotal));
+                const netTotal = round2(grossTotal - appliedAdvance);
+                return (
+                  <div className="rounded-md border bg-muted/30 p-3 text-sm space-y-1">
+                    <p>Totaal: <span className="font-medium">€{grossTotal.toLocaleString("nl-NL", { minimumFractionDigits: 2 })}</span></p>
+                    <p>Beschikbaar voorschot: <span className="font-medium">€{availableAdvance.toLocaleString("nl-NL", { minimumFractionDigits: 2 })}</span></p>
+                    <p>Voorschot op deze factuur: <span className="font-medium">€{appliedAdvance.toLocaleString("nl-NL", { minimumFractionDigits: 2 })}</span></p>
+                    <p>Te betalen na voorschot: <span className="font-medium">€{netTotal.toLocaleString("nl-NL", { minimumFractionDigits: 2 })}</span></p>
+                  </div>
+                );
+              })()}
               <Button
                 onClick={handleCreate}
                 disabled={
@@ -423,7 +464,21 @@ export default function Invoices() {
                   <TableCell className="font-medium">{invoice.invoice_number}</TableCell>
                   <TableCell>{invoice.companies?.name}</TableCell>
                   <TableCell>{new Date(invoice.invoice_date).toLocaleDateString("nl-NL")}</TableCell>
-                  <TableCell>€{Number(invoice.total).toLocaleString("nl-NL", { minimumFractionDigits: 2 })}</TableCell>
+                  <TableCell>
+                    <div className="leading-tight">
+                      <p className="font-medium">
+                        €{Number(Number(invoice.total) - Number(invoice.advance_payment ?? 0)).toLocaleString("nl-NL", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
+                      </p>
+                      {Number(invoice.advance_payment ?? 0) > 0 && (
+                        <p className="text-xs text-muted-foreground">
+                          van €{Number(invoice.total).toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </p>
+                      )}
+                    </div>
+                  </TableCell>
                   <TableCell className="text-muted-foreground text-sm">
                     {Number(invoice.advance_payment ?? 0) > 0
                       ? `€${Number(invoice.advance_payment).toLocaleString("nl-NL", { minimumFractionDigits: 2 })}`
@@ -476,6 +531,7 @@ export default function Invoices() {
             <AlertDialogDescription>
               Factuur <span className="font-medium text-foreground">{invoiceToDelete?.invoice_number}</span> wordt permanent
               verwijderd. Uren die op deze factuur stonden worden weer vrijgegeven, zodat je ze opnieuw kunt factureren.
+              Gebruikt voorschot wordt ook teruggezet op de klant.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
