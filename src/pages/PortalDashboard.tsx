@@ -5,8 +5,13 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
-import { LogOut, Clock, FileText, Download } from "lucide-react";
+import { LogOut, Clock, FileText, Download, Scale } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { generateInvoicePDF } from "@/lib/pdf";
+
+function money(n: number): string {
+  return `€${n.toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
 
 function invoiceStatusLabel(status: string): string {
   const m: Record<string, string> = {
@@ -73,7 +78,7 @@ export default function PortalDashboard() {
         {loading && <p className="text-muted-foreground">Laden…</p>}
         {!loading && data && (
           <>
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               <Card>
                 <CardHeader className="flex flex-row items-center gap-2 pb-2">
                   <Clock className="h-5 w-5 text-muted-foreground" />
@@ -94,7 +99,54 @@ export default function PortalDashboard() {
                   <CardDescription className="mt-1">Openstaand en betaald</CardDescription>
                 </CardContent>
               </Card>
+              <Card className="sm:col-span-2 lg:col-span-1">
+                <CardHeader className="flex flex-row items-center gap-2 pb-2">
+                  <Scale className="h-5 w-5 text-muted-foreground" />
+                  <CardTitle className="text-lg">Openstaande schuld</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-3xl font-semibold tabular-nums">{money(data.debtToClient ?? 0)}</p>
+                  <CardDescription className="mt-1">
+                    Bedrag dat aan uw organisatie wordt verrekend (bijv. vooruitbetaling of tegoed). Wordt verlaagd bij schuldverrekening met uren.
+                  </CardDescription>
+                </CardContent>
+              </Card>
             </div>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">Schuldverrekeningen</CardTitle>
+                <CardDescription>
+                  Overzicht van verrekeningen waarbij uren zijn gebruikt om openstaande schuld te verlagen.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="overflow-x-auto">
+                {(data.debtSettlements ?? []).length === 0 ? (
+                  <p className="text-sm text-muted-foreground">Nog geen verrekeningen geregistreerd.</p>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Datum</TableHead>
+                        <TableHead className="text-right">Verrekend bedrag</TableHead>
+                        <TableHead>Toelichting</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {(data.debtSettlements ?? []).map((s) => (
+                        <TableRow key={s.id}>
+                          <TableCell className="whitespace-nowrap">
+                            {new Date(s.createdAt).toLocaleString("nl-NL")}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums font-medium">{money(s.totalAmount)}</TableCell>
+                          <TableCell className="text-muted-foreground max-w-[280px]">{s.notes?.trim() || "—"}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
 
             <Card>
               <CardHeader>
@@ -111,6 +163,7 @@ export default function PortalDashboard() {
                         <TableHead>Datum</TableHead>
                         <TableHead className="text-right">Uren</TableHead>
                         <TableHead>Omschrijving</TableHead>
+                        <TableHead className="w-[140px]">Status</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -119,6 +172,15 @@ export default function PortalDashboard() {
                           <TableCell className="whitespace-nowrap">{row.date}</TableCell>
                           <TableCell className="text-right tabular-nums">{Number(row.hours).toLocaleString("nl-NL", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</TableCell>
                           <TableCell className="text-muted-foreground">{row.description ?? "—"}</TableCell>
+                          <TableCell>
+                            {row.settledAgainstDebt ? (
+                              <Badge variant="secondary" className="font-normal">
+                                Verrekend met schuld
+                              </Badge>
+                            ) : (
+                              <span className="text-muted-foreground text-sm">—</span>
+                            )}
+                          </TableCell>
                         </TableRow>
                       ))}
                     </TableBody>

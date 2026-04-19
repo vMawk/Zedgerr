@@ -224,20 +224,41 @@ api.get("/api/portal/me", async (c) => {
 
 api.get("/api/portal/dashboard", async (c) => {
   const companyId = c.get("portalCompanyId")!;
+  const debtCompany = await c.env.DB
+    .prepare("SELECT COALESCE(debt_to_client, 0) AS d FROM companies WHERE id = ?")
+    .bind(companyId)
+    .first<{ d: number }>();
+  const debtSettlements = await c.env.DB
+    .prepare(
+      `SELECT id, total_amount, notes, created_at
+       FROM debt_settlements
+       WHERE company_id = ?
+       ORDER BY created_at DESC
+       LIMIT 100`,
+    )
+    .bind(companyId)
+    .all<{ id: string; total_amount: number; notes: string | null; created_at: string }>();
+
   const hoursRow = await c.env.DB
     .prepare("SELECT COALESCE(SUM(hours), 0) AS h FROM time_entries WHERE company_id = ?")
     .bind(companyId)
     .first<{ h: number }>();
   const te = await c.env.DB
     .prepare(
-      `SELECT id, date, hours, description
+      `SELECT id, date, hours, description, debt_settlement_id
        FROM time_entries
        WHERE company_id = ?
        ORDER BY date DESC, created_at DESC
        LIMIT 500`,
     )
     .bind(companyId)
-    .all<{ id: string; date: string; hours: number; description: string | null }>();
+    .all<{
+      id: string;
+      date: string;
+      hours: number;
+      description: string | null;
+      debt_settlement_id: string | null;
+    }>();
 
   const inv = await c.env.DB
     .prepare(
@@ -264,7 +285,20 @@ api.get("/api/portal/dashboard", async (c) => {
 
   return c.json({
     totalHours: Number(hoursRow?.h ?? 0),
-    timeEntries: te.results ?? [],
+    debtToClient: Math.max(0, Number(debtCompany?.d ?? 0)),
+    debtSettlements: (debtSettlements.results ?? []).map((s) => ({
+      id: s.id,
+      totalAmount: Number(s.total_amount),
+      notes: s.notes,
+      createdAt: s.created_at,
+    })),
+    timeEntries: (te.results ?? []).map((row) => ({
+      id: row.id,
+      date: row.date,
+      hours: row.hours,
+      description: row.description,
+      settledAgainstDebt: Boolean(row.debt_settlement_id),
+    })),
     invoices: inv.results ?? [],
   });
 });
