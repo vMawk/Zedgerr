@@ -14,45 +14,13 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart";
-import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
 import { useToast } from "@/hooks/use-toast";
-import {
-  LogOut,
-  Clock,
-  FileText,
-  Download,
-  Scale,
-  Settings,
-  Loader2,
-  Filter,
-} from "lucide-react";
+import { LogOut, Clock, FileText, Download, Scale, Settings, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { generateInvoicePDF } from "@/lib/pdf";
 
 function money(n: number): string {
   return `€${n.toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
-function todayIso(): string {
-  return new Date().toISOString().split("T")[0]!;
-}
-
-function monthsAgoIso(months: number): string {
-  const d = new Date();
-  d.setMonth(d.getMonth() - months);
-  return d.toISOString().split("T")[0]!;
-}
-
-function startOfYearIso(): string {
-  const y = new Date().getFullYear();
-  return `${y}-01-01`;
-}
-
-function startOfMonthIso(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
 }
 
 function monthLabel(key: string): string {
@@ -70,9 +38,6 @@ function invoiceStatusLabel(status: string): string {
   };
   return m[status] ?? status;
 }
-
-const hoursChartConfig = { hours: { label: "Uren", color: "#3b82f6" } } satisfies ChartConfig;
-const settlementChartConfig = { amount: { label: "Verrekend (€)", color: "#8b5cf6" } } satisfies ChartConfig;
 
 type TimeRow = PortalDashboard["timeEntries"][number];
 type SettlementRow = PortalDashboard["debtSettlements"][number];
@@ -182,122 +147,104 @@ function PortalSettingsPanel() {
   );
 }
 
-function PortalHoursBlock({ entries }: { entries: TimeRow[] }) {
-  const [from, setFrom] = useState(monthsAgoIso(12));
-  const [to, setTo] = useState(todayIso());
-  const [kind, setKind] = useState<"all" | "settled" | "open">("all");
-
-  const filtered = useMemo(() => {
-    return entries.filter((row) => {
-      if (from && row.date < from) return false;
-      if (to && row.date > to) return false;
-      if (kind === "settled" && !row.settledAgainstDebt) return false;
-      if (kind === "open" && row.settledAgainstDebt) return false;
-      return true;
-    });
-  }, [entries, from, to, kind]);
-
-  const hoursInPeriod = useMemo(
-    () => filtered.reduce((s, r) => s + Number(r.hours), 0),
-    [filtered],
-  );
-
-  const chartData = useMemo(() => {
+/** Lage, rustige staafjes per maand — alleen ter indicatie. */
+function SubtleHoursTrend({ entries }: { entries: TimeRow[] }) {
+  const data = useMemo(() => {
     const byMonth = new Map<string, number>();
-    for (const row of filtered) {
+    for (const row of entries) {
       const key = row.date.slice(0, 7);
       byMonth.set(key, (byMonth.get(key) ?? 0) + Number(row.hours));
     }
     return [...byMonth.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([month, hours]) => ({ month, label: monthLabel(month), hours: Number(hours.toFixed(2)) }));
-  }, [filtered]);
+      .map(([month, hours]) => ({ key: month, label: monthLabel(month), value: hours }));
+  }, [entries]);
+
+  if (data.length === 0) return null;
+  const max = Math.max(...data.map((d) => d.value), 0.01);
+
+  return (
+    <div className="rounded-lg border border-border/50 bg-muted/20 px-3 py-3">
+      <p className="text-xs text-muted-foreground mb-3">Verdeling van uren over de maanden heen</p>
+      <div className="flex h-11 items-end gap-px sm:gap-0.5">
+        {data.map((d) => (
+          <div
+            key={d.key}
+            className="flex min-h-0 min-w-0 flex-1 flex-col items-stretch justify-end gap-1.5"
+            title={`${d.label}: ${d.value.toLocaleString("nl-NL", { maximumFractionDigits: 2 })} uur`}
+          >
+            <div className="flex h-10 w-full flex-col justify-end">
+              <div
+                className="w-full rounded-[2px] bg-foreground/10 transition-[height]"
+                style={{ height: `${Math.max(8, (d.value / max) * 100)}%` }}
+              />
+            </div>
+            <span className="block truncate text-center text-[10px] leading-none text-muted-foreground sm:text-[11px]">
+              {d.label.replace(" ", "\u00a0")}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SubtleSettlementTrend({ settlements }: { settlements: SettlementRow[] }) {
+  const data = useMemo(() => {
+    const byMonth = new Map<string, number>();
+    for (const s of settlements) {
+      const key = s.createdAt.slice(0, 7);
+      byMonth.set(key, (byMonth.get(key) ?? 0) + s.totalAmount);
+    }
+    return [...byMonth.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([month, amount]) => ({ key: month, label: monthLabel(month), value: amount }));
+  }, [settlements]);
+
+  if (data.length === 0) return null;
+  const max = Math.max(...data.map((d) => d.value), 0.01);
+
+  return (
+    <div className="rounded-lg border border-border/50 bg-muted/20 px-3 py-3">
+      <p className="text-xs text-muted-foreground mb-3">Verrekende bedragen per maand</p>
+      <div className="flex h-11 items-end gap-px sm:gap-0.5">
+        {data.map((d) => (
+          <div
+            key={d.key}
+            className="flex min-h-0 min-w-0 flex-1 flex-col items-stretch justify-end gap-1.5"
+            title={`${d.label}: ${money(d.value)}`}
+          >
+            <div className="flex h-10 w-full flex-col justify-end">
+              <div
+                className="w-full rounded-[2px] bg-foreground/10 transition-[height]"
+                style={{ height: `${Math.max(8, (d.value / max) * 100)}%` }}
+              />
+            </div>
+            <span className="block truncate text-center text-[10px] leading-none text-muted-foreground sm:text-[11px]">
+              {d.label.replace(" ", "\u00a0")}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PortalHoursBlock({ entries }: { entries: TimeRow[] }) {
+  const sumHours = useMemo(() => entries.reduce((s, r) => s + Number(r.hours), 0), [entries]);
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:flex-wrap">
-        <div className="flex flex-wrap gap-2">
-          <Button type="button" variant="outline" size="sm" onClick={() => setFrom(startOfMonthIso())}>
-            Deze maand
-          </Button>
-          <Button type="button" variant="outline" size="sm" onClick={() => setFrom(startOfYearIso())}>
-            Dit jaar
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              setFrom(monthsAgoIso(12));
-              setTo(todayIso());
-            }}
-          >
-            Laatste 12 mnd
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              setFrom("");
-              setTo("");
-            }}
-          >
-            Alles
-          </Button>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Filter className="h-4 w-4 text-muted-foreground shrink-0" />
-          <div className="grid gap-1">
-            <Label className="text-xs">Van</Label>
-            <Input type="date" className="w-[160px]" value={from} onChange={(e) => setFrom(e.target.value)} />
-          </div>
-          <div className="grid gap-1">
-            <Label className="text-xs">Tot en met</Label>
-            <Input type="date" className="w-[160px]" value={to} onChange={(e) => setTo(e.target.value)} />
-          </div>
-          <div className="grid gap-1 min-w-[180px]">
-            <Label className="text-xs">Soort</Label>
-            <Select value={kind} onValueChange={(v) => setKind(v as typeof kind)}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Alle uren</SelectItem>
-                <SelectItem value="settled">Alleen verrekend met schuld</SelectItem>
-                <SelectItem value="open">Alleen nog niet verrekend</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-      </div>
-
       <p className="text-sm text-muted-foreground">
-        In selectie: <span className="font-medium text-foreground">{hoursInPeriod.toLocaleString("nl-NL", { maximumFractionDigits: 2 })}</span> uur
-        {" · "}
-        {filtered.length} regel{filtered.length === 1 ? "" : "s"}
+        <span className="font-medium text-foreground">{sumHours.toLocaleString("nl-NL", { maximumFractionDigits: 2 })}</span> uur in{" "}
+        <span className="font-medium text-foreground">{entries.length}</span> regel{entries.length === 1 ? "" : "s"}
       </p>
 
-      {chartData.length > 0 ? (
-        <div className="rounded-xl border bg-card/50 p-2">
-          <ChartContainer config={hoursChartConfig} className="h-[220px] w-full">
-            <BarChart data={chartData} margin={{ left: 4, right: 8 }}>
-              <CartesianGrid vertical={false} strokeDasharray="3 3" className="stroke-muted" />
-              <XAxis dataKey="label" tickLine={false} axisLine={false} tick={{ fontSize: 11 }} interval="preserveStartEnd" />
-              <YAxis tickLine={false} axisLine={false} width={44} tick={{ fontSize: 11 }} />
-              <ChartTooltip content={<ChartTooltipContent />} />
-              <Bar dataKey="hours" fill="var(--color-hours)" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ChartContainer>
-          <p className="text-center text-xs text-muted-foreground px-2 pb-1">Uren per maand (selectie)</p>
-        </div>
-      ) : (
-        <p className="text-sm text-muted-foreground">Geen uren in deze filter.</p>
-      )}
+      <SubtleHoursTrend entries={entries} />
 
       <div className="rounded-md border overflow-x-auto">
-        {filtered.length === 0 ? (
-          <p className="p-4 text-sm text-muted-foreground">Geen regels om te tonen.</p>
+        {entries.length === 0 ? (
+          <p className="p-4 text-sm text-muted-foreground">Nog geen uren geregistreerd.</p>
         ) : (
           <Table>
             <TableHeader>
@@ -309,7 +256,7 @@ function PortalHoursBlock({ entries }: { entries: TimeRow[] }) {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filtered.map((row) => (
+              {entries.map((row) => (
                 <TableRow key={row.id}>
                   <TableCell className="whitespace-nowrap">{row.date}</TableCell>
                   <TableCell className="text-right tabular-nums">
@@ -336,118 +283,30 @@ function PortalHoursBlock({ entries }: { entries: TimeRow[] }) {
 }
 
 function PortalSettlementsBlock({ settlements }: { settlements: SettlementRow[] }) {
-  const [from, setFrom] = useState(monthsAgoIso(12));
-  const [to, setTo] = useState(todayIso());
-
-  const filtered = useMemo(() => {
-    return settlements.filter((s) => {
-      const d = s.createdAt.slice(0, 10);
-      if (from && d < from) return false;
-      if (to && d > to) return false;
-      return true;
-    });
-  }, [settlements, from, to]);
-
-  const chartData = useMemo(() => {
-    const byMonth = new Map<string, number>();
-    for (const s of filtered) {
-      const key = s.createdAt.slice(0, 7);
-      byMonth.set(key, (byMonth.get(key) ?? 0) + s.totalAmount);
-    }
-    return [...byMonth.entries()]
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([month, amount]) => ({ month, label: monthLabel(month), amount: Number(amount.toFixed(2)) }));
-  }, [filtered]);
-
-  const totalVerrekend = useMemo(() => filtered.reduce((s, x) => s + x.totalAmount, 0), [filtered]);
+  const totalVerrekend = useMemo(() => settlements.reduce((s, x) => s + x.totalAmount, 0), [settlements]);
   const totalUrenVerrekend = useMemo(
-    () => filtered.reduce((s, x) => s + (x.totalHours ?? x.lines?.reduce((a, l) => a + l.hours, 0) ?? 0), 0),
-    [filtered],
+    () =>
+      settlements.reduce((s, x) => s + (x.totalHours ?? x.lines?.reduce((a, l) => a + l.hours, 0) ?? 0), 0),
+    [settlements],
   );
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:flex-wrap">
-        <div className="flex flex-wrap gap-2">
-          <Button type="button" variant="outline" size="sm" onClick={() => setFrom(startOfMonthIso())}>
-            Deze maand
-          </Button>
-          <Button type="button" variant="outline" size="sm" onClick={() => setFrom(startOfYearIso())}>
-            Dit jaar
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              setFrom(monthsAgoIso(12));
-              setTo(todayIso());
-            }}
-          >
-            Laatste 12 mnd
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              setFrom("");
-              setTo("");
-            }}
-          >
-            Alles
-          </Button>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Filter className="h-4 w-4 text-muted-foreground shrink-0" />
-          <div className="grid gap-1">
-            <Label className="text-xs">Van</Label>
-            <Input type="date" className="w-[160px]" value={from} onChange={(e) => setFrom(e.target.value)} />
-          </div>
-          <div className="grid gap-1">
-            <Label className="text-xs">Tot en met</Label>
-            <Input type="date" className="w-[160px]" value={to} onChange={(e) => setTo(e.target.value)} />
-          </div>
-        </div>
-      </div>
-
       <p className="text-sm text-muted-foreground">
-        Selectie: <span className="font-medium text-foreground">{money(totalVerrekend)}</span> verrekend ·{" "}
+        Totaal verrekend: <span className="font-medium text-foreground">{money(totalVerrekend)}</span>
+        {" · "}
         <span className="font-medium text-foreground">{totalUrenVerrekend.toLocaleString("nl-NL", { maximumFractionDigits: 2 })}</span> uur
         {" · "}
-        {filtered.length} verrekening{filtered.length === 1 ? "" : "en"}
+        {settlements.length} verrekening{settlements.length === 1 ? "" : "en"}
       </p>
 
-      {chartData.length > 0 ? (
-        <div className="rounded-xl border bg-card/50 p-2">
-          <ChartContainer config={settlementChartConfig} className="h-[220px] w-full">
-            <BarChart data={chartData} margin={{ left: 4, right: 8 }}>
-              <CartesianGrid vertical={false} strokeDasharray="3 3" className="stroke-muted" />
-              <XAxis dataKey="label" tickLine={false} axisLine={false} tick={{ fontSize: 11 }} interval="preserveStartEnd" />
-              <YAxis
-                tickLine={false}
-                axisLine={false}
-                width={52}
-                tick={{ fontSize: 11 }}
-                tickFormatter={(v) => `€${Number(v).toFixed(0)}`}
-              />
-              <ChartTooltip
-                content={<ChartTooltipContent formatter={(value) => money(Number(value))} />}
-              />
-              <Bar dataKey="amount" fill="var(--color-amount)" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ChartContainer>
-          <p className="text-center text-xs text-muted-foreground px-2 pb-1">Verrekende bedragen per maand (selectie)</p>
-        </div>
-      ) : filtered.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Geen verrekeningen in deze periode.</p>
-      ) : null}
+      <SubtleSettlementTrend settlements={settlements} />
 
-      {filtered.length === 0 ? (
-        <p className="text-sm text-muted-foreground py-2">Pas de datums aan of er zijn nog geen verrekeningen.</p>
+      {settlements.length === 0 ? (
+        <p className="text-sm text-muted-foreground py-1">Nog geen schuldverrekeningen.</p>
       ) : (
         <Accordion type="multiple" className="space-y-2 w-full">
-          {filtered.map((s) => (
+          {settlements.map((s) => (
             <AccordionItem key={s.id} value={s.id} className="border rounded-lg px-3 bg-muted/20">
               <AccordionTrigger className="text-sm hover:no-underline py-3 [&[data-state=open]>svg]:rotate-180">
                 <div className="flex flex-1 flex-col gap-1 text-left sm:flex-row sm:items-center sm:justify-between sm:gap-4 pr-2">
@@ -622,7 +481,7 @@ export default function PortalDashboard() {
                     </AccordionTrigger>
                     <AccordionContent className="pb-4">
                       <CardDescription className="mb-4 -mt-1">
-                        Filter op periode en soort uren. Klap secties dicht voor een compacter overzicht.
+                        Alle uren in één tabel; bovenin een rustige verdeling per maand. Klap de sectie dicht voor minder schermruimte.
                       </CardDescription>
                       <PortalHoursBlock entries={data.timeEntries} />
                     </AccordionContent>
@@ -637,7 +496,7 @@ export default function PortalDashboard() {
                     </AccordionTrigger>
                     <AccordionContent className="pb-4">
                       <CardDescription className="mb-4 -mt-1">
-                        Per verrekening ziet u het bedrag, het aantal uren en welke diensten daarbij horen. Klap een regel open voor details.
+                        Bedrag, uren en uitgevoerde werkzaamheden per verrekening. Open een regel voor het volledige detail.
                       </CardDescription>
                       <PortalSettlementsBlock settlements={data.debtSettlements ?? []} />
                     </AccordionContent>

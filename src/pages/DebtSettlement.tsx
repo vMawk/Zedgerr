@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Scale } from "lucide-react";
+import { Loader2, Scale, Trash2 } from "lucide-react";
 
 type TimeRow = TimeEntry & { companies: Company | null };
 
@@ -34,6 +34,7 @@ export default function DebtSettlementPage() {
   const [notes, setNotes] = useState("");
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const selectedCompany = useMemo(() => companies.find((c) => c.id === companyId), [companies, companyId]);
   const defaultRate = Number(selectedCompany?.default_hourly_rate ?? 0);
@@ -117,6 +118,34 @@ export default function DebtSettlementPage() {
     }
   };
 
+  const handleDeleteSettlement = async (settlementId: string, amountLabel: string) => {
+    if (
+      !confirm(
+        `Deze verrekening (${amountLabel}) verwijderen?\n\nDe bijbehorende uren worden weer vrij voor facturatie en het bedrag wordt teruggezet op de openstaande schuld bij de klant.`,
+      )
+    ) {
+      return;
+    }
+    setDeletingId(settlementId);
+    try {
+      await api.deleteDebtSettlement(settlementId);
+      toast({
+        title: "Verrekening verwijderd",
+        description: "Uren zijn weer beschikbaar; schuld is bijgewerkt.",
+      });
+      await loadLists();
+      if (companyId) await loadEntries();
+    } catch (e: unknown) {
+      toast({
+        title: "Verwijderen mislukt",
+        description: e instanceof Error ? e.message : String(e),
+        variant: "destructive",
+      });
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-2">
@@ -125,7 +154,7 @@ export default function DebtSettlementPage() {
       </div>
       <p className="text-sm text-muted-foreground max-w-2xl">
         Verreken openstaande schuld aan een klant met niet-gefactureerde uren. Die uren zijn daarna verbruikt en komen niet meer op een normale factuur. Stel de schuld in bij{" "}
-        <span className="text-foreground font-medium">Bedrijven</span>.
+        <span className="text-foreground font-medium">Bedrijven</span>. Je kunt een verrekening in de historiek weer verwijderen; de uren komen dan vrij en de schuld wordt teruggezet.
       </p>
 
       {loading ? (
@@ -244,7 +273,7 @@ export default function DebtSettlementPage() {
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Historiek</CardTitle>
-              <CardDescription>Recente schuldverrekeningen</CardDescription>
+              <CardDescription>Verwijder een regel om de verrekening ongedaan te maken en uren weer factureerbaar te maken.</CardDescription>
             </CardHeader>
             <CardContent>
               {history.length === 0 ? (
@@ -257,6 +286,7 @@ export default function DebtSettlementPage() {
                         <TableHead>Datum</TableHead>
                         <TableHead>Klant</TableHead>
                         <TableHead className="text-right">Bedrag</TableHead>
+                        <TableHead className="w-[100px] text-right">Actie</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -265,6 +295,23 @@ export default function DebtSettlementPage() {
                           <TableCell>{new Date(h.created_at).toLocaleString("nl-NL")}</TableCell>
                           <TableCell>{h.company_name ?? "—"}</TableCell>
                           <TableCell className="text-right font-medium">{money(Number(h.total_amount))}</TableCell>
+                          <TableCell className="text-right">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                              title="Verrekening verwijderen"
+                              disabled={deletingId === h.id}
+                              onClick={() => handleDeleteSettlement(h.id, money(Number(h.total_amount)))}
+                            >
+                              {deletingId === h.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Trash2 className="h-4 w-4" />
+                              )}
+                            </Button>
+                          </TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
