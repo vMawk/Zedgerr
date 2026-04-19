@@ -21,7 +21,11 @@ export type PortalCompany = { id: string; name: string };
 
 export type PortalDashboard = {
   totalHours: number;
-  timeEntries: { id: string; date: string; hours: number; description: string | null }[];
+  /** Openstaand bedrag dat de leverancier aan uw organisatie verschuldigd is (€). */
+  debtToClient: number;
+  /** Chronologische lijst schuldverrekeningen (recent eerst). */
+  debtSettlements: { id: string; totalAmount: number; notes: string | null; createdAt: string }[];
+  timeEntries: { id: string; date: string; hours: number; description: string | null; settledAgainstDebt?: boolean }[];
   invoices: {
     id: string;
     invoice_number: string;
