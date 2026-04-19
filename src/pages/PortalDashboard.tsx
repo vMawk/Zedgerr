@@ -71,8 +71,8 @@ function invoiceStatusLabel(status: string): string {
   return m[status] ?? status;
 }
 
-const hoursChartConfig = { hours: { label: "Uren", color: "hsl(var(--chart-1))" } } satisfies ChartConfig;
-const settlementChartConfig = { amount: { label: "Verrekend (€)", color: "hsl(var(--chart-3))" } } satisfies ChartConfig;
+const hoursChartConfig = { hours: { label: "Uren", color: "#3b82f6" } } satisfies ChartConfig;
+const settlementChartConfig = { amount: { label: "Verrekend (€)", color: "#8b5cf6" } } satisfies ChartConfig;
 
 type TimeRow = PortalDashboard["timeEntries"][number];
 type SettlementRow = PortalDashboard["debtSettlements"][number];
