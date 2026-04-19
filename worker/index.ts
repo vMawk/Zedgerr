@@ -222,6 +222,37 @@ api.get("/api/portal/me", async (c) => {
   return c.json(row);
 });
 
+api.patch("/api/portal/password", async (c) => {
+  const companyId = c.get("portalCompanyId")!;
+  let body: { current_password?: string; new_password?: string };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Ongeldige aanvraag" }, 400);
+  }
+  const current = body.current_password ?? "";
+  const newPass = body.new_password ?? "";
+  if (!current || !newPass) {
+    return c.json({ error: "Huidig en nieuw wachtwoord zijn verplicht" }, 400);
+  }
+  if (newPass.length < 6) {
+    return c.json({ error: "Nieuw wachtwoord moet minimaal 6 tekens zijn" }, 400);
+  }
+
+  const row = await c.env.DB
+    .prepare("SELECT password_hash FROM company_portal_users WHERE company_id = ?")
+    .bind(companyId)
+    .first<{ password_hash: string }>();
+  if (!row) return c.json({ error: "Portaalaccount niet gevonden" }, 404);
+  if (!(await verifyPassword(current, row.password_hash))) {
+    return c.json({ error: "Huidig wachtwoord is onjuist" }, 400);
+  }
+
+  const hash = await hashPassword(newPass);
+  await c.env.DB.prepare("UPDATE company_portal_users SET password_hash = ? WHERE company_id = ?").bind(hash, companyId).run();
+  return c.json({ ok: true });
+});
+
 api.get("/api/portal/dashboard", async (c) => {
   const companyId = c.get("portalCompanyId")!;
   const debtCompany = await c.env.DB
@@ -249,7 +280,7 @@ api.get("/api/portal/dashboard", async (c) => {
        FROM time_entries
        WHERE company_id = ?
        ORDER BY date DESC, created_at DESC
-       LIMIT 500`,
+       LIMIT 2000`,
     )
     .bind(companyId)
     .all<{
@@ -259,6 +290,37 @@ api.get("/api/portal/dashboard", async (c) => {
       description: string | null;
       debt_settlement_id: string | null;
     }>();
+
+  const teForSettlements = await c.env.DB
+    .prepare(
+      `SELECT id, date, hours, description, debt_settlement_id
+       FROM time_entries
+       WHERE company_id = ? AND debt_settlement_id IS NOT NULL
+       ORDER BY date ASC, created_at ASC`,
+    )
+    .bind(companyId)
+    .all<{
+      id: string;
+      date: string;
+      hours: number;
+      description: string | null;
+      debt_settlement_id: string;
+    }>();
+
+  const linesBySettlement = new Map<
+    string,
+    { id: string; date: string; hours: number; description: string | null }[]
+  >();
+  for (const row of teForSettlements.results ?? []) {
+    const sid = row.debt_settlement_id;
+    if (!linesBySettlement.has(sid)) linesBySettlement.set(sid, []);
+    linesBySettlement.get(sid)!.push({
+      id: row.id,
+      date: row.date,
+      hours: Number(row.hours),
+      description: row.description,
+    });
+  }
 
   const inv = await c.env.DB
     .prepare(
@@ -286,12 +348,18 @@ api.get("/api/portal/dashboard", async (c) => {
   return c.json({
     totalHours: Number(hoursRow?.h ?? 0),
     debtToClient: Math.max(0, Number(debtCompany?.d ?? 0)),
-    debtSettlements: (debtSettlements.results ?? []).map((s) => ({
-      id: s.id,
-      totalAmount: Number(s.total_amount),
-      notes: s.notes,
-      createdAt: s.created_at,
-    })),
+    debtSettlements: (debtSettlements.results ?? []).map((s) => {
+      const lines = linesBySettlement.get(s.id) ?? [];
+      const totalHoursInSettlement = lines.reduce((sum, l) => sum + l.hours, 0);
+      return {
+        id: s.id,
+        totalAmount: Number(s.total_amount),
+        notes: s.notes,
+        createdAt: s.created_at,
+        totalHours: Number(totalHoursInSettlement.toFixed(2)),
+        lines,
+      };
+    }),
     timeEntries: (te.results ?? []).map((row) => ({
       id: row.id,
       date: row.date,

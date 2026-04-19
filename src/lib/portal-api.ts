@@ -23,8 +23,15 @@ export type PortalDashboard = {
   totalHours: number;
   /** Openstaand bedrag dat de leverancier aan uw organisatie verschuldigd is (€). */
   debtToClient: number;
-  /** Chronologische lijst schuldverrekeningen (recent eerst). */
-  debtSettlements: { id: string; totalAmount: number; notes: string | null; createdAt: string }[];
+  /** Chronologische lijst schuldverrekeningen (recent eerst), inclusief uren en diensten per verrekening. */
+  debtSettlements: {
+    id: string;
+    totalAmount: number;
+    notes: string | null;
+    createdAt: string;
+    totalHours: number;
+    lines: { id: string; date: string; hours: number; description: string | null }[];
+  }[];
   timeEntries: { id: string; date: string; hours: number; description: string | null; settledAgainstDebt?: boolean }[];
   invoices: {
     id: string;
@@ -71,6 +78,30 @@ export async function portalFetchDashboard(): Promise<PortalDashboard> {
   }
   if (!r.ok) throw new Error((await r.text()) || "Fout bij laden");
   return r.json() as Promise<PortalDashboard>;
+}
+
+export async function portalChangePassword(currentPassword: string, newPassword: string): Promise<void> {
+  const t = getPortalToken();
+  if (!t) throw new Error("Niet ingelogd");
+  const r = await fetch(portalApiUrl("/portal/password"), {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${t}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+  });
+  if (r.status === 401) {
+    setPortalToken(null);
+    throw new Error("Sessie verlopen. Log opnieuw in.");
+  }
+  if (!r.ok) {
+    let msg = await r.text();
+    try {
+      const j = JSON.parse(msg) as { error?: string };
+      if (j.error) msg = j.error;
+    } catch {
+      /* use raw */
+    }
+    throw new Error(msg || "Wachtwoord wijzigen mislukt");
+  }
 }
 
 export async function portalFetchMe(): Promise<{ id: string; name: string; portal_email: string }> {
