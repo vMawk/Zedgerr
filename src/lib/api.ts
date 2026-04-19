@@ -1,4 +1,15 @@
-import type { BusinessSettings, Company, DailyNote, Invoice, InvoiceLine, Quote, QuoteLine, Service, TimeEntry } from "@/lib/db-types";
+import type {
+  BusinessSettings,
+  Company,
+  DailyNote,
+  DebtSettlement,
+  Invoice,
+  InvoiceLine,
+  Quote,
+  QuoteLine,
+  Service,
+  TimeEntry,
+} from "@/lib/db-types";
 
 /**
  * Worker-API (D1 + auth). Leeg = zelfde origin (`npm run dev` → Vite proxy naar Wrangler).
@@ -44,7 +55,17 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
     setStoredToken(null);
     throw new Error("Sessie verlopen of niet ingelogd. Log opnieuw in.");
   }
-  if (!r.ok) throw new Error((await r.text()) || r.statusText);
+  if (!r.ok) {
+    const text = await r.text();
+    let msg = text || r.statusText;
+    try {
+      const j = JSON.parse(text) as { error?: string };
+      if (j?.error) msg = j.error;
+    } catch {
+      /* plain text */
+    }
+    throw new Error(msg);
+  }
   if (r.status === 204) return undefined as T;
   const text = await r.text();
   return (text ? JSON.parse(text) : undefined) as T;
@@ -81,6 +102,15 @@ export const api = {
   deleteTimeEntry: (id: string) => req<void>("DELETE", `/time-entries/${id}`),
   markTimeEntriesInvoiced: (body: { ids: string[]; invoice_id: string }) =>
     req<{ ok: boolean }>("POST", "/time-entries/mark-invoiced", body),
+
+  getDebtSettlements: (q?: { company_id?: string }) => {
+    const p = new URLSearchParams();
+    if (q?.company_id) p.set("company_id", q.company_id);
+    const qs = p.toString();
+    return req<DebtSettlement[]>("GET", `/debt-settlements${qs ? `?${qs}` : ""}`);
+  },
+  createDebtSettlement: (body: { company_id: string; time_entry_ids: string[]; notes?: string | null }) =>
+    req<DebtSettlement>("POST", "/debt-settlements", body),
 
   getReportTimeEntries: (from: string, to: string, companyId: string) => {
     const p = new URLSearchParams({ from, to, company_id: companyId });

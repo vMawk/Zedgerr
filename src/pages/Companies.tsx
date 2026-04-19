@@ -25,7 +25,7 @@ function generateClientPassword(): string {
 const emptyForm: Partial<Company> = {
   name: "", contact_person: "", email: "", phone: "",
   street: "", postal_code: "", city: "", country: "Nederland",
-  kvk_number: "", btw_number: "", default_hourly_rate: undefined, advance_balance: 0, notes: "",
+  kvk_number: "", btw_number: "", default_hourly_rate: undefined, advance_balance: 0, debt_to_client: 0, notes: "",
 };
 
 export default function Companies() {
@@ -231,6 +231,19 @@ export default function Companies() {
                 />
               </div>
               <div className="grid gap-2">
+                <Label>Openstaande schuld aan klant (€)</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={form.debt_to_client ?? 0}
+                  onChange={(e) => updateField("debt_to_client", e.target.value ? Math.max(0, parseFloat(e.target.value)) : 0)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Bedrag dat jij deze klant nog verschuldigd bent. Verlaag je dit via Schuldverrekening door uren te verrekenen.
+                </p>
+              </div>
+              <div className="grid gap-2">
                 <Label>Notities</Label>
                 <Textarea value={form.notes || ""} onChange={(e) => updateField("notes", e.target.value)} />
               </div>
@@ -327,6 +340,11 @@ export default function Companies() {
                 <p className="font-medium text-foreground">
                   Krediet: €{Number(company.advance_balance ?? 0).toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </p>
+                {Number(company.debt_to_client ?? 0) > 0 && (
+                  <p className="font-medium text-amber-700 dark:text-amber-400">
+                    Schuld aan klant: €{Number(company.debt_to_client ?? 0).toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </p>
+                )}
               </CardContent>
             </Card>
           ))}

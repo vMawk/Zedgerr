@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { NavLink } from "@/components/NavLink";
 import type { Company, Invoice, TimeEntry } from "@/lib/db-types";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ChartContainer, ChartLegend, ChartLegendContent, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart";
 import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, XAxis, YAxis } from "recharts";
 
@@ -70,6 +71,7 @@ export default function Dashboard() {
   const [needsMonthInvoice, setNeedsMonthInvoice] = useState(false);
   const [toSendCount, setToSendCount] = useState(0);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [customerTableSort, setCustomerTableSort] = useState<"revenue" | "hours">("revenue");
 
   useEffect(() => {
     if (!user) return;
@@ -149,18 +151,34 @@ export default function Dashboard() {
     return [...grouped.entries()].map(([status, count]) => ({ status, count, fill: STATUS_COLORS[status] ?? "#94a3b8" }));
   }, [filteredInvoices]);
 
-  const topCustomers = useMemo(() => {
-    const grouped = new Map<string, { customer: string; revenue: number }>();
+  const customersHoursRevenue = useMemo(() => {
+    const grouped = new Map<string, { customer: string; hours: number; revenue: number }>();
     for (const row of reportRows) {
       const customer = row.company_name ?? "Onbekend";
-      if (!grouped.has(customer)) grouped.set(customer, { customer, revenue: 0 });
+      if (!grouped.has(customer)) grouped.set(customer, { customer, hours: 0, revenue: 0 });
       const agg = grouped.get(customer)!;
       const hours = Number(row.hours);
       const rate = Number(row.hourly_rate ?? row.default_hourly_rate ?? 0);
+      agg.hours += hours;
       agg.revenue += hours * rate;
     }
-    return [...grouped.values()].sort((a, b) => b.revenue - a.revenue).slice(0, 5).map((r) => ({ ...r, revenue: Number(r.revenue.toFixed(2)) }));
+    return [...grouped.values()].map((r) => ({
+      ...r,
+      hours: Number(r.hours.toFixed(1)),
+      revenue: Number(r.revenue.toFixed(2)),
+    }));
   }, [reportRows]);
+
+  const topCustomers = useMemo(
+    () => [...customersHoursRevenue].sort((a, b) => b.revenue - a.revenue).slice(0, 5),
+    [customersHoursRevenue],
+  );
+
+  const customersTableSorted = useMemo(() => {
+    const arr = [...customersHoursRevenue];
+    arr.sort((a, b) => (customerTableSort === "revenue" ? b.revenue - a.revenue : b.hours - a.hours));
+    return arr;
+  }, [customersHoursRevenue, customerTableSort]);
 
   const kpis = useMemo(() => {
     const openAmount = filteredInvoices.filter((inv) => inv.status === "concept" || inv.status === "verzonden").reduce((sum, inv) => sum + Math.max(0, Number(inv.total) - Number(inv.advance_payment ?? 0)), 0);
@@ -324,6 +342,61 @@ export default function Dashboard() {
               </CardContent>
             </Card>
           </div>
+
+          <Card>
+            <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <CardTitle className="text-base">Uren en omzet per klant</CardTitle>
+                <p className="text-sm text-muted-foreground font-normal mt-1">
+                  Zelfde periode en filters als hierboven. Omzet = uren × tarief (regeltarief of standaardtarief klant).
+                </p>
+              </div>
+              <div className="flex gap-2 shrink-0">
+                <Button
+                  type="button"
+                  variant={customerTableSort === "revenue" ? "secondary" : "outline"}
+                  size="sm"
+                  onClick={() => setCustomerTableSort("revenue")}
+                >
+                  Sorteer op omzet
+                </Button>
+                <Button
+                  type="button"
+                  variant={customerTableSort === "hours" ? "secondary" : "outline"}
+                  size="sm"
+                  onClick={() => setCustomerTableSort("hours")}
+                >
+                  Sorteer op uren
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {customersTableSorted.length === 0 ? (
+                <p className="text-sm text-muted-foreground">Geen uren in deze periode voor de gekozen filters.</p>
+              ) : (
+                <div className="rounded-md border overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Klant</TableHead>
+                        <TableHead className="text-right">Uren</TableHead>
+                        <TableHead className="text-right">Omzet</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {customersTableSorted.map((row) => (
+                        <TableRow key={row.customer}>
+                          <TableCell className="font-medium">{row.customer}</TableCell>
+                          <TableCell className="text-right">{row.hours.toLocaleString("nl-NL")}</TableCell>
+                          <TableCell className="text-right">{numberMoney(row.revenue)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
 
           <Card>
             <CardHeader><CardTitle className="text-base">Samenvatting voor {periodLabels[period]}</CardTitle></CardHeader>
