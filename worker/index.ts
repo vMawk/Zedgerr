@@ -805,6 +805,35 @@ api.post("/api/debt-settlements", async (c) => {
   return c.json(row);
 });
 
+api.delete("/api/debt-settlements/:id", async (c) => {
+  const userId = c.get("userId")!;
+  const { id } = c.req.param();
+  const settlement = await c.env.DB
+    .prepare("SELECT id, company_id, total_amount FROM debt_settlements WHERE id = ? AND user_id = ?")
+    .bind(id, userId)
+    .first<{ id: string; company_id: string; total_amount: number }>();
+  if (!settlement) return c.json({ error: "Verrekening niet gevonden" }, 404);
+
+  const now = new Date().toISOString();
+  const addBack = Math.max(0, Number(settlement.total_amount));
+
+  await c.env.DB.batch([
+    c.env.DB
+      .prepare(
+        "UPDATE time_entries SET debt_settlement_id = NULL, updated_at = ? WHERE debt_settlement_id = ? AND user_id = ?",
+      )
+      .bind(now, id, userId),
+    c.env.DB
+      .prepare(
+        "UPDATE companies SET debt_to_client = COALESCE(debt_to_client, 0) + ?, updated_at = ? WHERE id = ? AND user_id = ?",
+      )
+      .bind(addBack, now, settlement.company_id, userId),
+    c.env.DB.prepare("DELETE FROM debt_settlements WHERE id = ? AND user_id = ?").bind(id, userId),
+  ]);
+
+  return c.body(null, 204);
+});
+
 // --- Reports ---
 api.get("/api/reports/time-entries", async (c) => {
   const userId = c.get("userId")!;

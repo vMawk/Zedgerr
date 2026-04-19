@@ -111,6 +111,7 @@ export const api = {
   },
   createDebtSettlement: (body: { company_id: string; time_entry_ids: string[]; notes?: string | null }) =>
     req<DebtSettlement>("POST", "/debt-settlements", body),
+  deleteDebtSettlement: (id: string) => req<void>("DELETE", `/debt-settlements/${id}`),
 
   getReportTimeEntries: (from: string, to: string, companyId: string) => {
     const p = new URLSearchParams({ from, to, company_id: companyId });
