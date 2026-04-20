@@ -174,6 +174,37 @@ api.get("/api/auth/me", async (c) => {
   return c.json(row);
 });
 
+api.patch("/api/auth/password", async (c) => {
+  const userId = c.get("userId")!;
+  let body: { current_password?: string; new_password?: string };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON" }, 400);
+  }
+  const currentPassword = body.current_password ?? "";
+  const newPassword = body.new_password ?? "";
+  if (!currentPassword || !newPassword) {
+    return c.json({ error: "Huidig en nieuw wachtwoord zijn verplicht" }, 400);
+  }
+  if (newPassword.length < 6) {
+    return c.json({ error: "Nieuw wachtwoord moet minimaal 6 tekens zijn" }, 400);
+  }
+
+  const user = await c.env.DB
+    .prepare("SELECT id, password_hash FROM users WHERE id = ?")
+    .bind(userId)
+    .first<{ id: string; password_hash: string }>();
+  if (!user) return c.json({ error: "User not found" }, 404);
+  if (!(await verifyPassword(currentPassword, user.password_hash))) {
+    return c.json({ error: "Huidig wachtwoord is onjuist" }, 400);
+  }
+
+  const nextHash = await hashPassword(newPassword);
+  await c.env.DB.prepare("UPDATE users SET password_hash = ? WHERE id = ?").bind(nextHash, userId).run();
+  return c.json({ ok: true });
+});
+
 // --- Klantenportaal (ingelogd als bedrijf: uren + facturen) ---
 api.post("/api/portal/login", async (c) => {
   const secret = c.env.JWT_SECRET;
