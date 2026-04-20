@@ -626,9 +626,10 @@ api.post("/api/ai/improve-grammar", async (c) => {
 
   const prompt = [
     "Verbeter de grammatica en spelling van deze Nederlandse tekst.",
-    "Behoud betekenis, details en toon.",
-    "Herschrijf niet onnodig; alleen verbeteren.",
-    "Geef uitsluitend de verbeterde tekst terug, zonder uitleg.",
+    "Zet de tekst mooi en professioneel neer voor urenregistratie van uitgevoerde werkzaamheden.",
+    "Behoud de exacte inhoud en details van wat er is gedaan.",
+    "Maak de formulering helder en zakelijk, zonder nieuwe informatie toe te voegen.",
+    "Geef uitsluitend de verbeterde tekst terug, zonder uitleg of opsommingstekens.",
     "",
     text,
   ].join("\n");
@@ -638,7 +639,7 @@ api.post("/api/ai/improve-grammar", async (c) => {
       {
         role: "system",
         content:
-          "Je bent een redacteur voor Nederlandse werklogboeken. Verbeter enkel grammatica en spelling, behoud zakelijke toon en inhoud.",
+          "Je bent een redacteur voor Nederlandse urenregistraties. Verbeter grammatica en formulering, houd de tekst professioneel en zakelijk, en wijzig de inhoud niet.",
       },
       { role: "user", content: prompt },
     ],
