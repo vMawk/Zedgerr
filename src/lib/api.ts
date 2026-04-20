@@ -118,6 +118,7 @@ export const api = {
   },
 
   getDailyNote: (date: string) => req<DailyNote>("GET", `/notes/daily?date=${encodeURIComponent(date)}`),
+  getDailyNoteDates: () => req<string[]>("GET", "/notes/dates"),
   putDailyNote: (date: string, content: string) => req<DailyNote>("PUT", "/notes/daily", { date, content }),
 
   getBusinessSettings: () => req<BusinessSettings | null>("GET", "/business-settings"),
