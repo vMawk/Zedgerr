@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -38,13 +38,31 @@ export default function Notes() {
     setDirty(false);
   };
 
-  const loadDatesWithNotes = async () => {
-    const dates = await api.getDailyNoteDates();
-    setDatesWithNotes(dates);
-  };
+  const loadDatesWithNotes = useCallback(async () => {
+    try {
+      const dates = await api.getDailyNoteDates();
+      setDatesWithNotes(dates);
+    } catch {
+      /* Server zonder /notes/dates (oude deploy): kalender blijft uit lokale state / optimistic updates */
+    }
+  }, []);
+
+  /** Houd kalender bij zonder afhankelijk te zijn van GET /notes/dates (werkt ook als die route nog niet live is). */
+  const syncDateMarker = useCallback((d: string, text: string) => {
+    const has = text.trim().length > 0;
+    setDatesWithNotes((prev) => {
+      const next = new Set(prev);
+      if (has) next.add(d);
+      else next.delete(d);
+      return [...next].sort();
+    });
+  }, []);
 
   useEffect(() => {
-    loadDatesWithNotes().catch(() => setDatesWithNotes([]));
+    void loadDatesWithNotes();
+  }, [loadDatesWithNotes]);
+
+  useEffect(() => {
     loadNote(date).catch((e: unknown) =>
       toast({ title: "Fout", description: e instanceof Error ? e.message : String(e), variant: "destructive" }),
     );
@@ -56,7 +74,8 @@ export default function Notes() {
     try {
       await api.putDailyNote(d, text);
       setDirty(false);
-      await loadDatesWithNotes();
+      syncDateMarker(d, text);
+      void loadDatesWithNotes();
     } catch (e: unknown) {
       toast({ title: "Opslaan mislukt", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
     } finally {
@@ -132,7 +151,10 @@ export default function Notes() {
               }}
               modifiers={{ hasNote: datesWithNotes.map(isoToLocalDate) }}
               modifiersClassNames={{
-                hasNote: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 font-semibold rounded-md",
+                hasNote: "font-semibold text-emerald-800 dark:text-emerald-200",
+              }}
+              modifiersStyles={{
+                hasNote: { boxShadow: "inset 0 0 0 2px rgba(16, 185, 129, 0.55)" },
               }}
             />
             <p className="text-xs text-muted-foreground">Dagen met notities zijn groen gemarkeerd.</p>
