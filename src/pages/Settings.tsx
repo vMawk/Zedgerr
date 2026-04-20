@@ -26,6 +26,8 @@ export default function Settings() {
   const [svcEditId, setSvcEditId] = useState<string | null>(null);
   const [svcName, setSvcName] = useState("");
   const [svcAmount, setSvcAmount] = useState("");
+  const [passwordForm, setPasswordForm] = useState({ current: "", next: "", confirm: "" });
+  const [changingPassword, setChangingPassword] = useState(false);
 
   useEffect(() => {
     if (!user) return;
@@ -117,6 +119,34 @@ export default function Settings() {
       toast({ title: "Dienst verwijderd" });
     } catch (e: unknown) {
       toast({ title: "Fout", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
+    }
+  };
+
+  const handleChangePassword = async () => {
+    const current = passwordForm.current;
+    const next = passwordForm.next;
+    const confirm = passwordForm.confirm;
+    if (!current || !next || !confirm) {
+      toast({ title: "Wachtwoord", description: "Vul alle velden in.", variant: "destructive" });
+      return;
+    }
+    if (next.length < 6) {
+      toast({ title: "Wachtwoord", description: "Nieuw wachtwoord moet minimaal 6 tekens zijn.", variant: "destructive" });
+      return;
+    }
+    if (next !== confirm) {
+      toast({ title: "Wachtwoord", description: "Nieuw wachtwoord en bevestiging komen niet overeen.", variant: "destructive" });
+      return;
+    }
+    setChangingPassword(true);
+    try {
+      await api.changePassword({ current_password: current, new_password: next });
+      setPasswordForm({ current: "", next: "", confirm: "" });
+      toast({ title: "Wachtwoord gewijzigd" });
+    } catch (error: unknown) {
+      toast({ title: "Wachtwoord wijzigen mislukt", description: error instanceof Error ? error.message : String(error), variant: "destructive" });
+    } finally {
+      setChangingPassword(false);
     }
   };
 
@@ -281,6 +311,45 @@ export default function Settings() {
               </div>
             </DialogContent>
           </Dialog>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Wachtwoord wijzigen</CardTitle>
+          <CardDescription>Wijzig je inlogwachtwoord voor deze account</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-2">
+            <Label>Huidig wachtwoord</Label>
+            <Input
+              type="password"
+              autoComplete="current-password"
+              value={passwordForm.current}
+              onChange={(e) => setPasswordForm((p) => ({ ...p, current: e.target.value }))}
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label>Nieuw wachtwoord</Label>
+            <Input
+              type="password"
+              autoComplete="new-password"
+              value={passwordForm.next}
+              onChange={(e) => setPasswordForm((p) => ({ ...p, next: e.target.value }))}
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label>Bevestig nieuw wachtwoord</Label>
+            <Input
+              type="password"
+              autoComplete="new-password"
+              value={passwordForm.confirm}
+              onChange={(e) => setPasswordForm((p) => ({ ...p, confirm: e.target.value }))}
+            />
+          </div>
+          <Button onClick={handleChangePassword} disabled={changingPassword}>
+            {changingPassword ? "Bezig..." : "Wachtwoord opslaan"}
+          </Button>
         </CardContent>
       </Card>
     </div>

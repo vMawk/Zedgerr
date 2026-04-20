@@ -79,6 +79,8 @@ export type DashboardStats = {
 
 export const api = {
   getDashboardStats: () => req<DashboardStats>("GET", "/dashboard/stats"),
+  changePassword: (body: { current_password: string; new_password: string }) =>
+    req<{ ok: boolean }>("PATCH", "/auth/password", body),
 
   getCompanies: () => req<Company[]>("GET", "/companies"),
   createCompany: (body: Partial<Company> & { name: string }) => req<Company>("POST", "/companies", body),
