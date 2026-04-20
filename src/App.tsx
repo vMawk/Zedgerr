@@ -11,7 +11,6 @@ import TimeEntries from "./pages/TimeEntries";
 import Invoices from "./pages/Invoices";
 import Quotes from "./pages/Quotes";
 import Reports from "./pages/Reports";
-import DebtSettlement from "./pages/DebtSettlement";
 import Settings from "./pages/Settings";
 import Notes from "./pages/Notes";
 import NotFound from "./pages/NotFound";
@@ -86,7 +85,6 @@ const App = () => (
               <Route path="/facturen" element={<Invoices />} />
               <Route path="/offertes" element={<Quotes />} />
               <Route path="/overzichten" element={<Reports />} />
-              <Route path="/schuld" element={<DebtSettlement />} />
               <Route path="/notities" element={<Notes />} />
               <Route path="/instellingen" element={<Settings />} />
             </Route>

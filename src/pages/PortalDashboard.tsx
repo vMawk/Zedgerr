@@ -15,13 +15,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { useToast } from "@/hooks/use-toast";
-import { LogOut, Clock, FileText, Download, Scale, Settings, Loader2 } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { LogOut, Clock, FileText, Download, Settings, Loader2 } from "lucide-react";
 import { generateInvoicePDF } from "@/lib/pdf";
-
-function money(n: number): string {
-  return `€${n.toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
 
 function monthLabel(key: string): string {
   const [y, m] = key.split("-");
@@ -40,7 +35,6 @@ function invoiceStatusLabel(status: string): string {
 }
 
 type TimeRow = PortalDashboard["timeEntries"][number];
-type SettlementRow = PortalDashboard["debtSettlements"][number];
 
 function PortalSettingsPanel() {
   const { toast } = useToast();
@@ -189,47 +183,6 @@ function SubtleHoursTrend({ entries }: { entries: TimeRow[] }) {
   );
 }
 
-function SubtleSettlementTrend({ settlements }: { settlements: SettlementRow[] }) {
-  const data = useMemo(() => {
-    const byMonth = new Map<string, number>();
-    for (const s of settlements) {
-      const key = s.createdAt.slice(0, 7);
-      byMonth.set(key, (byMonth.get(key) ?? 0) + s.totalAmount);
-    }
-    return [...byMonth.entries()]
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([month, amount]) => ({ key: month, label: monthLabel(month), value: amount }));
-  }, [settlements]);
-
-  if (data.length === 0) return null;
-  const max = Math.max(...data.map((d) => d.value), 0.01);
-
-  return (
-    <div className="rounded-lg border border-border/50 bg-muted/20 px-3 py-3">
-      <p className="text-xs text-muted-foreground mb-3">Verrekende bedragen per maand</p>
-      <div className="flex h-11 items-end gap-px sm:gap-0.5">
-        {data.map((d) => (
-          <div
-            key={d.key}
-            className="flex min-h-0 min-w-0 flex-1 flex-col items-stretch justify-end gap-1.5"
-            title={`${d.label}: ${money(d.value)}`}
-          >
-            <div className="flex h-10 w-full flex-col justify-end">
-              <div
-                className="w-full rounded-[2px] bg-foreground/10 transition-[height]"
-                style={{ height: `${Math.max(8, (d.value / max) * 100)}%` }}
-              />
-            </div>
-            <span className="block truncate text-center text-[10px] leading-none text-muted-foreground sm:text-[11px]">
-              {d.label.replace(" ", "\u00a0")}
-            </span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function PortalHoursBlock({ entries }: { entries: TimeRow[] }) {
   const sumHours = useMemo(() => entries.reduce((s, r) => s + Number(r.hours), 0), [entries]);
 
@@ -252,7 +205,6 @@ function PortalHoursBlock({ entries }: { entries: TimeRow[] }) {
                 <TableHead>Datum</TableHead>
                 <TableHead className="text-right">Uren</TableHead>
                 <TableHead>Omschrijving / dienst</TableHead>
-                <TableHead className="w-[150px]">Status</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -263,15 +215,6 @@ function PortalHoursBlock({ entries }: { entries: TimeRow[] }) {
                     {Number(row.hours).toLocaleString("nl-NL", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
                   </TableCell>
                   <TableCell className="text-muted-foreground max-w-[min(480px,55vw)]">{row.description ?? "—"}</TableCell>
-                  <TableCell>
-                    {row.settledAgainstDebt ? (
-                      <Badge variant="secondary" className="font-normal">
-                        Verrekend met schuld
-                      </Badge>
-                    ) : (
-                      <span className="text-muted-foreground text-sm">—</span>
-                    )}
-                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -282,95 +225,6 @@ function PortalHoursBlock({ entries }: { entries: TimeRow[] }) {
   );
 }
 
-function PortalSettlementsBlock({ settlements }: { settlements: SettlementRow[] }) {
-  const totalVerrekend = useMemo(() => settlements.reduce((s, x) => s + x.totalAmount, 0), [settlements]);
-  const totalUrenVerrekend = useMemo(
-    () =>
-      settlements.reduce((s, x) => s + (x.totalHours ?? x.lines?.reduce((a, l) => a + l.hours, 0) ?? 0), 0),
-    [settlements],
-  );
-
-  return (
-    <div className="space-y-4">
-      <p className="text-sm text-muted-foreground">
-        Totaal verrekend: <span className="font-medium text-foreground">{money(totalVerrekend)}</span>
-        {" · "}
-        <span className="font-medium text-foreground">{totalUrenVerrekend.toLocaleString("nl-NL", { maximumFractionDigits: 2 })}</span> uur
-        {" · "}
-        {settlements.length} verrekening{settlements.length === 1 ? "" : "en"}
-      </p>
-
-      <SubtleSettlementTrend settlements={settlements} />
-
-      {settlements.length === 0 ? (
-        <p className="text-sm text-muted-foreground py-1">Nog geen schuldverrekeningen.</p>
-      ) : (
-        <Accordion type="multiple" className="space-y-2 w-full">
-          {settlements.map((s) => (
-            <AccordionItem key={s.id} value={s.id} className="border rounded-lg px-3 bg-muted/20">
-              <AccordionTrigger className="text-sm hover:no-underline py-3 [&[data-state=open]>svg]:rotate-180">
-                <div className="flex flex-1 flex-col gap-1 text-left sm:flex-row sm:items-center sm:justify-between sm:gap-4 pr-2">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium">{new Date(s.createdAt).toLocaleString("nl-NL")}</span>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
-                    <span className="tabular-nums font-semibold text-foreground">{money(s.totalAmount)}</span>
-                    <span className="text-muted-foreground">
-                      {(s.totalHours ?? s.lines?.reduce((a, l) => a + l.hours, 0) ?? 0).toLocaleString("nl-NL", {
-                        maximumFractionDigits: 2,
-                      })}{" "}
-                      uur
-                    </span>
-                  </div>
-                </div>
-              </AccordionTrigger>
-              <AccordionContent>
-                <div className="space-y-3 border-t pt-3">
-                  {s.notes?.trim() ? (
-                    <p className="text-sm text-muted-foreground">
-                      <span className="font-medium text-foreground">Toelichting: </span>
-                      {s.notes.trim()}
-                    </p>
-                  ) : null}
-                  <div className="rounded-md border overflow-x-auto bg-background">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Datum</TableHead>
-                          <TableHead className="text-right">Uren</TableHead>
-                          <TableHead>Uitgevoerde diensten / werk</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {(s.lines ?? []).length === 0 ? (
-                          <TableRow>
-                            <TableCell colSpan={3} className="text-muted-foreground">
-                              Geen regels gekoppeld (alleen totaal bekend).
-                            </TableCell>
-                          </TableRow>
-                        ) : (
-                          (s.lines ?? []).map((line) => (
-                            <TableRow key={line.id}>
-                              <TableCell className="whitespace-nowrap">{line.date}</TableCell>
-                              <TableCell className="text-right tabular-nums">
-                                {line.hours.toLocaleString("nl-NL", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
-                              </TableCell>
-                              <TableCell className="text-muted-foreground">{line.description ?? "—"}</TableCell>
-                            </TableRow>
-                          ))
-                        )}
-                      </TableBody>
-                    </Table>
-                  </div>
-                </div>
-              </AccordionContent>
-            </AccordionItem>
-          ))}
-        </Accordion>
-      )}
-    </div>
-  );
-}
 
 export default function PortalDashboard() {
   const { company, signOut } = usePortalAuth();
@@ -434,7 +288,7 @@ export default function PortalDashboard() {
             {loading && <p className="text-muted-foreground">Laden…</p>}
             {!loading && data && (
               <>
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                <div className="grid gap-4 sm:grid-cols-2">
                   <Card className="border-primary/15 shadow-sm">
                     <CardHeader className="flex flex-row items-center gap-2 pb-2">
                       <Clock className="h-5 w-5 text-primary" />
@@ -457,21 +311,9 @@ export default function PortalDashboard() {
                       <CardDescription className="mt-1">Openstaand en betaald</CardDescription>
                     </CardContent>
                   </Card>
-                  <Card className="border-amber-500/20 shadow-sm sm:col-span-2 lg:col-span-1 bg-gradient-to-br from-card to-amber-500/5">
-                    <CardHeader className="flex flex-row items-center gap-2 pb-2">
-                      <Scale className="h-5 w-5 text-amber-700 dark:text-amber-400" />
-                      <CardTitle className="text-lg">Openstaande schuld</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <p className="text-3xl font-semibold tabular-nums tracking-tight">{money(data.debtToClient ?? 0)}</p>
-                      <CardDescription className="mt-1">
-                        Tegoed / vooruitbetaling dat nog met uren kan worden verrekend.
-                      </CardDescription>
-                    </CardContent>
-                  </Card>
                 </div>
 
-                <Accordion type="multiple" defaultValue={["hours", "settlements", "invoices"]} className="space-y-3">
+                <Accordion type="multiple" defaultValue={["hours", "invoices"]} className="space-y-3">
                   <AccordionItem value="hours" className="border rounded-xl px-4 bg-card shadow-sm">
                     <AccordionTrigger className="text-lg font-semibold hover:no-underline py-4">
                       <span className="flex items-center gap-2">
@@ -484,21 +326,6 @@ export default function PortalDashboard() {
                         Alle uren in één tabel; bovenin een rustige verdeling per maand. Klap de sectie dicht voor minder schermruimte.
                       </CardDescription>
                       <PortalHoursBlock entries={data.timeEntries} />
-                    </AccordionContent>
-                  </AccordionItem>
-
-                  <AccordionItem value="settlements" className="border rounded-xl px-4 bg-card shadow-sm">
-                    <AccordionTrigger className="text-lg font-semibold hover:no-underline py-4">
-                      <span className="flex items-center gap-2">
-                        <Scale className="h-5 w-5 text-muted-foreground" />
-                        Schuldverrekeningen
-                      </span>
-                    </AccordionTrigger>
-                    <AccordionContent className="pb-4">
-                      <CardDescription className="mb-4 -mt-1">
-                        Bedrag, uren en uitgevoerde werkzaamheden per verrekening. Open een regel voor het volledige detail.
-                      </CardDescription>
-                      <PortalSettlementsBlock settlements={data.debtSettlements ?? []} />
                     </AccordionContent>
                   </AccordionItem>
 
