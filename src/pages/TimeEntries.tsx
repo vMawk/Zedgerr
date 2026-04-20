@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Pencil, Trash2, Clock } from "lucide-react";
+import { Plus, Pencil, Trash2, Clock, WandSparkles } from "lucide-react";
 
 export default function TimeEntries() {
   const { user } = useAuth();
@@ -21,6 +21,7 @@ export default function TimeEntries() {
   const [open, setOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [form, setForm] = useState({ company_id: "", date: new Date().toISOString().split("T")[0], hours: "", description: "", hourly_rate: "" });
+  const [improvingDescription, setImprovingDescription] = useState(false);
 
   const fetchData = async () => {
     const [entriesRes, companiesRes] = await Promise.all([
@@ -80,6 +81,28 @@ export default function TimeEntries() {
     fetchData();
   };
 
+  const handleImproveDescription = async () => {
+    const text = form.description.trim();
+    if (!text) {
+      toast({
+        title: "Geen tekst",
+        description: "Vul eerst werkzaamheden in die je wilt verbeteren.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setImprovingDescription(true);
+    try {
+      const res = await api.improveGrammar(text);
+      setForm((p) => ({ ...p, description: res.text }));
+      toast({ title: "Tekst verbeterd" });
+    } catch (error: unknown) {
+      toast({ title: "AI verbeteren mislukt", description: error instanceof Error ? error.message : String(error), variant: "destructive" });
+    } finally {
+      setImprovingDescription(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -113,7 +136,13 @@ export default function TimeEntries() {
                 </div>
               </div>
               <div className="grid gap-2">
-                <Label>Werkzaamheden</Label>
+                <div className="flex items-center justify-between gap-3">
+                  <Label>Werkzaamheden</Label>
+                  <Button type="button" variant="outline" size="sm" onClick={handleImproveDescription} disabled={improvingDescription}>
+                    <WandSparkles className="mr-2 h-4 w-4" />
+                    {improvingDescription ? "Verbeteren..." : "AI grammatica verbeteren"}
+                  </Button>
+                </div>
                 <Textarea value={form.description} onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))} />
               </div>
               <div className="grid gap-2">

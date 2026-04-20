@@ -9,6 +9,7 @@ import { seedInvoice2026IfNeeded } from "./seed-d1";
 export type Env = {
   DB: D1Database;
   JWT_SECRET: string;
+  AI: Ai;
   ASSETS?: Fetcher;
   /** Extra accounts na de eerste gebruiker: zet op "true" in wrangler.toml. Anders alleen eerste account (lege `users`). */
   ALLOW_REGISTRATION?: string;
@@ -608,6 +609,46 @@ api.delete("/api/time-entries/:id", async (c) => {
   const { id } = c.req.param();
   await c.env.DB.prepare("DELETE FROM time_entries WHERE id = ? AND user_id = ?").bind(id, userId).run();
   return c.body(null, 204);
+});
+
+// --- AI writing helper ---
+api.post("/api/ai/improve-grammar", async (c) => {
+  let body: { text?: string };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON" }, 400);
+  }
+
+  const text = String(body.text ?? "").trim();
+  if (!text) return c.json({ error: "Tekst is verplicht" }, 400);
+  if (text.length > 3000) return c.json({ error: "Tekst is te lang (max 3000 tekens)" }, 400);
+
+  const prompt = [
+    "Verbeter de grammatica en spelling van deze Nederlandse tekst.",
+    "Behoud betekenis, details en toon.",
+    "Herschrijf niet onnodig; alleen verbeteren.",
+    "Geef uitsluitend de verbeterde tekst terug, zonder uitleg.",
+    "",
+    text,
+  ].join("\n");
+
+  const result = await c.env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
+    messages: [
+      {
+        role: "system",
+        content:
+          "Je bent een redacteur voor Nederlandse werklogboeken. Verbeter enkel grammatica en spelling, behoud zakelijke toon en inhoud.",
+      },
+      { role: "user", content: prompt },
+    ],
+    max_tokens: 500,
+    temperature: 0.1,
+  });
+
+  const improved = typeof result === "object" && result && "response" in result ? String(result.response ?? "").trim() : "";
+  if (!improved) return c.json({ error: "AI gaf geen bruikbaar antwoord" }, 502);
+  return c.json({ text: improved });
 });
 
 api.post("/api/time-entries/mark-invoiced", async (c) => {
