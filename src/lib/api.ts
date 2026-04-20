@@ -101,6 +101,7 @@ export const api = {
   deleteTimeEntry: (id: string) => req<void>("DELETE", `/time-entries/${id}`),
   markTimeEntriesInvoiced: (body: { ids: string[]; invoice_id: string }) =>
     req<{ ok: boolean }>("POST", "/time-entries/mark-invoiced", body),
+  improveGrammar: (text: string) => req<{ text: string }>("POST", "/ai/improve-grammar", { text }),
 
   getReportTimeEntries: (from: string, to: string, companyId: string) => {
     const p = new URLSearchParams({ from, to, company_id: companyId });
