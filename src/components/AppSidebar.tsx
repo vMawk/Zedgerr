@@ -1,4 +1,4 @@
-import { LayoutDashboard, Building2, Clock, FileText, FileCheck, BarChart3, Settings, LogOut, MonitorSmartphone, NotebookPen, Scale } from "lucide-react";
+import { LayoutDashboard, Building2, Clock, FileText, FileCheck, BarChart3, Settings, LogOut, MonitorSmartphone, NotebookPen } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
@@ -22,7 +22,6 @@ const mainItems = [
   { title: "Facturen", url: "/facturen", icon: FileText },
   { title: "Offertes", url: "/offertes", icon: FileCheck },
   { title: "Overzichten", url: "/overzichten", icon: BarChart3 },
-  { title: "Schuldverrekening", url: "/schuld", icon: Scale },
   { title: "Notities", url: "/notities", icon: NotebookPen },
 ];
 

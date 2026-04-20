@@ -21,7 +21,7 @@ function rowInvoiced(r: Record<string, unknown>) {
 }
 
 function rowTimeEntry(r: Record<string, unknown>) {
-  return { ...rowInvoiced(r), debt_settlement_id: r.debt_settlement_id ?? null };
+  return { ...rowInvoiced(r) };
 }
 
 function toMoney(value: unknown, fallback = 0): number {
@@ -255,20 +255,6 @@ api.patch("/api/portal/password", async (c) => {
 
 api.get("/api/portal/dashboard", async (c) => {
   const companyId = c.get("portalCompanyId")!;
-  const debtCompany = await c.env.DB
-    .prepare("SELECT COALESCE(debt_to_client, 0) AS d FROM companies WHERE id = ?")
-    .bind(companyId)
-    .first<{ d: number }>();
-  const debtSettlements = await c.env.DB
-    .prepare(
-      `SELECT id, total_amount, notes, created_at
-       FROM debt_settlements
-       WHERE company_id = ?
-       ORDER BY created_at DESC
-       LIMIT 100`,
-    )
-    .bind(companyId)
-    .all<{ id: string; total_amount: number; notes: string | null; created_at: string }>();
 
   const hoursRow = await c.env.DB
     .prepare("SELECT COALESCE(SUM(hours), 0) AS h FROM time_entries WHERE company_id = ?")
@@ -276,7 +262,7 @@ api.get("/api/portal/dashboard", async (c) => {
     .first<{ h: number }>();
   const te = await c.env.DB
     .prepare(
-      `SELECT id, date, hours, description, debt_settlement_id
+      `SELECT id, date, hours, description
        FROM time_entries
        WHERE company_id = ?
        ORDER BY date DESC, created_at DESC
@@ -288,39 +274,7 @@ api.get("/api/portal/dashboard", async (c) => {
       date: string;
       hours: number;
       description: string | null;
-      debt_settlement_id: string | null;
     }>();
-
-  const teForSettlements = await c.env.DB
-    .prepare(
-      `SELECT id, date, hours, description, debt_settlement_id
-       FROM time_entries
-       WHERE company_id = ? AND debt_settlement_id IS NOT NULL
-       ORDER BY date ASC, created_at ASC`,
-    )
-    .bind(companyId)
-    .all<{
-      id: string;
-      date: string;
-      hours: number;
-      description: string | null;
-      debt_settlement_id: string;
-    }>();
-
-  const linesBySettlement = new Map<
-    string,
-    { id: string; date: string; hours: number; description: string | null }[]
-  >();
-  for (const row of teForSettlements.results ?? []) {
-    const sid = row.debt_settlement_id;
-    if (!linesBySettlement.has(sid)) linesBySettlement.set(sid, []);
-    linesBySettlement.get(sid)!.push({
-      id: row.id,
-      date: row.date,
-      hours: Number(row.hours),
-      description: row.description,
-    });
-  }
 
   const inv = await c.env.DB
     .prepare(
@@ -347,25 +301,11 @@ api.get("/api/portal/dashboard", async (c) => {
 
   return c.json({
     totalHours: Number(hoursRow?.h ?? 0),
-    debtToClient: Math.max(0, Number(debtCompany?.d ?? 0)),
-    debtSettlements: (debtSettlements.results ?? []).map((s) => {
-      const lines = linesBySettlement.get(s.id) ?? [];
-      const totalHoursInSettlement = lines.reduce((sum, l) => sum + l.hours, 0);
-      return {
-        id: s.id,
-        totalAmount: Number(s.total_amount),
-        notes: s.notes,
-        createdAt: s.created_at,
-        totalHours: Number(totalHoursInSettlement.toFixed(2)),
-        lines,
-      };
-    }),
     timeEntries: (te.results ?? []).map((row) => ({
       id: row.id,
       date: row.date,
       hours: row.hours,
       description: row.description,
-      settledAgainstDebt: Boolean(row.debt_settlement_id),
     })),
     invoices: inv.results ?? [],
   });
@@ -446,11 +386,10 @@ api.post("/api/companies", async (c) => {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
   const advanceBalance = Math.max(0, toMoney(req.advance_balance, 0));
-  const debtToClient = Math.max(0, toMoney(req.debt_to_client, 0));
   await c.env.DB
     .prepare(
-      `INSERT INTO companies (id, user_id, name, contact_person, email, phone, street, postal_code, city, country, kvk_number, btw_number, default_hourly_rate, notes, advance_balance, debt_to_client, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO companies (id, user_id, name, contact_person, email, phone, street, postal_code, city, country, kvk_number, btw_number, default_hourly_rate, notes, advance_balance, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       id,
@@ -468,7 +407,6 @@ api.post("/api/companies", async (c) => {
       req.default_hourly_rate ?? null,
       req.notes ?? null,
       advanceBalance,
-      debtToClient,
       now,
       now,
     )
@@ -483,21 +421,18 @@ api.patch("/api/companies/:id", async (c) => {
   const req = await c.req.json<Record<string, unknown>>();
   const now = new Date().toISOString();
   const existing = await c.env.DB
-    .prepare("SELECT id, advance_balance, debt_to_client FROM companies WHERE id = ? AND user_id = ?")
+    .prepare("SELECT id, advance_balance FROM companies WHERE id = ? AND user_id = ?")
     .bind(id, userId)
-    .first<{ id: string; advance_balance: number; debt_to_client: number }>();
+    .first<{ id: string; advance_balance: number }>();
   if (!existing) return c.json({ error: "Not found" }, 404);
   const advanceBalance = req.advance_balance === undefined
     ? Math.max(0, toMoney(existing.advance_balance, 0))
     : Math.max(0, toMoney(req.advance_balance, 0));
-  const debtToClient = req.debt_to_client === undefined
-    ? Math.max(0, toMoney(existing.debt_to_client, 0))
-    : Math.max(0, toMoney(req.debt_to_client, 0));
   await c.env.DB
     .prepare(
       `UPDATE companies SET
         name = ?, contact_person = ?, email = ?, phone = ?, street = ?, postal_code = ?, city = ?, country = ?,
-        kvk_number = ?, btw_number = ?, default_hourly_rate = ?, notes = ?, advance_balance = ?, debt_to_client = ?, updated_at = ?
+        kvk_number = ?, btw_number = ?, default_hourly_rate = ?, notes = ?, advance_balance = ?, updated_at = ?
        WHERE id = ? AND user_id = ?`,
     )
     .bind(
@@ -514,7 +449,6 @@ api.patch("/api/companies/:id", async (c) => {
       req.default_hourly_rate ?? null,
       req.notes ?? null,
       advanceBalance,
-      debtToClient,
       now,
       id,
       userId,
@@ -611,9 +545,6 @@ api.get("/api/time-entries", async (c) => {
     const inv = invoiced === "true" || invoiced === "1";
     sql += " AND te.invoiced = ?";
     params.push(inv ? 1 : 0);
-    if (!inv) {
-      sql += " AND te.debt_settlement_id IS NULL";
-    }
   }
   sql += " ORDER BY te.date DESC";
   const { results } = await c.env.DB.prepare(sql).bind(...params).all<Record<string, unknown>>();
@@ -687,151 +618,12 @@ api.post("/api/time-entries/mark-invoiced", async (c) => {
   const stmts = ids.map((tid) =>
     c.env.DB
       .prepare(
-        "UPDATE time_entries SET invoiced = 1, invoice_id = ?, updated_at = ? WHERE id = ? AND user_id = ? AND debt_settlement_id IS NULL",
+        "UPDATE time_entries SET invoiced = 1, invoice_id = ?, updated_at = ? WHERE id = ? AND user_id = ?",
       )
       .bind(invoice_id, now, tid, userId),
   );
   await c.env.DB.batch(stmts);
   return c.json({ ok: true });
-});
-
-// --- Debt settlements (verreken schuld met uren) ---
-api.get("/api/debt-settlements", async (c) => {
-  const userId = c.get("userId")!;
-  const companyId = c.req.query("company_id");
-  let sql = `SELECT ds.*, c.name AS company_name
-    FROM debt_settlements ds
-    JOIN companies c ON c.id = ds.company_id AND c.user_id = ds.user_id
-    WHERE ds.user_id = ?`;
-  const params: unknown[] = [userId];
-  if (companyId) {
-    sql += " AND ds.company_id = ?";
-    params.push(companyId);
-  }
-  sql += " ORDER BY ds.created_at DESC";
-  const { results } = await c.env.DB.prepare(sql).bind(...params).all<Record<string, unknown>>();
-  return c.json(results ?? []);
-});
-
-api.post("/api/debt-settlements", async (c) => {
-  const userId = c.get("userId")!;
-  const body = await c.req.json<{ company_id?: string; time_entry_ids?: string[]; notes?: string | null }>();
-  const companyId = body.company_id;
-  const ids = body.time_entry_ids;
-  if (!companyId || !Array.isArray(ids) || ids.length === 0) {
-    return c.json({ error: "company_id en time_entry_ids zijn verplicht" }, 400);
-  }
-  const company = await c.env.DB
-    .prepare("SELECT id, default_hourly_rate, debt_to_client FROM companies WHERE id = ? AND user_id = ?")
-    .bind(companyId, userId)
-    .first<{ id: string; default_hourly_rate: number | null; debt_to_client: number }>();
-  if (!company) return c.json({ error: "Bedrijf niet gevonden" }, 404);
-
-  const placeholders = ids.map(() => "?").join(",");
-  const { results: rows } = await c.env.DB
-    .prepare(
-      `SELECT te.id, te.company_id, te.hours, te.hourly_rate, te.invoiced, te.invoice_id, te.debt_settlement_id
-       FROM time_entries te WHERE te.user_id = ? AND te.id IN (${placeholders})`,
-    )
-    .bind(userId, ...ids)
-    .all<{
-      id: string;
-      company_id: string;
-      hours: number;
-      hourly_rate: number | null;
-      invoiced: number;
-      invoice_id: string | null;
-      debt_settlement_id: string | null;
-    }>();
-
-  const found = new Map((rows ?? []).map((r) => [r.id, r]));
-  for (const tid of ids) {
-    if (!found.has(tid)) return c.json({ error: `Urenregel niet gevonden: ${tid}` }, 400);
-  }
-  for (const r of rows ?? []) {
-    if (r.company_id !== companyId) {
-      return c.json({ error: "Alle uren moeten bij het gekozen bedrijf horen" }, 400);
-    }
-    if (Number(r.invoiced) !== 0 || r.invoice_id) {
-      return c.json({ error: "Gefactureerde uren kunnen niet worden verrekend" }, 400);
-    }
-    if (r.debt_settlement_id) {
-      return c.json({ error: "Deze uren zijn al verrekend met schuld" }, 400);
-    }
-  }
-
-  const defaultRate = Number(company.default_hourly_rate ?? 0);
-  let total = 0;
-  for (const r of rows ?? []) {
-    const rate = r.hourly_rate != null && r.hourly_rate !== "" ? Number(r.hourly_rate) : defaultRate;
-    total += Number(r.hours) * Number(rate);
-  }
-  const debt = Math.max(0, Number(company.debt_to_client ?? 0));
-  if (total > debt + 1e-9) {
-    return c.json(
-      { error: `Totaal (€${total.toFixed(2)}) is hoger dan openstaande schuld (€${debt.toFixed(2)})` },
-      400,
-    );
-  }
-
-  const settlementId = crypto.randomUUID();
-  const now = new Date().toISOString();
-  const notes = typeof body.notes === "string" ? body.notes : null;
-
-  await c.env.DB.batch([
-    c.env.DB
-      .prepare(
-        `INSERT INTO debt_settlements (id, user_id, company_id, total_amount, notes, created_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-      )
-      .bind(settlementId, userId, companyId, total, notes, now),
-    ...ids.map((tid) =>
-      c.env.DB
-        .prepare("UPDATE time_entries SET debt_settlement_id = ?, updated_at = ? WHERE id = ? AND user_id = ?")
-        .bind(settlementId, now, tid, userId),
-    ),
-    c.env.DB
-      .prepare("UPDATE companies SET debt_to_client = ?, updated_at = ? WHERE id = ? AND user_id = ?")
-      .bind(Math.max(0, debt - total), now, companyId, userId),
-  ]);
-
-  const row = await c.env.DB
-    .prepare(
-      `SELECT ds.*, c.name AS company_name FROM debt_settlements ds
-       JOIN companies c ON c.id = ds.company_id WHERE ds.id = ?`,
-    )
-    .bind(settlementId)
-    .first();
-  return c.json(row);
-});
-
-api.delete("/api/debt-settlements/:id", async (c) => {
-  const userId = c.get("userId")!;
-  const { id } = c.req.param();
-  const settlement = await c.env.DB
-    .prepare("SELECT id, company_id, total_amount FROM debt_settlements WHERE id = ? AND user_id = ?")
-    .bind(id, userId)
-    .first<{ id: string; company_id: string; total_amount: number }>();
-  if (!settlement) return c.json({ error: "Verrekening niet gevonden" }, 404);
-
-  const now = new Date().toISOString();
-  const addBack = Math.max(0, Number(settlement.total_amount));
-
-  await c.env.DB.batch([
-    c.env.DB
-      .prepare(
-        "UPDATE time_entries SET debt_settlement_id = NULL, updated_at = ? WHERE debt_settlement_id = ? AND user_id = ?",
-      )
-      .bind(now, id, userId),
-    c.env.DB
-      .prepare(
-        "UPDATE companies SET debt_to_client = COALESCE(debt_to_client, 0) + ?, updated_at = ? WHERE id = ? AND user_id = ?",
-      )
-      .bind(addBack, now, settlement.company_id, userId),
-    c.env.DB.prepare("DELETE FROM debt_settlements WHERE id = ? AND user_id = ?").bind(id, userId),
-  ]);
-
-  return c.body(null, 204);
 });
 
 // --- Reports ---

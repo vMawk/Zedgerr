@@ -17,8 +17,6 @@ export type Company = {
   btw_number: string | null;
   default_hourly_rate: number | null;
   advance_balance: number;
-  /** Openstaand bedrag dat jij aan deze klant verschuldigd bent (€). */
-  debt_to_client: number;
   notes: string | null;
   created_at: string;
   updated_at: string;
@@ -34,20 +32,8 @@ export type TimeEntry = {
   hourly_rate: number | null;
   description: string | null;
   invoiced: boolean;
-  /** Gezet na verrekening met schuld; niet meer factureerbaar. */
-  debt_settlement_id?: string | null;
   created_at: string;
   updated_at: string;
-};
-
-export type DebtSettlement = {
-  id: string;
-  user_id: string;
-  company_id: string;
-  total_amount: number;
-  notes: string | null;
-  created_at: string;
-  company_name?: string | null;
 };
 
 export type Invoice = {

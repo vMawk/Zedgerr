@@ -2,7 +2,6 @@ import type {
   BusinessSettings,
   Company,
   DailyNote,
-  DebtSettlement,
   Invoice,
   InvoiceLine,
   Quote,
@@ -102,16 +101,6 @@ export const api = {
   deleteTimeEntry: (id: string) => req<void>("DELETE", `/time-entries/${id}`),
   markTimeEntriesInvoiced: (body: { ids: string[]; invoice_id: string }) =>
     req<{ ok: boolean }>("POST", "/time-entries/mark-invoiced", body),
-
-  getDebtSettlements: (q?: { company_id?: string }) => {
-    const p = new URLSearchParams();
-    if (q?.company_id) p.set("company_id", q.company_id);
-    const qs = p.toString();
-    return req<DebtSettlement[]>("GET", `/debt-settlements${qs ? `?${qs}` : ""}`);
-  },
-  createDebtSettlement: (body: { company_id: string; time_entry_ids: string[]; notes?: string | null }) =>
-    req<DebtSettlement>("POST", "/debt-settlements", body),
-  deleteDebtSettlement: (id: string) => req<void>("DELETE", `/debt-settlements/${id}`),
 
   getReportTimeEntries: (from: string, to: string, companyId: string) => {
     const p = new URLSearchParams({ from, to, company_id: companyId });
