@@ -733,6 +733,20 @@ api.get("/api/notes/daily", async (c) => {
   return c.json(row ?? { note_date: date, content: "", updated_at: null });
 });
 
+api.get("/api/notes/dates", async (c) => {
+  const userId = c.get("userId")!;
+  const { results } = await c.env.DB
+    .prepare(
+      `SELECT note_date
+       FROM daily_notes
+       WHERE user_id = ? AND TRIM(COALESCE(content, '')) <> ''
+       ORDER BY note_date ASC`,
+    )
+    .bind(userId)
+    .all<{ note_date: string }>();
+  return c.json((results ?? []).map((r) => r.note_date));
+});
+
 api.put("/api/notes/daily", async (c) => {
   const userId = c.get("userId")!;
   const req = await c.req.json<Record<string, unknown>>();

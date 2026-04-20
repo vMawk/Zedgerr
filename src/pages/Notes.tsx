@@ -4,16 +4,30 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Calendar } from "@/components/ui/calendar";
 import { useToast } from "@/hooks/use-toast";
 
 function todayIso(): string {
   return new Date().toISOString().split("T")[0]!;
 }
 
+function isoToLocalDate(iso: string): Date {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(y, (m ?? 1) - 1, d ?? 1);
+}
+
+function localDateToIso(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 export default function Notes() {
   const { toast } = useToast();
   const [date, setDate] = useState(todayIso());
   const [content, setContent] = useState("");
+  const [datesWithNotes, setDatesWithNotes] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const saveTimer = useRef<number | null>(null);
@@ -24,7 +38,13 @@ export default function Notes() {
     setDirty(false);
   };
 
+  const loadDatesWithNotes = async () => {
+    const dates = await api.getDailyNoteDates();
+    setDatesWithNotes(dates);
+  };
+
   useEffect(() => {
+    loadDatesWithNotes().catch(() => setDatesWithNotes([]));
     loadNote(date).catch((e: unknown) =>
       toast({ title: "Fout", description: e instanceof Error ? e.message : String(e), variant: "destructive" }),
     );
@@ -36,6 +56,7 @@ export default function Notes() {
     try {
       await api.putDailyNote(d, text);
       setDirty(false);
+      await loadDatesWithNotes();
     } catch (e: unknown) {
       toast({ title: "Opslaan mislukt", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
     } finally {
@@ -99,6 +120,22 @@ export default function Notes() {
           <div className="grid gap-2 max-w-xs">
             <Label htmlFor="note-date">Datum</Label>
             <Input id="note-date" type="date" value={date} onChange={(e) => void onDateChange(e.target.value)} />
+          </div>
+          <div className="grid gap-2 max-w-xs">
+            <Label>Selectie</Label>
+            <Calendar
+              mode="single"
+              selected={isoToLocalDate(date)}
+              onSelect={(next) => {
+                if (!next) return;
+                void onDateChange(localDateToIso(next));
+              }}
+              modifiers={{ hasNote: datesWithNotes.map(isoToLocalDate) }}
+              modifiersClassNames={{
+                hasNote: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 font-semibold rounded-md",
+              }}
+            />
+            <p className="text-xs text-muted-foreground">Dagen met notities zijn groen gemarkeerd.</p>
           </div>
           <div className="grid gap-2">
             <Label htmlFor="note-content">Notitie</Label>
