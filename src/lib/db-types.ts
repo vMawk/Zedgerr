@@ -135,3 +135,19 @@ export type DailyNote = {
   content: string;
   updated_at: string | null;
 };
+
+export type Subscription = {
+  id: string;
+  user_id: string;
+  name: string;
+  category: "prive" | "zakelijk";
+  contract_number: string | null;
+  amount: number;
+  billing_cycle: "maandelijks" | "jaarlijks" | "kwartaal" | "halfjaarlijks" | "wekelijks";
+  payment_method: string | null;
+  contract_end_date: string | null;
+  next_payment_date: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
