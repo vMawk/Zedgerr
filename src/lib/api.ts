@@ -125,6 +125,7 @@ export const api = {
 
   getBusinessSettings: () => req<BusinessSettings | null>("GET", "/business-settings"),
   putBusinessSettings: (body: Record<string, unknown>) => req<BusinessSettings>("PUT", "/business-settings", body),
+  sendTelegramTest: () => req<{ ok: boolean }>("POST", "/telegram/test"),
 
   getInvoices: () => req<(Invoice & { companies: { name: string | null } | null })[]>("GET", "/invoices"),
   invoicesExistForMonth: (month: string) => req<{ exists: boolean }>("GET", `/invoices/exists?month=${encodeURIComponent(month)}`),
