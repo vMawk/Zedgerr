@@ -8,6 +8,7 @@ import type {
   QuoteLine,
   Service,
   Subscription,
+  SubscriptionPayment,
   TimeEntry,
 } from "@/lib/db-types";
 
@@ -175,4 +176,8 @@ export const api = {
   createSubscription: (body: Partial<Subscription> & { name: string }) => req<Subscription>("POST", "/subscriptions", body),
   updateSubscription: (id: string, body: Partial<Subscription>) => req<Subscription>("PATCH", `/subscriptions/${id}`, body),
   deleteSubscription: (id: string) => req<void>("DELETE", `/subscriptions/${id}`),
+  getSubscriptionPayments: (subscriptionId: string) =>
+    req<SubscriptionPayment[]>("GET", `/subscriptions/${subscriptionId}/payments`),
+  toggleSubscriptionPayment: (subscriptionId: string, periodDate: string) =>
+    req<SubscriptionPayment>("POST", `/subscriptions/${subscriptionId}/payments/toggle`, { period_date: periodDate }),
 };

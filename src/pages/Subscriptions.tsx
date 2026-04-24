@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
-import type { Subscription } from "@/lib/db-types";
+import type { Subscription, SubscriptionPayment } from "@/lib/db-types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -11,7 +11,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Pencil, Trash2, CreditCard, Landmark, CalendarClock, RepeatIcon, Wallet } from "lucide-react";
+import {
+  Plus, Pencil, Trash2, CreditCard, Landmark, CalendarClock,
+  RepeatIcon, Wallet, ChevronDown, Check, X,
+} from "lucide-react";
 
 type Category = "prive" | "zakelijk";
 
@@ -31,10 +34,32 @@ const billingCycleMonthly: Record<string, number> = {
   jaarlijks: 1 / 12,
 };
 
+const billingCycleMonths: Record<string, number> = {
+  wekelijks: 0,
+  maandelijks: 1,
+  kwartaal: 3,
+  halfjaarlijks: 6,
+  jaarlijks: 12,
+};
+
 const paymentMethodIcons: Record<string, typeof CreditCard> = {
   creditcard: CreditCard,
   rekening: Landmark,
 };
+
+const paymentMethodLabels: Record<string, string> = {
+  rekening: "Bank",
+  creditcard: "Creditcard",
+  ideal: "iDEAL",
+  paypal: "PayPal",
+  incasso: "Incasso",
+  overig: "Overig",
+};
+
+const monthNames = [
+  "jan", "feb", "mrt", "apr", "mei", "jun",
+  "jul", "aug", "sep", "okt", "nov", "dec",
+];
 
 const emptyForm: Partial<Subscription> = {
   name: "",
@@ -66,6 +91,108 @@ function daysUntil(d: string | null | undefined): number | null {
   return Math.ceil((target.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
 }
 
+function generatePeriods(sub: Subscription): string[] {
+  const months = billingCycleMonths[sub.billing_cycle];
+  if (!months) return [];
+
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const periods: string[] = [];
+
+  const startDate = sub.next_payment_date
+    ? new Date(sub.next_payment_date)
+    : new Date(sub.created_at);
+
+  const startMonth = startDate.getMonth();
+  const startYear = startDate.getFullYear();
+
+  const rangeStart = new Date(currentYear - 1, 0, 1);
+  const rangeEnd = new Date(currentYear, 11, 31);
+
+  let cursor = new Date(startYear, startMonth, 1);
+
+  if (cursor > rangeEnd) {
+    while (cursor > rangeStart) {
+      cursor.setMonth(cursor.getMonth() - months);
+    }
+    cursor.setMonth(cursor.getMonth() + months);
+  }
+
+  while (cursor < rangeStart) {
+    cursor.setMonth(cursor.getMonth() + months);
+  }
+
+  while (cursor <= rangeEnd) {
+    periods.push(cursor.toISOString().slice(0, 7));
+    cursor.setMonth(cursor.getMonth() + months);
+  }
+
+  return periods;
+}
+
+function PaymentTimeline({
+  sub,
+  payments,
+  onToggle,
+}: {
+  sub: Subscription;
+  payments: SubscriptionPayment[];
+  onToggle: (periodDate: string) => void;
+}) {
+  const periods = useMemo(() => generatePeriods(sub), [sub]);
+  const paidSet = useMemo(
+    () => new Set(payments.filter((p) => p.paid).map((p) => p.period_date)),
+    [payments],
+  );
+
+  const now = new Date();
+  const currentPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+
+  if (periods.length === 0) return null;
+
+  return (
+    <div className="space-y-2 pt-3 border-t">
+      <p className="text-xs font-medium text-muted-foreground">Betaalhistorie</p>
+      <div className="grid grid-cols-4 gap-1.5">
+        {periods.map((period) => {
+          const [y, m] = period.split("-");
+          const monthIdx = parseInt(m!, 10) - 1;
+          const isPaid = paidSet.has(period);
+          const isCurrent = period === currentPeriod;
+          const isFuture = period > currentPeriod;
+
+          return (
+            <button
+              key={period}
+              onClick={() => onToggle(period)}
+              className={`
+                flex flex-col items-center gap-0.5 rounded-md px-1 py-1.5 text-[11px] transition-all
+                ${isPaid
+                  ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/25"
+                  : isFuture
+                    ? "bg-muted/50 text-muted-foreground/50 hover:bg-muted"
+                    : "bg-red-500/10 text-red-600 dark:text-red-400 hover:bg-red-500/20"
+                }
+                ${isCurrent ? "ring-1 ring-primary/50" : ""}
+              `}
+            >
+              <span className="font-medium">{monthNames[monthIdx]}</span>
+              <span className="text-[9px] opacity-70">{y}</span>
+              {isPaid ? (
+                <Check className="h-3 w-3" />
+              ) : isFuture ? (
+                <span className="h-3 w-3" />
+              ) : (
+                <X className="h-3 w-3" />
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function Subscriptions() {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -74,6 +201,8 @@ export default function Subscriptions() {
   const [editId, setEditId] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [category, setCategory] = useState<Category>("prive");
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [payments, setPayments] = useState<Record<string, SubscriptionPayment[]>>({});
 
   const fetchSubscriptions = async () => {
     const data = await api.getSubscriptions();
@@ -83,6 +212,35 @@ export default function Subscriptions() {
   useEffect(() => {
     if (user) fetchSubscriptions();
   }, [user]);
+
+  const fetchPayments = useCallback(async (subId: string) => {
+    const data = await api.getSubscriptionPayments(subId);
+    setPayments((prev) => ({ ...prev, [subId]: data }));
+  }, []);
+
+  const handleExpand = useCallback(
+    (subId: string) => {
+      if (expandedId === subId) {
+        setExpandedId(null);
+      } else {
+        setExpandedId(subId);
+        if (!payments[subId]) fetchPayments(subId);
+      }
+    },
+    [expandedId, payments, fetchPayments],
+  );
+
+  const handleTogglePayment = useCallback(
+    async (subId: string, periodDate: string) => {
+      try {
+        await api.toggleSubscriptionPayment(subId, periodDate);
+        await fetchPayments(subId);
+      } catch (error: unknown) {
+        toast({ title: "Fout", description: error instanceof Error ? error.message : String(error), variant: "destructive" });
+      }
+    },
+    [fetchPayments, toast],
+  );
 
   const filtered = useMemo(
     () => subscriptions.filter((s) => s.category === category),
@@ -338,6 +496,7 @@ export default function Subscriptions() {
             const PaymentIcon = paymentMethodIcons[sub.payment_method ?? ""] ?? Wallet;
             const nextDays = daysUntil(sub.next_payment_date);
             const contractDays = daysUntil(sub.contract_end_date);
+            const isExpanded = expandedId === sub.id;
 
             return (
               <Card key={sub.id} className="relative group">
@@ -351,17 +510,7 @@ export default function Subscriptions() {
                       {sub.payment_method && (
                         <Badge variant="outline" className="text-xs font-normal gap-1">
                           <PaymentIcon className="h-3 w-3" />
-                          {sub.payment_method === "rekening"
-                            ? "Bank"
-                            : sub.payment_method === "creditcard"
-                              ? "Creditcard"
-                              : sub.payment_method === "ideal"
-                                ? "iDEAL"
-                                : sub.payment_method === "paypal"
-                                  ? "PayPal"
-                                  : sub.payment_method === "incasso"
-                                    ? "Incasso"
-                                    : "Overig"}
+                          {paymentMethodLabels[sub.payment_method] ?? "Overig"}
                         </Badge>
                       )}
                     </div>
@@ -425,6 +574,24 @@ export default function Subscriptions() {
 
                   {sub.notes && (
                     <p className="text-xs text-muted-foreground pt-1 border-t">{sub.notes}</p>
+                  )}
+
+                  {/* Expand button */}
+                  <button
+                    onClick={() => handleExpand(sub.id)}
+                    className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors w-full pt-1"
+                  >
+                    <ChevronDown className={`h-3.5 w-3.5 transition-transform ${isExpanded ? "rotate-180" : ""}`} />
+                    <span>{isExpanded ? "Verberg" : "Bekijk"} betaalhistorie</span>
+                  </button>
+
+                  {/* Payment timeline */}
+                  {isExpanded && (
+                    <PaymentTimeline
+                      sub={sub}
+                      payments={payments[sub.id] ?? []}
+                      onToggle={(period) => handleTogglePayment(sub.id, period)}
+                    />
                   )}
                 </CardContent>
               </Card>

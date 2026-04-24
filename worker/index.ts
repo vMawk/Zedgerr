@@ -13,6 +13,8 @@ export type Env = {
   ASSETS?: Fetcher;
   /** Extra accounts na de eerste gebruiker: zet op "true" in wrangler.toml. Anders alleen eerste account (lege `users`). */
   ALLOW_REGISTRATION?: string;
+  TELEGRAM_BOT_TOKEN?: string;
+  TELEGRAM_CHAT_ID?: string;
 };
 
 type Variables = { userId?: string; portalCompanyId?: string; email?: string };
@@ -1430,8 +1432,61 @@ api.patch("/api/subscriptions/:id", async (c) => {
 api.delete("/api/subscriptions/:id", async (c) => {
   const userId = c.get("userId")!;
   const { id } = c.req.param();
+  await c.env.DB.prepare("DELETE FROM subscription_payments WHERE subscription_id = ? AND user_id = ?").bind(id, userId).run();
   await c.env.DB.prepare("DELETE FROM subscriptions WHERE id = ? AND user_id = ?").bind(id, userId).run();
   return c.body(null, 204);
+});
+
+api.get("/api/subscriptions/:id/payments", async (c) => {
+  const userId = c.get("userId")!;
+  const { id } = c.req.param();
+  const sub = await c.env.DB.prepare("SELECT id FROM subscriptions WHERE id = ? AND user_id = ?").bind(id, userId).first();
+  if (!sub) return c.json({ error: "Not found" }, 404);
+  const { results } = await c.env.DB
+    .prepare("SELECT * FROM subscription_payments WHERE subscription_id = ? AND user_id = ? ORDER BY period_date DESC")
+    .bind(id, userId)
+    .all();
+  return c.json((results ?? []).map((r) => ({ ...r, paid: Boolean(r.paid) })));
+});
+
+api.post("/api/subscriptions/:id/payments/toggle", async (c) => {
+  const userId = c.get("userId")!;
+  const { id } = c.req.param();
+  const body = await c.req.json<{ period_date: string }>();
+  const periodDate = body.period_date;
+
+  const sub = await c.env.DB
+    .prepare("SELECT * FROM subscriptions WHERE id = ? AND user_id = ?")
+    .bind(id, userId)
+    .first<{ id: string; amount: number }>();
+  if (!sub) return c.json({ error: "Not found" }, 404);
+
+  const existing = await c.env.DB
+    .prepare("SELECT * FROM subscription_payments WHERE subscription_id = ? AND period_date = ?")
+    .bind(id, periodDate)
+    .first<{ id: string; paid: number }>();
+
+  const now = new Date().toISOString();
+
+  if (existing) {
+    const newPaid = existing.paid ? 0 : 1;
+    await c.env.DB
+      .prepare("UPDATE subscription_payments SET paid = ?, paid_at = ? WHERE id = ?")
+      .bind(newPaid, newPaid ? now : null, existing.id)
+      .run();
+  } else {
+    const newId = crypto.randomUUID();
+    await c.env.DB
+      .prepare("INSERT INTO subscription_payments (id, subscription_id, user_id, period_date, amount, paid, paid_at, created_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?)")
+      .bind(newId, id, userId, periodDate, sub.amount, now, now)
+      .run();
+  }
+
+  const row = await c.env.DB
+    .prepare("SELECT * FROM subscription_payments WHERE subscription_id = ? AND period_date = ?")
+    .bind(id, periodDate)
+    .first();
+  return c.json({ ...row, paid: Boolean(row?.paid) });
 });
 
 /** D1-fouten (o.a. ontbrekende tabellen) anders als kale "Internal Server Error" zonder JSON. */
@@ -1450,6 +1505,47 @@ api.onError((err, c) => {
   return c.json({ error: "Serverfout" }, 500);
 });
 
+// --- Telegram notification helper ---
+async function sendTelegramMessage(env: Env, text: string): Promise<void> {
+  if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID) return;
+  await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: env.TELEGRAM_CHAT_ID, text, parse_mode: "HTML" }),
+  });
+}
+
+async function checkUpcomingPayments(env: Env): Promise<void> {
+  const today = new Date();
+  const in2days = new Date(today);
+  in2days.setDate(in2days.getDate() + 2);
+  const targetDate = in2days.toISOString().slice(0, 10);
+  const todayStr = today.toISOString().slice(0, 10);
+
+  const { results } = await env.DB
+    .prepare("SELECT * FROM subscriptions WHERE next_payment_date IS NOT NULL AND next_payment_date BETWEEN ? AND ?")
+    .bind(todayStr, targetDate)
+    .all<{ name: string; amount: number; next_payment_date: string; payment_method: string | null; category: string }>();
+
+  if (!results || results.length === 0) return;
+
+  const lines = results.map((s) => {
+    const method = s.payment_method ?? "onbekend";
+    const cat = s.category === "zakelijk" ? "Zakelijk" : "Privé";
+    const date = new Date(s.next_payment_date).toLocaleDateString("nl-NL", { day: "numeric", month: "long" });
+    return `• <b>${s.name}</b> — €${Number(s.amount).toFixed(2)} (${method}) — ${date} [${cat}]`;
+  });
+
+  const total = results.reduce((sum, s) => sum + Number(s.amount), 0);
+
+  const msg =
+    `💰 <b>Komende betalingen</b>\n\n` +
+    lines.join("\n") +
+    `\n\n<b>Totaal: €${total.toFixed(2)}</b>\n\nZorg dat je saldo/creditcard op orde is!`;
+
+  await sendTelegramMessage(env, msg);
+}
+
 // --- Deploy: static SPA + API ---
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -1464,5 +1560,8 @@ export default {
       status: 404,
       headers: { "Content-Type": "text/plain; charset=utf-8" },
     });
+  },
+  async scheduled(_event: ScheduledEvent, env: Env, _ctx: ExecutionContext): Promise<void> {
+    await checkUpcomingPayments(env);
   },
 };

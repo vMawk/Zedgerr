@@ -151,3 +151,14 @@ export type Subscription = {
   created_at: string;
   updated_at: string;
 };
+
+export type SubscriptionPayment = {
+  id: string;
+  subscription_id: string;
+  user_id: string;
+  period_date: string;
+  amount: number;
+  paid: boolean;
+  paid_at: string | null;
+  created_at: string;
+};
