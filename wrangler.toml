@@ -17,6 +17,8 @@ custom_domain = true
 JWT_SECRET = "1495960008180958"
 # Eerste account: registreren als `users` leeg is. Daarna alleen nieuwe accounts als dit "true" is:
 # ALLOW_REGISTRATION = "false"
+TELEGRAM_BOT_TOKEN = "8140190358:AAGAXPoNzjw5r5s5COnLwUOlqr8F5VE91Tc"
+TELEGRAM_CHAT_ID = "700986250"
 
 [[d1_databases]]
 binding = "DB"
@@ -31,3 +33,6 @@ not_found_handling = "single-page-application"
 
 [ai]
 binding = "AI"
+
+[triggers]
+crons = ["0 8 * * *"]
