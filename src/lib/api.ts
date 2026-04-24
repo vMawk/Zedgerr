@@ -7,6 +7,7 @@ import type {
   Quote,
   QuoteLine,
   Service,
+  Subscription,
   TimeEntry,
 } from "@/lib/db-types";
 
@@ -169,4 +170,9 @@ export const api = {
   getQuoteLines: (quoteId: string) => req<QuoteLine[]>("GET", `/quote-lines?quote_id=${encodeURIComponent(quoteId)}`),
   createQuoteLinesBatch: (lines: Record<string, unknown>[]) =>
     req<{ ok: boolean }>("POST", "/quote-lines/batch", { lines }),
+
+  getSubscriptions: () => req<Subscription[]>("GET", "/subscriptions"),
+  createSubscription: (body: Partial<Subscription> & { name: string }) => req<Subscription>("POST", "/subscriptions", body),
+  updateSubscription: (id: string, body: Partial<Subscription>) => req<Subscription>("PATCH", `/subscriptions/${id}`, body),
+  deleteSubscription: (id: string) => req<void>("DELETE", `/subscriptions/${id}`),
 };

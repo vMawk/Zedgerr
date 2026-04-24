@@ -1374,6 +1374,66 @@ api.post("/api/quote-lines/batch", async (c) => {
   return c.json({ ok: true });
 });
 
+// --- Subscriptions ---
+api.get("/api/subscriptions", async (c) => {
+  const userId = c.get("userId")!;
+  const { results } = await c.env.DB.prepare("SELECT * FROM subscriptions WHERE user_id = ? ORDER BY name").bind(userId).all();
+  return c.json(results ?? []);
+});
+
+api.post("/api/subscriptions", async (c) => {
+  const userId = c.get("userId")!;
+  const req = await c.req.json<Record<string, unknown>>();
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  await c.env.DB
+    .prepare(
+      `INSERT INTO subscriptions (id, user_id, name, category, contract_number, amount, billing_cycle, payment_method, contract_end_date, next_payment_date, notes, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(
+      id, userId, req.name, req.category ?? "prive", req.contract_number ?? null,
+      req.amount ?? 0, req.billing_cycle ?? "maandelijks", req.payment_method ?? null,
+      req.contract_end_date ?? null, req.next_payment_date ?? null, req.notes ?? null, now, now,
+    )
+    .run();
+  const row = await c.env.DB.prepare("SELECT * FROM subscriptions WHERE id = ?").bind(id).first();
+  return c.json(row);
+});
+
+api.patch("/api/subscriptions/:id", async (c) => {
+  const userId = c.get("userId")!;
+  const { id } = c.req.param();
+  const req = await c.req.json<Record<string, unknown>>();
+  const now = new Date().toISOString();
+
+  const existing = await c.env.DB.prepare("SELECT * FROM subscriptions WHERE id = ? AND user_id = ?").bind(id, userId).first();
+  if (!existing) return c.json({ error: "Not found" }, 404);
+
+  const fields: string[] = [];
+  const values: unknown[] = [];
+  for (const key of ["name", "category", "contract_number", "amount", "billing_cycle", "payment_method", "contract_end_date", "next_payment_date", "notes"]) {
+    if (key in req) {
+      fields.push(`${key} = ?`);
+      values.push(req[key] ?? null);
+    }
+  }
+  fields.push("updated_at = ?");
+  values.push(now);
+  values.push(id, userId);
+
+  await c.env.DB.prepare(`UPDATE subscriptions SET ${fields.join(", ")} WHERE id = ? AND user_id = ?`).bind(...values).run();
+  const row = await c.env.DB.prepare("SELECT * FROM subscriptions WHERE id = ? AND user_id = ?").bind(id, userId).first();
+  return c.json(row);
+});
+
+api.delete("/api/subscriptions/:id", async (c) => {
+  const userId = c.get("userId")!;
+  const { id } = c.req.param();
+  await c.env.DB.prepare("DELETE FROM subscriptions WHERE id = ? AND user_id = ?").bind(id, userId).run();
+  return c.body(null, 204);
+});
+
 /** D1-fouten (o.a. ontbrekende tabellen) anders als kale "Internal Server Error" zonder JSON. */
 api.onError((err, c) => {
   console.error(err);

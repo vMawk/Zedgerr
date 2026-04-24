@@ -13,6 +13,7 @@ import Quotes from "./pages/Quotes";
 import Reports from "./pages/Reports";
 import Settings from "./pages/Settings";
 import Notes from "./pages/Notes";
+import Subscriptions from "./pages/Subscriptions";
 import NotFound from "./pages/NotFound";
 import Auth from "./pages/Auth";
 import { PortalProvider, usePortalAuth } from "@/lib/portal-auth";
@@ -86,6 +87,7 @@ const App = () => (
               <Route path="/offertes" element={<Quotes />} />
               <Route path="/overzichten" element={<Reports />} />
               <Route path="/notities" element={<Notes />} />
+              <Route path="/abonnementen" element={<Subscriptions />} />
               <Route path="/instellingen" element={<Settings />} />
             </Route>
             <Route path="*" element={<NotFound />} />
