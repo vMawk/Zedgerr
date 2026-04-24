@@ -33,6 +33,32 @@ function toMoney(value: unknown, fallback = 0): number {
   return Math.round(n * 100) / 100;
 }
 
+function parseSubscriptionTags(value: unknown): string[] {
+  if (!value) return [];
+  const raw = String(value);
+  return raw
+    .split(",")
+    .map((t) => t.trim())
+    .filter(Boolean);
+}
+
+function serializeSubscriptionTags(value: unknown): string | null {
+  if (!Array.isArray(value)) return null;
+  const tags = value
+    .map((v) => String(v).trim())
+    .filter(Boolean)
+    .slice(0, 20);
+  if (!tags.length) return null;
+  return Array.from(new Set(tags)).join(",");
+}
+
+function rowSubscription(r: Record<string, unknown>) {
+  return {
+    ...r,
+    tags: parseSubscriptionTags(r.tags),
+  };
+}
+
 const publicApiPaths = new Set([
   "/api/auth/login",
   "/api/auth/register",
@@ -1380,7 +1406,7 @@ api.post("/api/quote-lines/batch", async (c) => {
 api.get("/api/subscriptions", async (c) => {
   const userId = c.get("userId")!;
   const { results } = await c.env.DB.prepare("SELECT * FROM subscriptions WHERE user_id = ? ORDER BY name").bind(userId).all();
-  return c.json(results ?? []);
+  return c.json((results ?? []).map((r) => rowSubscription(r as Record<string, unknown>)));
 });
 
 api.post("/api/subscriptions", async (c) => {
@@ -1390,17 +1416,17 @@ api.post("/api/subscriptions", async (c) => {
   const now = new Date().toISOString();
   await c.env.DB
     .prepare(
-      `INSERT INTO subscriptions (id, user_id, name, category, contract_number, amount, billing_cycle, payment_method, contract_end_date, next_payment_date, notes, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO subscriptions (id, user_id, name, category, contract_number, amount, billing_cycle, payment_method, contract_end_date, next_payment_date, notes, tags, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       id, userId, req.name, req.category ?? "prive", req.contract_number ?? null,
       req.amount ?? 0, req.billing_cycle ?? "maandelijks", req.payment_method ?? null,
-      req.contract_end_date ?? null, req.next_payment_date ?? null, req.notes ?? null, now, now,
+      req.contract_end_date ?? null, req.next_payment_date ?? null, req.notes ?? null, serializeSubscriptionTags(req.tags), now, now,
     )
     .run();
   const row = await c.env.DB.prepare("SELECT * FROM subscriptions WHERE id = ?").bind(id).first();
-  return c.json(row);
+  return c.json(row ? rowSubscription(row as Record<string, unknown>) : null);
 });
 
 api.patch("/api/subscriptions/:id", async (c) => {
@@ -1420,13 +1446,18 @@ api.patch("/api/subscriptions/:id", async (c) => {
       values.push(req[key] ?? null);
     }
   }
+  if ("tags" in req) {
+    fields.push("tags = ?");
+    values.push(serializeSubscriptionTags(req.tags));
+  }
   fields.push("updated_at = ?");
   values.push(now);
   values.push(id, userId);
 
   await c.env.DB.prepare(`UPDATE subscriptions SET ${fields.join(", ")} WHERE id = ? AND user_id = ?`).bind(...values).run();
   const row = await c.env.DB.prepare("SELECT * FROM subscriptions WHERE id = ? AND user_id = ?").bind(id, userId).first();
-  return c.json(row);
+  if (!row) return c.json({ error: "Not found" }, 404);
+  return c.json(rowSubscription(row as Record<string, unknown>));
 });
 
 api.delete("/api/subscriptions/:id", async (c) => {
@@ -1515,7 +1546,15 @@ async function sendTelegramMessage(env: Env, text: string): Promise<void> {
   });
 }
 
-async function checkUpcomingPayments(env: Env): Promise<void> {
+type UpcomingPaymentRow = {
+  name: string;
+  amount: number;
+  next_payment_date: string;
+  payment_method: string | null;
+  category: string;
+};
+
+async function getUpcomingPayments(env: Env): Promise<UpcomingPaymentRow[]> {
   const today = new Date();
   const in2days = new Date(today);
   in2days.setDate(in2days.getDate() + 2);
@@ -1525,10 +1564,12 @@ async function checkUpcomingPayments(env: Env): Promise<void> {
   const { results } = await env.DB
     .prepare("SELECT * FROM subscriptions WHERE next_payment_date IS NOT NULL AND next_payment_date BETWEEN ? AND ?")
     .bind(todayStr, targetDate)
-    .all<{ name: string; amount: number; next_payment_date: string; payment_method: string | null; category: string }>();
+    .all<UpcomingPaymentRow>();
 
-  if (!results || results.length === 0) return;
+  return results ?? [];
+}
 
+function buildUpcomingPaymentsMessage(results: UpcomingPaymentRow[]): string {
   const lines = results.map((s) => {
     const method = s.payment_method ?? "onbekend";
     const cat = s.category === "zakelijk" ? "Zakelijk" : "Privé";
@@ -1538,12 +1579,18 @@ async function checkUpcomingPayments(env: Env): Promise<void> {
 
   const total = results.reduce((sum, s) => sum + Number(s.amount), 0);
 
-  const msg =
+  return (
     `💰 <b>Komende betalingen</b>\n\n` +
     lines.join("\n") +
-    `\n\n<b>Totaal: €${total.toFixed(2)}</b>\n\nZorg dat je saldo/creditcard op orde is!`;
+    `\n\n<b>Totaal: €${total.toFixed(2)}</b>\n\nZorg dat je saldo/creditcard op orde is!`
+  );
+}
 
-  await sendTelegramMessage(env, msg);
+async function checkUpcomingPayments(env: Env): Promise<number> {
+  const results = await getUpcomingPayments(env);
+  if (results.length === 0) return 0;
+  await sendTelegramMessage(env, buildUpcomingPaymentsMessage(results));
+  return results.length;
 }
 
 api.post("/api/telegram/test", async (c) => {
@@ -1564,6 +1611,27 @@ api.post("/api/telegram/test", async (c) => {
   return c.json({ ok: true });
 });
 
+api.post("/api/telegram/test-upcoming-payments", async (c) => {
+  if (!c.env.TELEGRAM_BOT_TOKEN || !c.env.TELEGRAM_CHAT_ID) {
+    return c.json(
+      { error: "Telegram is niet geconfigureerd. Voeg TELEGRAM_BOT_TOKEN en TELEGRAM_CHAT_ID toe." },
+      400,
+    );
+  }
+
+  const results = await getUpcomingPayments(c.env);
+  if (results.length === 0) {
+    await sendTelegramMessage(
+      c.env,
+      "💰 <b>Komende betalingen</b>\n\nGeen betalingen gepland in de komende 2 dagen.",
+    );
+    return c.json({ ok: true, count: 0 });
+  }
+
+  await sendTelegramMessage(c.env, buildUpcomingPaymentsMessage(results));
+  return c.json({ ok: true, count: results.length });
+});
+
 // --- Deploy: static SPA + API ---
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -1580,6 +1648,31 @@ export default {
     });
   },
   async scheduled(_event: ScheduledEvent, env: Env, _ctx: ExecutionContext): Promise<void> {
-    await checkUpcomingPayments(env);
+    const now = new Date();
+    const nlParts = new Intl.DateTimeFormat("nl-NL", {
+      timeZone: "Europe/Amsterdam",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    })
+      .formatToParts(now)
+      .reduce<Record<string, string>>((acc, p) => {
+        if (p.type === "hour" || p.type === "minute") acc[p.type] = p.value;
+        return acc;
+      }, {});
+    const nlTime = `${nlParts.hour ?? "00"}:${nlParts.minute ?? "00"}`;
+    const utcHour = now.getUTCHours();
+    const utcMinute = now.getUTCMinutes();
+
+    // Bestaande dagelijkse run om 08:00 UTC behouden.
+    if (utcHour === 8 && utcMinute === 0) {
+      await checkUpcomingPayments(env);
+      return;
+    }
+
+    // Extra run exact om 10:23 Nederlandse tijd (DST-safe).
+    if (nlTime === "10:23") {
+      await checkUpcomingPayments(env);
+    }
   },
 };

@@ -35,4 +35,4 @@ not_found_handling = "single-page-application"
 binding = "AI"
 
 [triggers]
-crons = ["0 8 * * *"]
+crons = ["0 8 * * *", "23 8 * * *", "23 9 * * *"]

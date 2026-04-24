@@ -126,6 +126,8 @@ export const api = {
   getBusinessSettings: () => req<BusinessSettings | null>("GET", "/business-settings"),
   putBusinessSettings: (body: Record<string, unknown>) => req<BusinessSettings>("PUT", "/business-settings", body),
   sendTelegramTest: () => req<{ ok: boolean }>("POST", "/telegram/test"),
+  sendUpcomingPaymentsTelegramTest: () =>
+    req<{ ok: boolean; count: number }>("POST", "/telegram/test-upcoming-payments"),
 
   getInvoices: () => req<(Invoice & { companies: { name: string | null } | null })[]>("GET", "/invoices"),
   invoicesExistForMonth: (month: string) => req<{ exists: boolean }>("GET", `/invoices/exists?month=${encodeURIComponent(month)}`),

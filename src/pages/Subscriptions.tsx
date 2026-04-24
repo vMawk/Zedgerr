@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { Fragment, useEffect, useMemo, useState, useCallback } from "react";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
 import type { Subscription, SubscriptionPayment } from "@/lib/db-types";
@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import {
   Plus, Pencil, Trash2, CreditCard, Landmark, CalendarClock,
@@ -71,6 +72,7 @@ const emptyForm: Partial<Subscription> = {
   contract_end_date: "",
   next_payment_date: "",
   notes: "",
+  tags: [],
 };
 
 function formatDate(d: string | null | undefined): string {
@@ -203,6 +205,10 @@ export default function Subscriptions() {
   const [category, setCategory] = useState<Category>("prive");
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [payments, setPayments] = useState<Record<string, SubscriptionPayment[]>>({});
+  const [search, setSearch] = useState("");
+  const [cycleFilter, setCycleFilter] = useState("all");
+  const [paymentFilter, setPaymentFilter] = useState("all");
+  const [tagFilter, setTagFilter] = useState("all");
 
   const fetchSubscriptions = async () => {
     const data = await api.getSubscriptions();
@@ -217,6 +223,28 @@ export default function Subscriptions() {
     const data = await api.getSubscriptionPayments(subId);
     setPayments((prev) => ({ ...prev, [subId]: data }));
   }, []);
+
+  useEffect(() => {
+    if (!subscriptions.length) return;
+    const missing = subscriptions.filter((s) => !payments[s.id]).map((s) => s.id);
+    if (!missing.length) return;
+    Promise.all(
+      missing.map(async (id) => {
+        try {
+          const data = await api.getSubscriptionPayments(id);
+          return { id, data };
+        } catch {
+          return { id, data: [] as SubscriptionPayment[] };
+        }
+      }),
+    ).then((rows) => {
+      setPayments((prev) => {
+        const next = { ...prev };
+        for (const row of rows) next[row.id] = row.data;
+        return next;
+      });
+    });
+  }, [subscriptions, payments]);
 
   const handleExpand = useCallback(
     (subId: string) => {
@@ -243,8 +271,41 @@ export default function Subscriptions() {
   );
 
   const filtered = useMemo(
-    () => subscriptions.filter((s) => s.category === category),
-    [subscriptions, category],
+    () =>
+      subscriptions.filter((s) => {
+        if (s.category !== category) return false;
+        if (cycleFilter !== "all" && s.billing_cycle !== cycleFilter) return false;
+        const q = search.trim().toLowerCase();
+        if (
+          q &&
+          !s.name.toLowerCase().includes(q) &&
+          !(s.contract_number ?? "").toLowerCase().includes(q) &&
+          !(s.notes ?? "").toLowerCase().includes(q) &&
+          !(s.tags ?? []).join(" ").toLowerCase().includes(q)
+        ) {
+          return false;
+        }
+        if (tagFilter !== "all" && !(s.tags ?? []).includes(tagFilter)) return false;
+        const now = new Date();
+        const currentPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+        const dueThisMonth = generatePeriods(s).includes(currentPeriod);
+        const paidThisMonth = (payments[s.id] ?? []).some((p) => p.period_date === currentPeriod && p.paid);
+        if (paymentFilter === "paid" && !paidThisMonth) return false;
+        if (paymentFilter === "open" && (!dueThisMonth || paidThisMonth)) return false;
+        if (paymentFilter === "na" && dueThisMonth) return false;
+        return true;
+      }),
+    [subscriptions, category, cycleFilter, search, paymentFilter, tagFilter, payments],
+  );
+
+  const allTags = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          subscriptions.flatMap((s) => s.tags ?? []).map((t) => t.trim()).filter(Boolean),
+        ),
+      ).sort((a, b) => a.localeCompare(b, "nl-NL")),
+    [subscriptions],
   );
 
   const monthlyTotal = useMemo(
@@ -271,6 +332,7 @@ export default function Subscriptions() {
         contract_end_date: form.contract_end_date || null,
         next_payment_date: form.next_payment_date || null,
         notes: form.notes?.trim() || null,
+        tags: (form.tags ?? []).map((t) => t.trim()).filter(Boolean),
       };
       if (editId) {
         await api.updateSubscription(editId, payload);
@@ -296,6 +358,7 @@ export default function Subscriptions() {
       contract_end_date: sub.contract_end_date ?? "",
       next_payment_date: sub.next_payment_date ?? "",
       notes: sub.notes ?? "",
+      tags: sub.tags ?? [],
     });
     setEditId(sub.id);
     setOpen(true);
@@ -310,6 +373,18 @@ export default function Subscriptions() {
 
   const updateField = (field: string, value: string | number | null | undefined) =>
     setForm((prev) => ({ ...prev, [field]: value }));
+
+  const quickTags = ["Noodzakelijk", "Luxe", "Hobby", "Vrije tijd", "Werk", "Gezondheid", "Entertainment", "Besparen"];
+
+  const toggleTag = (tag: string) => {
+    setForm((prev) => {
+      const current = prev.tags ?? [];
+      if (current.includes(tag)) {
+        return { ...prev, tags: current.filter((t) => t !== tag) };
+      }
+      return { ...prev, tags: [...current, tag] };
+    });
+  };
 
   return (
     <div className="space-y-6">
@@ -433,6 +508,39 @@ export default function Subscriptions() {
                   onChange={(e) => updateField("notes", e.target.value)}
                 />
               </div>
+              <div className="grid gap-2">
+                <Label>Tags</Label>
+                <Input
+                  placeholder="bijv. Noodzakelijk, Luxe, Hobby"
+                  value={(form.tags ?? []).join(", ")}
+                  onChange={(e) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      tags: e.target.value
+                        .split(",")
+                        .map((t) => t.trim())
+                        .filter(Boolean),
+                    }))
+                  }
+                />
+                <div className="flex flex-wrap gap-2">
+                  {quickTags.map((tag) => {
+                    const active = (form.tags ?? []).includes(tag);
+                    return (
+                      <button
+                        key={tag}
+                        type="button"
+                        onClick={() => toggleTag(tag)}
+                        className={`rounded-full border px-2 py-1 text-xs transition-colors ${
+                          active ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:text-foreground"
+                        }`}
+                      >
+                        {tag}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
               <Button onClick={handleSave}>{editId ? "Opslaan" : "Toevoegen"}</Button>
             </div>
           </DialogContent>
@@ -482,7 +590,56 @@ export default function Subscriptions() {
         </CardContent>
       </Card>
 
-      {/* Subscription cards */}
+      <Card>
+        <CardContent className="pt-6">
+          <div className="grid gap-3 md:grid-cols-4">
+            <Input
+              placeholder="Zoek op naam, contractnummer of notitie..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            <Select value={cycleFilter} onValueChange={setCycleFilter}>
+              <SelectTrigger>
+                <SelectValue placeholder="Alle cycli" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Alle cycli</SelectItem>
+                {Object.entries(billingCycleLabels).map(([key, label]) => (
+                  <SelectItem key={key} value={key}>
+                    {label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={paymentFilter} onValueChange={setPaymentFilter}>
+              <SelectTrigger>
+                <SelectValue placeholder="Alle statussen" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Alle betaalstatussen</SelectItem>
+                <SelectItem value="paid">PAID deze maand</SelectItem>
+                <SelectItem value="open">Open deze maand</SelectItem>
+                <SelectItem value="na">Niet van toepassing deze maand</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={tagFilter} onValueChange={setTagFilter}>
+              <SelectTrigger>
+                <SelectValue placeholder="Alle tags" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Alle tags</SelectItem>
+                {allTags.map((tag) => (
+                  <SelectItem key={tag} value={tag}>
+                    {tag}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Subscription table */}
       {filtered.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12 text-muted-foreground">
@@ -491,113 +648,134 @@ export default function Subscriptions() {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <Card>
+          <CardContent className="pt-6">
+            <div className="overflow-x-auto border rounded-md">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Abonnement</TableHead>
+                    <TableHead>Cyclus</TableHead>
+                    <TableHead>Bedrag</TableHead>
+                    <TableHead>Volgende betaling</TableHead>
+                    <TableHead>Deze maand</TableHead>
+                    <TableHead>Tags</TableHead>
+                    <TableHead className="text-right">Acties</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
           {filtered.map((sub) => {
             const PaymentIcon = paymentMethodIcons[sub.payment_method ?? ""] ?? Wallet;
             const nextDays = daysUntil(sub.next_payment_date);
             const contractDays = daysUntil(sub.contract_end_date);
             const isExpanded = expandedId === sub.id;
+            const now = new Date();
+            const currentPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+            const dueThisMonth = generatePeriods(sub).includes(currentPeriod);
+            const paidThisMonth = (payments[sub.id] ?? []).some((p) => p.period_date === currentPeriod && p.paid);
+            const paymentStatus = !dueThisMonth ? "na" : paidThisMonth ? "paid" : "open";
 
             return (
-              <Card key={sub.id} className="relative group">
-                <CardHeader className="flex flex-row items-start justify-between pb-2">
-                  <div className="space-y-1 min-w-0 flex-1">
-                    <CardTitle className="text-base truncate">{sub.name}</CardTitle>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <Badge variant="secondary" className="text-xs font-normal">
-                        {billingCycleLabels[sub.billing_cycle] ?? sub.billing_cycle}
-                      </Badge>
-                      {sub.payment_method && (
-                        <Badge variant="outline" className="text-xs font-normal gap-1">
-                          <PaymentIcon className="h-3 w-3" />
-                          {paymentMethodLabels[sub.payment_method] ?? "Overig"}
+              <Fragment key={sub.id}>
+                <TableRow>
+                  <TableCell>
+                    <div className="min-w-[220px]">
+                      <p className="font-medium">{sub.name}</p>
+                      <div className="mt-1 flex items-center gap-2 flex-wrap">
+                        {sub.payment_method && (
+                          <Badge variant="outline" className="text-xs font-normal gap-1">
+                            <PaymentIcon className="h-3 w-3" />
+                            {paymentMethodLabels[sub.payment_method] ?? "Overig"}
+                          </Badge>
+                        )}
+                        {sub.contract_number && (
+                          <Badge variant="secondary" className="text-xs font-normal">
+                            #{sub.contract_number}
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="secondary" className="text-xs font-normal">
+                      {billingCycleLabels[sub.billing_cycle] ?? sub.billing_cycle}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="font-semibold">{formatCurrency(sub.amount)}</TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-2">
+                      <CalendarClock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      <span className="text-sm">
+                        {formatDate(sub.next_payment_date)}
+                      </span>
+                      {nextDays !== null && nextDays >= 0 && nextDays <= 7 && (
+                        <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
+                          over {nextDays} {nextDays === 1 ? "dag" : "dagen"}
                         </Badge>
                       )}
                     </div>
-                  </div>
-                  <div className="flex gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <Button variant="ghost" size="icon" onClick={() => handleEdit(sub)}>
-                      <Pencil className="h-4 w-4" />
-                    </Button>
-                    <Button variant="ghost" size="icon" onClick={() => handleDelete(sub.id)}>
-                      <Trash2 className="h-4 w-4 text-destructive" />
-                    </Button>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-2">
-                  <p className="text-xl font-bold">{formatCurrency(sub.amount)}</p>
-
-                  {sub.contract_number && (
-                    <p className="text-xs text-muted-foreground">
-                      Contract: {sub.contract_number}
-                    </p>
-                  )}
-
-                  <div className="flex flex-col gap-1.5 text-sm">
-                    {sub.next_payment_date && (
-                      <div className="flex items-center gap-2 text-muted-foreground">
-                        <CalendarClock className="h-3.5 w-3.5 shrink-0" />
-                        <span>
-                          Volgende betaling: {formatDate(sub.next_payment_date)}
-                          {nextDays !== null && nextDays >= 0 && nextDays <= 7 && (
-                            <Badge variant="destructive" className="ml-2 text-[10px] px-1.5 py-0">
-                              over {nextDays} {nextDays === 1 ? "dag" : "dagen"}
-                            </Badge>
-                          )}
-                          {nextDays !== null && nextDays < 0 && (
-                            <Badge variant="destructive" className="ml-2 text-[10px] px-1.5 py-0">
-                              verlopen
-                            </Badge>
-                          )}
-                        </span>
+                  </TableCell>
+                  <TableCell>
+                    {paymentStatus === "paid" && <Badge className="bg-emerald-600 hover:bg-emerald-600">PAID</Badge>}
+                    {paymentStatus === "open" && <Badge variant="destructive">OPEN</Badge>}
+                    {paymentStatus === "na" && <Badge variant="secondary">N.V.T.</Badge>}
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex flex-wrap gap-1 max-w-[220px]">
+                      {(sub.tags ?? []).length === 0 ? (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      ) : (
+                        (sub.tags ?? []).map((tag) => (
+                          <Badge key={tag} variant="outline" className="text-[10px] font-normal">
+                            {tag}
+                          </Badge>
+                        ))
+                      )}
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex items-center justify-end gap-1">
+                      <Button variant="ghost" size="icon" onClick={() => handleEdit(sub)}>
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon" onClick={() => handleDelete(sub.id)}>
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
+                      <Button variant="ghost" size="icon" onClick={() => handleExpand(sub.id)}>
+                        <ChevronDown className={`h-4 w-4 transition-transform ${isExpanded ? "rotate-180" : ""}`} />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+                {isExpanded && (
+                  <TableRow>
+                    <TableCell colSpan={7}>
+                      <div className="space-y-2 py-2">
+                        {sub.contract_end_date && (
+                          <p className="text-xs text-muted-foreground">
+                            Contract t/m: {formatDate(sub.contract_end_date)}
+                            {contractDays !== null && contractDays >= 0 && contractDays <= 30 && " (loopt bijna af)"}
+                            {contractDays !== null && contractDays < 0 && " (afgelopen)"}
+                          </p>
+                        )}
+                        {sub.notes && <p className="text-xs text-muted-foreground">{sub.notes}</p>}
+                        <PaymentTimeline
+                          sub={sub}
+                          payments={payments[sub.id] ?? []}
+                          onToggle={(period) => handleTogglePayment(sub.id, period)}
+                        />
                       </div>
-                    )}
-                    {sub.contract_end_date && (
-                      <div className="flex items-center gap-2 text-muted-foreground">
-                        <CalendarClock className="h-3.5 w-3.5 shrink-0" />
-                        <span>
-                          Contract t/m: {formatDate(sub.contract_end_date)}
-                          {contractDays !== null && contractDays >= 0 && contractDays <= 30 && (
-                            <Badge className="ml-2 text-[10px] px-1.5 py-0 bg-yellow-500/15 text-yellow-600 hover:bg-yellow-500/15 border-0">
-                              loopt af
-                            </Badge>
-                          )}
-                          {contractDays !== null && contractDays < 0 && (
-                            <Badge variant="secondary" className="ml-2 text-[10px] px-1.5 py-0">
-                              afgelopen
-                            </Badge>
-                          )}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-
-                  {sub.notes && (
-                    <p className="text-xs text-muted-foreground pt-1 border-t">{sub.notes}</p>
-                  )}
-
-                  {/* Expand button */}
-                  <button
-                    onClick={() => handleExpand(sub.id)}
-                    className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors w-full pt-1"
-                  >
-                    <ChevronDown className={`h-3.5 w-3.5 transition-transform ${isExpanded ? "rotate-180" : ""}`} />
-                    <span>{isExpanded ? "Verberg" : "Bekijk"} betaalhistorie</span>
-                  </button>
-
-                  {/* Payment timeline */}
-                  {isExpanded && (
-                    <PaymentTimeline
-                      sub={sub}
-                      payments={payments[sub.id] ?? []}
-                      onToggle={(period) => handleTogglePayment(sub.id, period)}
-                    />
-                  )}
-                </CardContent>
-              </Card>
+                    </TableCell>
+                  </TableRow>
+                )}
+              </Fragment>
             );
           })}
-        </div>
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
       )}
     </div>
   );

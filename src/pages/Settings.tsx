@@ -29,6 +29,7 @@ export default function Settings() {
   const [passwordForm, setPasswordForm] = useState({ current: "", next: "", confirm: "" });
   const [changingPassword, setChangingPassword] = useState(false);
   const [sendingTelegramTest, setSendingTelegramTest] = useState(false);
+  const [sendingUpcomingTelegramTest, setSendingUpcomingTelegramTest] = useState(false);
 
   useEffect(() => {
     if (!user) return;
@@ -164,6 +165,26 @@ export default function Settings() {
       });
     } finally {
       setSendingTelegramTest(false);
+    }
+  };
+
+  const handleSendUpcomingTelegramTest = async () => {
+    setSendingUpcomingTelegramTest(true);
+    try {
+      const res = await api.sendUpcomingPaymentsTelegramTest();
+      if (res.count > 0) {
+        toast({ title: "Komende-betalingen test verstuurd", description: `${res.count} betaling(en) meegenomen.` });
+      } else {
+        toast({ title: "Komende-betalingen test verstuurd", description: "Geen betalingen in de komende 2 dagen." });
+      }
+    } catch (error: unknown) {
+      toast({
+        title: "Komende-betalingen test mislukt",
+        description: error instanceof Error ? error.message : String(error),
+        variant: "destructive",
+      });
+    } finally {
+      setSendingUpcomingTelegramTest(false);
     }
   };
 
@@ -376,9 +397,14 @@ export default function Settings() {
           <CardDescription>Stuur een testbericht om je worker Telegram-melding te controleren</CardDescription>
         </CardHeader>
         <CardContent>
-          <Button onClick={handleSendTelegramTest} disabled={sendingTelegramTest}>
-            {sendingTelegramTest ? "Bezig..." : "Test Telegram bericht"}
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={handleSendTelegramTest} disabled={sendingTelegramTest}>
+              {sendingTelegramTest ? "Bezig..." : "Test Telegram bericht"}
+            </Button>
+            <Button variant="outline" onClick={handleSendUpcomingTelegramTest} disabled={sendingUpcomingTelegramTest}>
+              {sendingUpcomingTelegramTest ? "Bezig..." : "Test komende betalingen"}
+            </Button>
+          </div>
         </CardContent>
       </Card>
     </div>

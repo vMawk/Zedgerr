@@ -148,6 +148,7 @@ export type Subscription = {
   contract_end_date: string | null;
   next_payment_date: string | null;
   notes: string | null;
+  tags: string[];
   created_at: string;
   updated_at: string;
 };
