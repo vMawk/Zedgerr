@@ -376,13 +376,23 @@ export default function Subscriptions() {
 
   const quickTags = ["Noodzakelijk", "Luxe", "Hobby", "Vrije tijd", "Werk", "Gezondheid", "Entertainment", "Besparen"];
 
+  const preserveScroll = (updater: () => void) => {
+    const y = window.scrollY;
+    updater();
+    requestAnimationFrame(() => {
+      window.scrollTo({ top: y });
+    });
+  };
+
   const toggleTag = (tag: string) => {
-    setForm((prev) => {
-      const current = prev.tags ?? [];
-      if (current.includes(tag)) {
-        return { ...prev, tags: current.filter((t) => t !== tag) };
-      }
-      return { ...prev, tags: [...current, tag] };
+    preserveScroll(() => {
+      setForm((prev) => {
+        const current = prev.tags ?? [];
+        if (current.includes(tag)) {
+          return { ...prev, tags: current.filter((t) => t !== tag) };
+        }
+        return { ...prev, tags: [...current, tag] };
+      });
     });
   };
 
@@ -514,13 +524,15 @@ export default function Subscriptions() {
                   placeholder="bijv. Noodzakelijk, Luxe, Hobby"
                   value={(form.tags ?? []).join(", ")}
                   onChange={(e) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      tags: e.target.value
-                        .split(",")
-                        .map((t) => t.trim())
-                        .filter(Boolean),
-                    }))
+                    preserveScroll(() => {
+                      setForm((prev) => ({
+                        ...prev,
+                        tags: e.target.value
+                          .split(",")
+                          .map((t) => t.trim())
+                          .filter(Boolean),
+                      }));
+                    })
                   }
                 />
                 <div className="flex flex-wrap gap-2">
