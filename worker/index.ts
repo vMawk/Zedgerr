@@ -1546,6 +1546,24 @@ async function checkUpcomingPayments(env: Env): Promise<void> {
   await sendTelegramMessage(env, msg);
 }
 
+api.post("/api/telegram/test", async (c) => {
+  if (!c.env.TELEGRAM_BOT_TOKEN || !c.env.TELEGRAM_CHAT_ID) {
+    return c.json(
+      { error: "Telegram is niet geconfigureerd. Voeg TELEGRAM_BOT_TOKEN en TELEGRAM_CHAT_ID toe." },
+      400,
+    );
+  }
+  const email = c.get("email") ?? "onbekend";
+  const now = new Date().toLocaleString("nl-NL", { dateStyle: "medium", timeStyle: "short" });
+  const text =
+    `🧪 <b>Telegram testbericht</b>\n` +
+    `Verzonden vanuit de app-instellingen.\n` +
+    `Gebruiker: <code>${email}</code>\n` +
+    `Tijd: ${now}`;
+  await sendTelegramMessage(c.env, text);
+  return c.json({ ok: true });
+});
+
 // --- Deploy: static SPA + API ---
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {

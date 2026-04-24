@@ -28,6 +28,7 @@ export default function Settings() {
   const [svcAmount, setSvcAmount] = useState("");
   const [passwordForm, setPasswordForm] = useState({ current: "", next: "", confirm: "" });
   const [changingPassword, setChangingPassword] = useState(false);
+  const [sendingTelegramTest, setSendingTelegramTest] = useState(false);
 
   useEffect(() => {
     if (!user) return;
@@ -147,6 +148,22 @@ export default function Settings() {
       toast({ title: "Wachtwoord wijzigen mislukt", description: error instanceof Error ? error.message : String(error), variant: "destructive" });
     } finally {
       setChangingPassword(false);
+    }
+  };
+
+  const handleSendTelegramTest = async () => {
+    setSendingTelegramTest(true);
+    try {
+      await api.sendTelegramTest();
+      toast({ title: "Telegram test verstuurd" });
+    } catch (error: unknown) {
+      toast({
+        title: "Telegram test mislukt",
+        description: error instanceof Error ? error.message : String(error),
+        variant: "destructive",
+      });
+    } finally {
+      setSendingTelegramTest(false);
     }
   };
 
@@ -349,6 +366,18 @@ export default function Settings() {
           </div>
           <Button onClick={handleChangePassword} disabled={changingPassword}>
             {changingPassword ? "Bezig..." : "Wachtwoord opslaan"}
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Telegram</CardTitle>
+          <CardDescription>Stuur een testbericht om je worker Telegram-melding te controleren</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button onClick={handleSendTelegramTest} disabled={sendingTelegramTest}>
+            {sendingTelegramTest ? "Bezig..." : "Test Telegram bericht"}
           </Button>
         </CardContent>
       </Card>
