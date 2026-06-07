@@ -163,3 +163,26 @@ export type SubscriptionPayment = {
   paid_at: string | null;
   created_at: string;
 };
+
+export type LeadStatus =
+  | "new"
+  | "emailed"
+  | "received_answer"
+  | "no_response"
+  | "follow_up"
+  | "converted"
+  | "rejected";
+
+export type Lead = {
+  id: string;
+  user_id: string;
+  company_name: string;
+  contact_name: string | null;
+  email: string | null;
+  phone: string | null;
+  website: string | null;
+  status: LeadStatus;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
