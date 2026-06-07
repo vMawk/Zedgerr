@@ -4,6 +4,7 @@ import type {
   DailyNote,
   Invoice,
   InvoiceLine,
+  Lead,
   Quote,
   QuoteLine,
   Service,
@@ -183,4 +184,9 @@ export const api = {
     req<SubscriptionPayment[]>("GET", `/subscriptions/${subscriptionId}/payments`),
   toggleSubscriptionPayment: (subscriptionId: string, periodDate: string) =>
     req<SubscriptionPayment>("POST", `/subscriptions/${subscriptionId}/payments/toggle`, { period_date: periodDate }),
+
+  getLeads: () => req<Lead[]>("GET", "/leads"),
+  createLead: (body: Partial<Lead> & { company_name: string }) => req<Lead>("POST", "/leads", body),
+  updateLead: (id: string, body: Partial<Lead>) => req<Lead>("PATCH", `/leads/${id}`, body),
+  deleteLead: (id: string) => req<void>("DELETE", `/leads/${id}`),
 };

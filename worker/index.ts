@@ -1520,6 +1520,66 @@ api.post("/api/subscriptions/:id/payments/toggle", async (c) => {
   return c.json({ ...row, paid: Boolean(row?.paid) });
 });
 
+// --- Leads ---
+api.get("/api/leads", async (c) => {
+  const userId = c.get("userId")!;
+  const { results } = await c.env.DB
+    .prepare("SELECT * FROM leads WHERE user_id = ? ORDER BY created_at DESC")
+    .bind(userId)
+    .all();
+  return c.json(results ?? []);
+});
+
+api.post("/api/leads", async (c) => {
+  const userId = c.get("userId")!;
+  const req = await c.req.json<Record<string, unknown>>();
+  if (!req.company_name) return c.json({ error: "company_name is verplicht" }, 400);
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  await c.env.DB
+    .prepare(
+      `INSERT INTO leads (id, user_id, company_name, contact_name, email, phone, website, status, notes, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(
+      id, userId, req.company_name, req.contact_name ?? null, req.email ?? null,
+      req.phone ?? null, req.website ?? null, req.status ?? "new", req.notes ?? null, now, now,
+    )
+    .run();
+  const row = await c.env.DB.prepare("SELECT * FROM leads WHERE id = ?").bind(id).first();
+  return c.json(row);
+});
+
+api.patch("/api/leads/:id", async (c) => {
+  const userId = c.get("userId")!;
+  const { id } = c.req.param();
+  const req = await c.req.json<Record<string, unknown>>();
+  const existing = await c.env.DB.prepare("SELECT id FROM leads WHERE id = ? AND user_id = ?").bind(id, userId).first();
+  if (!existing) return c.json({ error: "Not found" }, 404);
+  const now = new Date().toISOString();
+  const fields: string[] = [];
+  const values: unknown[] = [];
+  for (const key of ["company_name", "contact_name", "email", "phone", "website", "status", "notes"]) {
+    if (key in req) {
+      fields.push(`${key} = ?`);
+      values.push(req[key] ?? null);
+    }
+  }
+  fields.push("updated_at = ?");
+  values.push(now, id, userId);
+  await c.env.DB.prepare(`UPDATE leads SET ${fields.join(", ")} WHERE id = ? AND user_id = ?`).bind(...values).run();
+  const row = await c.env.DB.prepare("SELECT * FROM leads WHERE id = ? AND user_id = ?").bind(id, userId).first();
+  if (!row) return c.json({ error: "Not found" }, 404);
+  return c.json(row);
+});
+
+api.delete("/api/leads/:id", async (c) => {
+  const userId = c.get("userId")!;
+  const { id } = c.req.param();
+  await c.env.DB.prepare("DELETE FROM leads WHERE id = ? AND user_id = ?").bind(id, userId).run();
+  return c.body(null, 204);
+});
+
 /** D1-fouten (o.a. ontbrekende tabellen) anders als kale "Internal Server Error" zonder JSON. */
 api.onError((err, c) => {
   console.error(err);
