@@ -73,7 +73,7 @@ export default function Reports() {
             <SelectTrigger className="w-48"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Alle bedrijven</SelectItem>
-              {companies.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+              {companies.map((c) => <SelectItem key={c.id} value={c.id}>{c.name || "Klant"}</SelectItem>)}
             </SelectContent>
           </Select>
         </div>

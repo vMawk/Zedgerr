@@ -429,7 +429,7 @@ api.get("/api/companies", async (c) => {
     .prepare(
       `SELECT c.*,
         (SELECT 1 FROM company_portal_users p WHERE p.company_id = c.id LIMIT 1) AS has_portal
-       FROM companies c WHERE c.user_id = ? ORDER BY c.name`,
+       FROM companies c WHERE c.user_id = ? ORDER BY c.name NULLS LAST`,
     )
     .bind(userId)
     .all();
@@ -454,7 +454,7 @@ api.post("/api/companies", async (c) => {
     .bind(
       id,
       userId,
-      req.name,
+      req.name ?? null,
       req.contact_person ?? null,
       req.email ?? null,
       req.phone ?? null,
@@ -496,7 +496,7 @@ api.patch("/api/companies/:id", async (c) => {
        WHERE id = ? AND user_id = ?`,
     )
     .bind(
-      req.name,
+      req.name ?? null,
       req.contact_person ?? null,
       req.email ?? null,
       req.phone ?? null,

@@ -222,7 +222,7 @@ export default function Dashboard() {
             <SelectTrigger className="w-[220px]"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Alle bedrijven</SelectItem>
-              {companies.map((company) => <SelectItem key={company.id} value={company.id}>{company.name}</SelectItem>)}
+              {companies.map((company) => <SelectItem key={company.id} value={company.id}>{company.name || "Klant"}</SelectItem>)}
             </SelectContent>
           </Select>
         </div>

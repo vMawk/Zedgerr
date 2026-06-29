@@ -340,7 +340,7 @@ export default function Invoices() {
                 <Select value={selectedCompany} onValueChange={setSelectedCompany}>
                   <SelectTrigger><SelectValue placeholder="Selecteer bedrijf" /></SelectTrigger>
                   <SelectContent>
-                    {companies.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                    {companies.map((c) => <SelectItem key={c.id} value={c.id}>{c.name || "Klant"}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
@@ -525,7 +525,7 @@ export default function Invoices() {
                   }
                 >
                   <TableCell className="font-medium">{invoice.invoice_number}</TableCell>
-                  <TableCell>{invoice.companies?.name}</TableCell>
+                  <TableCell>{invoice.companies?.name || "Klant"}</TableCell>
                   <TableCell>{new Date(invoice.invoice_date).toLocaleDateString("nl-NL")}</TableCell>
                   <TableCell>
                     <div className="leading-tight">
