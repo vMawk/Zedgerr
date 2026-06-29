@@ -5,7 +5,7 @@ export type Company = {
   user_id: string;
   /** Gezet door API: klantenportaal actief voor dit bedrijf */
   has_portal?: boolean;
-  name: string;
+  name: string | null;
   contact_person: string | null;
   email: string | null;
   phone: string | null;

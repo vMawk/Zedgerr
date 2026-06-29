@@ -47,7 +47,7 @@ export default function Companies() {
   useEffect(() => { if (user) fetchCompanies(); }, [user]);
 
   const handleSave = async () => {
-    if (!user || !form.name) return;
+    if (!user) return;
     const pw = portalPassword.trim();
     if (portalEmail.trim()) {
       if (!portalHasPortal && pw.length < 6) {
@@ -171,7 +171,7 @@ export default function Companies() {
             </DialogHeader>
             <div className="grid gap-4 py-4">
               <div className="grid gap-2">
-                <Label>Bedrijfsnaam *</Label>
+                <Label>Bedrijfsnaam</Label>
                 <Input value={form.name || ""} onChange={(e) => updateField("name", e.target.value)} />
               </div>
               <div className="grid grid-cols-2 gap-4">
@@ -302,7 +302,7 @@ export default function Companies() {
             <Card key={company.id}>
               <CardHeader className="flex flex-row items-start justify-between pb-2">
                 <div className="space-y-1">
-                  <CardTitle className="text-base">{company.name}</CardTitle>
+                  <CardTitle className="text-base">{company.name || "Klant"}</CardTitle>
                   {company.has_portal && (
                     <Badge variant="secondary" className="text-xs font-normal">
                       Klantenportaal

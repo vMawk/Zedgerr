@@ -181,7 +181,7 @@ export default function Quotes() {
                 <Select value={selectedCompany} onValueChange={setSelectedCompany}>
                   <SelectTrigger><SelectValue placeholder="Selecteer bedrijf" /></SelectTrigger>
                   <SelectContent>
-                    {companies.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                    {companies.map((c) => <SelectItem key={c.id} value={c.id}>{c.name || "Klant"}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
@@ -252,7 +252,7 @@ export default function Quotes() {
               {quotes.map((quote) => (
                 <TableRow key={quote.id}>
                   <TableCell className="font-medium">{quote.quote_number}</TableCell>
-                  <TableCell>{quote.companies?.name}</TableCell>
+                  <TableCell>{quote.companies?.name || "Klant"}</TableCell>
                   <TableCell>{new Date(quote.quote_date).toLocaleDateString("nl-NL")}</TableCell>
                   <TableCell>€{Number(quote.total).toLocaleString("nl-NL", { minimumFractionDigits: 2 })}</TableCell>
                   <TableCell>
