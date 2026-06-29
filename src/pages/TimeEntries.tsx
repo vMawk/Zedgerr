@@ -121,7 +121,7 @@ export default function TimeEntries() {
                 <Select value={form.company_id} onValueChange={(v) => setForm((p) => ({ ...p, company_id: v }))}>
                   <SelectTrigger><SelectValue placeholder="Selecteer bedrijf" /></SelectTrigger>
                   <SelectContent>
-                    {companies.map((c) => <SelectItem key={c.id} value={c.id}>{c.name || "Klant"}</SelectItem>)}
+                    {companies.map((c) => <SelectItem key={c.id} value={c.id}>{c.name || c.contact_person || "Klant"}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
@@ -179,7 +179,7 @@ export default function TimeEntries() {
               {entries.map((entry) => (
                 <TableRow key={entry.id}>
                   <TableCell>{new Date(entry.date).toLocaleDateString("nl-NL")}</TableCell>
-                  <TableCell>{entry.companies?.name || "Klant"}</TableCell>
+                  <TableCell>{entry.companies?.name || entry.companies?.contact_person || "Klant"}</TableCell>
                   <TableCell>{Number(entry.hours).toFixed(2)}</TableCell>
                   <TableCell className="hidden md:table-cell max-w-xs truncate">{entry.description}</TableCell>
                   <TableCell>{entry.hourly_rate ? `€${Number(entry.hourly_rate).toFixed(2)}` : "-"}</TableCell>

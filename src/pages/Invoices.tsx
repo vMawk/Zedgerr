@@ -46,7 +46,7 @@ function round2(n: number): number {
 export default function Invoices() {
   const { user } = useAuth();
   const { toast } = useToast();
-  const [invoices, setInvoices] = useState<(Invoice & { companies: { name: string | null } | null })[]>([]);
+  const [invoices, setInvoices] = useState<(Invoice & { companies: { name: string | null; contact_person: string | null } | null })[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [services, setServices] = useState<Service[]>([]);
   const [open, setOpen] = useState(false);
@@ -64,7 +64,7 @@ export default function Invoices() {
   const [invoiceToDelete, setInvoiceToDelete] = useState<Invoice | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
-  const [invoiceToEdit, setInvoiceToEdit] = useState<(Invoice & { companies: { name: string | null } | null }) | null>(null);
+  const [invoiceToEdit, setInvoiceToEdit] = useState<(Invoice & { companies: { name: string | null; contact_person: string | null } | null }) | null>(null);
   const [editInvoiceNumber, setEditInvoiceNumber] = useState("");
   const [editInvoiceDate, setEditInvoiceDate] = useState("");
   const [editDueDate, setEditDueDate] = useState("");
@@ -72,7 +72,7 @@ export default function Invoices() {
   const [editNotes, setEditNotes] = useState("");
   const [editInvoiceType, setEditInvoiceType] = useState<"business" | "private">("business");
   const [splitOpen, setSplitOpen] = useState(false);
-  const [invoiceToSplit, setInvoiceToSplit] = useState<(Invoice & { companies: { name: string | null } | null }) | null>(null);
+  const [invoiceToSplit, setInvoiceToSplit] = useState<(Invoice & { companies: { name: string | null; contact_person: string | null } | null }) | null>(null);
   const [splitParts, setSplitParts] = useState("3");
   const [splitIntervalDays, setSplitIntervalDays] = useState("30");
   const [splitFirstDueDate, setSplitFirstDueDate] = useState("");
@@ -200,7 +200,7 @@ export default function Invoices() {
     }
   };
 
-  const handleDownloadPDF = async (invoice: Invoice & { companies: { name: string | null } | null }) => {
+  const handleDownloadPDF = async (invoice: Invoice & { companies: { name: string | null; contact_person: string | null } | null }) => {
     const [linesRes, settingsRes, companyRes] = await Promise.all([
       api.getInvoiceLines(invoice.id),
       api.getBusinessSettings(),
@@ -224,7 +224,7 @@ export default function Invoices() {
     }
   };
 
-  const openEdit = (inv: Invoice & { companies: { name: string | null } | null }) => {
+  const openEdit = (inv: Invoice & { companies: { name: string | null; contact_person: string | null } | null }) => {
     setInvoiceToEdit(inv);
     setEditInvoiceNumber(inv.invoice_number);
     setEditInvoiceDate(inv.invoice_date);
@@ -255,7 +255,7 @@ export default function Invoices() {
     }
   };
 
-  const openSplit = (inv: Invoice & { companies: { name: string | null } | null }) => {
+  const openSplit = (inv: Invoice & { companies: { name: string | null; contact_person: string | null } | null }) => {
     setInvoiceToSplit(inv);
     setSplitParts("3");
     setSplitIntervalDays("30");
@@ -340,7 +340,7 @@ export default function Invoices() {
                 <Select value={selectedCompany} onValueChange={setSelectedCompany}>
                   <SelectTrigger><SelectValue placeholder="Selecteer bedrijf" /></SelectTrigger>
                   <SelectContent>
-                    {companies.map((c) => <SelectItem key={c.id} value={c.id}>{c.name || "Klant"}</SelectItem>)}
+                    {companies.map((c) => <SelectItem key={c.id} value={c.id}>{c.name || c.contact_person || "Klant"}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
@@ -525,7 +525,7 @@ export default function Invoices() {
                   }
                 >
                   <TableCell className="font-medium">{invoice.invoice_number}</TableCell>
-                  <TableCell>{invoice.companies?.name || "Klant"}</TableCell>
+                  <TableCell>{invoice.companies?.name || invoice.companies?.contact_person || "Klant"}</TableCell>
                   <TableCell>{new Date(invoice.invoice_date).toLocaleDateString("nl-NL")}</TableCell>
                   <TableCell>
                     <div className="leading-tight">

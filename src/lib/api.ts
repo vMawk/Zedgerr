@@ -130,7 +130,7 @@ export const api = {
   sendUpcomingPaymentsTelegramTest: () =>
     req<{ ok: boolean; count: number }>("POST", "/telegram/test-upcoming-payments"),
 
-  getInvoices: () => req<(Invoice & { companies: { name: string | null } | null })[]>("GET", "/invoices"),
+  getInvoices: () => req<(Invoice & { companies: { name: string | null; contact_person: string | null } | null })[]>("GET", "/invoices"),
   invoicesExistForMonth: (month: string) => req<{ exists: boolean }>("GET", `/invoices/exists?month=${encodeURIComponent(month)}`),
   invoicesToSend: (month: string) =>
     req<{ count: number; invoices: { id: string; invoice_number: string; total: number; company_name: string | null }[] }>(
@@ -165,7 +165,7 @@ export const api = {
   updateService: (id: string, body: { name: string; amount: number }) => req<Service>("PATCH", `/services/${id}`, body),
   deleteService: (id: string) => req<void>("DELETE", `/services/${id}`),
 
-  getQuotes: () => req<(Quote & { companies: { name: string | null } | null })[]>("GET", "/quotes"),
+  getQuotes: () => req<(Quote & { companies: { name: string | null; contact_person: string | null } | null })[]>("GET", "/quotes"),
   createQuote: (body: Record<string, unknown>) => req<Quote>("POST", "/quotes", body),
   updateQuote: (
     id: string,
