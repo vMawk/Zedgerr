@@ -1,6 +1,7 @@
 import type {
   BusinessSettings,
   Company,
+  CompanyProduct,
   DailyNote,
   Invoice,
   InvoiceLine,
@@ -184,6 +185,14 @@ export const api = {
     req<SubscriptionPayment[]>("GET", `/subscriptions/${subscriptionId}/payments`),
   toggleSubscriptionPayment: (subscriptionId: string, periodDate: string) =>
     req<SubscriptionPayment>("POST", `/subscriptions/${subscriptionId}/payments/toggle`, { period_date: periodDate }),
+
+  getCompanyProducts: (companyId: string) => req<CompanyProduct[]>("GET", `/companies/${companyId}/products`),
+  createCompanyProduct: (companyId: string, body: { name: string; sale_price: number; cost_price?: number | null }) =>
+    req<CompanyProduct>("POST", `/companies/${companyId}/products`, body),
+  updateCompanyProduct: (companyId: string, productId: string, body: { name: string; sale_price: number; cost_price?: number | null }) =>
+    req<CompanyProduct>("PATCH", `/companies/${companyId}/products/${productId}`, body),
+  deleteCompanyProduct: (companyId: string, productId: string) =>
+    req<void>("DELETE", `/companies/${companyId}/products/${productId}`),
 
   getLeads: () => req<Lead[]>("GET", "/leads"),
   createLead: (body: Partial<Lead> & { company_name: string }) => req<Lead>("POST", "/leads", body),

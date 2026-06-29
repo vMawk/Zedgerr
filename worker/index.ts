@@ -590,6 +590,63 @@ api.get("/api/companies/:id", async (c) => {
   return c.json(row);
 });
 
+// --- Company products ---
+api.get("/api/companies/:id/products", async (c) => {
+  const userId = c.get("userId")!;
+  const { id } = c.req.param();
+  const owns = await c.env.DB.prepare("SELECT id FROM companies WHERE id = ? AND user_id = ?").bind(id, userId).first();
+  if (!owns) return c.json({ error: "Not found" }, 404);
+  const { results } = await c.env.DB
+    .prepare("SELECT * FROM company_products WHERE company_id = ? ORDER BY name")
+    .bind(id)
+    .all();
+  return c.json(results ?? []);
+});
+
+api.post("/api/companies/:id/products", async (c) => {
+  const userId = c.get("userId")!;
+  const { id } = c.req.param();
+  const owns = await c.env.DB.prepare("SELECT id FROM companies WHERE id = ? AND user_id = ?").bind(id, userId).first();
+  if (!owns) return c.json({ error: "Not found" }, 404);
+  const req = await c.req.json<Record<string, unknown>>();
+  const productId = crypto.randomUUID();
+  const now = new Date().toISOString();
+  await c.env.DB
+    .prepare("INSERT INTO company_products (id, user_id, company_id, name, sale_price, cost_price, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+    .bind(productId, userId, id, req.name, req.sale_price, req.cost_price ?? null, now, now)
+    .run();
+  const row = await c.env.DB.prepare("SELECT * FROM company_products WHERE id = ?").bind(productId).first();
+  return c.json(row);
+});
+
+api.patch("/api/companies/:id/products/:productId", async (c) => {
+  const userId = c.get("userId")!;
+  const { id, productId } = c.req.param();
+  const existing = await c.env.DB
+    .prepare("SELECT id FROM company_products WHERE id = ? AND company_id = ? AND user_id = ?")
+    .bind(productId, id, userId)
+    .first();
+  if (!existing) return c.json({ error: "Not found" }, 404);
+  const req = await c.req.json<Record<string, unknown>>();
+  const now = new Date().toISOString();
+  await c.env.DB
+    .prepare("UPDATE company_products SET name = ?, sale_price = ?, cost_price = ?, updated_at = ? WHERE id = ?")
+    .bind(req.name, req.sale_price, req.cost_price ?? null, now, productId)
+    .run();
+  const row = await c.env.DB.prepare("SELECT * FROM company_products WHERE id = ?").bind(productId).first();
+  return c.json(row);
+});
+
+api.delete("/api/companies/:id/products/:productId", async (c) => {
+  const userId = c.get("userId")!;
+  const { id, productId } = c.req.param();
+  await c.env.DB
+    .prepare("DELETE FROM company_products WHERE id = ? AND company_id = ? AND user_id = ?")
+    .bind(productId, id, userId)
+    .run();
+  return c.body(null, 204);
+});
+
 // --- Time entries ---
 api.get("/api/time-entries", async (c) => {
   const userId = c.get("userId")!;
