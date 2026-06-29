@@ -1,4 +1,4 @@
-import { LayoutDashboard, Building2, Clock, FileText, FileCheck, BarChart3, Settings, LogOut, MonitorSmartphone, NotebookPen, RepeatIcon, Users } from "lucide-react";
+import { LayoutDashboard, Building2, Clock, FileText, FileCheck, BarChart3, Settings, LogOut, MonitorSmartphone, NotebookPen, RepeatIcon, Users, Package } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
@@ -25,6 +25,7 @@ const mainItems = [
   { title: "Notities", url: "/notities", icon: NotebookPen },
   { title: "Abonnementen", url: "/abonnementen", icon: RepeatIcon },
   { title: "Leads", url: "/leads", icon: Users },
+  { title: "Producten", url: "/producten", icon: Package },
 ];
 
 const settingsItems = [

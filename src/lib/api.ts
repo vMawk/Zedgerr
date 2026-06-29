@@ -190,9 +190,9 @@ export const api = {
     req<SubscriptionPayment>("POST", `/subscriptions/${subscriptionId}/payments/toggle`, { period_date: periodDate }),
 
   getCompanyProducts: (companyId: string) => req<CompanyProduct[]>("GET", `/companies/${companyId}/products`),
-  createCompanyProduct: (companyId: string, body: { name: string; sale_price: number; cost_price?: number | null }) =>
+  createCompanyProduct: (companyId: string, body: Partial<CompanyProduct> & { name: string; sale_price: number }) =>
     req<CompanyProduct>("POST", `/companies/${companyId}/products`, body),
-  updateCompanyProduct: (companyId: string, productId: string, body: { name: string; sale_price: number; cost_price?: number | null }) =>
+  updateCompanyProduct: (companyId: string, productId: string, body: Partial<CompanyProduct> & { name: string; sale_price: number }) =>
     req<CompanyProduct>("PATCH", `/companies/${companyId}/products/${productId}`, body),
   deleteCompanyProduct: (companyId: string, productId: string) =>
     req<void>("DELETE", `/companies/${companyId}/products/${productId}`),
