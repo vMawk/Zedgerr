@@ -53,6 +53,7 @@ export type Invoice = {
   advance_label?: "krediet" | "voorschot";
   notes: string | null;
   invoice_type: "business" | "private";
+  payment_method: "overboeking" | "contant";
   created_at: string;
   updated_at: string;
 };

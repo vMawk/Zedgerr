@@ -138,6 +138,9 @@ export const api = {
       "GET",
       `/invoices/to-send?month=${encodeURIComponent(month)}`,
     ),
+  createInvoiceLine: (body: { invoice_id: string; description: string; date?: string | null; amount: number }) =>
+    req<InvoiceLine>("POST", "/invoice-lines", body),
+  deleteInvoiceLine: (id: string) => req<void>("DELETE", `/invoice-lines/${id}`),
   createInvoice: (body: Record<string, unknown>) => req<Invoice>("POST", "/invoices", body),
   splitInvoice: (id: string, body?: { parts?: number; interval_days?: number; first_due_date?: string }) =>
     req<{ ok: boolean; created_invoice_ids: string[] }>("POST", `/invoices/${id}/split`, body ?? {}),
