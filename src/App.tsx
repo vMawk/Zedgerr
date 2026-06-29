@@ -16,6 +16,7 @@ import Settings from "./pages/Settings";
 import Notes from "./pages/Notes";
 import Subscriptions from "./pages/Subscriptions";
 import Leads from "./pages/Leads";
+import Products from "./pages/Products";
 import NotFound from "./pages/NotFound";
 import Auth from "./pages/Auth";
 import { PortalProvider, usePortalAuth } from "@/lib/portal-auth";
@@ -92,6 +93,7 @@ const App = () => (
               <Route path="/notities" element={<Notes />} />
               <Route path="/abonnementen" element={<Subscriptions />} />
               <Route path="/leads" element={<Leads />} />
+              <Route path="/producten" element={<Products />} />
               <Route path="/instellingen" element={<Settings />} />
             </Route>
             <Route path="*" element={<NotFound />} />

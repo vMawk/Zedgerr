@@ -370,142 +370,110 @@ export default function Invoices() {
             <DialogHeader>
               <DialogTitle>Nieuwe factuur</DialogTitle>
             </DialogHeader>
-            <div className="grid gap-4 py-4">
-              <div className="grid gap-2">
-                <Label>Factuurdatum</Label>
-                <Input type="date" value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} />
-              </div>
-              <div className="grid gap-2">
-                <Label>Factuurtype</Label>
-                <Select value={invoiceType} onValueChange={(v) => setInvoiceType(v as "business" | "private")}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="business">Zakelijk (met BTW)</SelectItem>
-                    <SelectItem value="private">Particulier (vrijgesteld van BTW)</SelectItem>
-                  </SelectContent>
-                </Select>
-                {invoiceType === "private" && (
-                  <p className="text-xs text-muted-foreground">
-                    BTW wordt automatisch 0%. Op de PDF komt “Vrijgesteld van BTW” en de privé-afzender uit Instellingen.
-                  </p>
-                )}
-              </div>
-              <div className="grid gap-2">
-                <Label>Betaalwijze</Label>
-                <Select value={paymentMethod} onValueChange={(v) => setPaymentMethod(v as "overboeking" | "contant")}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="overboeking">Overboeking</SelectItem>
-                    <SelectItem value="contant">Contant</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid gap-2">
-                <Label>Type factuur</Label>
-                <Select value={createMode} onValueChange={(v) => setCreateMode(v as "hours" | "service" | "product")}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="hours">Op basis van uren</SelectItem>
-                    <SelectItem value="service">Op basis van dienst (vast bedrag)</SelectItem>
-                    <SelectItem value="product">Op basis van producten</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid gap-2">
-                <Label>Bedrijf</Label>
-                <Select value={selectedCompany} onValueChange={setSelectedCompany}>
-                  <SelectTrigger><SelectValue placeholder="Selecteer bedrijf" /></SelectTrigger>
-                  <SelectContent>
-                    {companies.map((c) => <SelectItem key={c.id} value={c.id}>{c.name || c.contact_person || "Klant"}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
+            <div className=”space-y-5 py-2”>
 
-              {selectedCompany && (
-                <div className="rounded-md border p-3 space-y-3">
-                  <div className="flex items-start gap-3">
-                    <Checkbox
-                      id="apply-advance"
-                      checked={applyAdvance}
-                      onCheckedChange={(c) => setApplyAdvance(c === true)}
-                      className="mt-1"
-                    />
-                    <div className="grid gap-1 flex-1">
-                      <Label htmlFor="apply-advance" className="font-medium leading-snug">
-                        Klantsaldo verrekenen
-                      </Label>
-                      <p className="text-xs text-muted-foreground">
-                        Zo niet, dan blijft het saldo op de klant staan en wordt er niets op deze factuur afgetrokken.
-                      </p>
-                    </div>
-                  </div>
-                  <div className="grid gap-2 pl-7 sm:pl-0">
-                    <Label>Op de factuur (PDF) tonen als</Label>
-                    <Select
-                      value={advanceLabel}
-                      onValueChange={(v) => setAdvanceLabel(v as "krediet" | "voorschot")}
-                      disabled={!applyAdvance}
-                    >
-                      <SelectTrigger><SelectValue /></SelectTrigger>
+              {/* Sectie 1: Klant */}
+              <div className=”space-y-3”>
+                <p className=”text-xs font-semibold text-muted-foreground uppercase tracking-wide”>Klant &amp; datum</p>
+                <div className=”grid grid-cols-2 gap-3”>
+                  <div className=”col-span-2 grid gap-2”>
+                    <Label>Klant</Label>
+                    <Select value={selectedCompany} onValueChange={setSelectedCompany}>
+                      <SelectTrigger><SelectValue placeholder=”Selecteer klant” /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="krediet">Krediet</SelectItem>
-                        <SelectItem value="voorschot">Voorschot</SelectItem>
+                        {companies.map((c) => <SelectItem key={c.id} value={c.id}>{c.name || c.contact_person || “Klant”}</SelectItem>)}
                       </SelectContent>
                     </Select>
-                    {!applyAdvance && (
-                      <p className="text-xs text-muted-foreground">Woordkeuze is alleen van toepassing als je saldo verrekent.</p>
-                    )}
+                  </div>
+                  <div className=”grid gap-2”>
+                    <Label>Datum</Label>
+                    <Input type=”date” value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} />
+                  </div>
+                  <div className=”grid gap-2”>
+                    <Label>Betaalwijze</Label>
+                    <Select value={paymentMethod} onValueChange={(v) => setPaymentMethod(v as “overboeking” | “contant”)}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value=”overboeking”>Overboeking</SelectItem>
+                        <SelectItem value=”contant”>Contant</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className=”grid gap-2”>
+                    <Label>Factuurtype</Label>
+                    <Select value={invoiceType} onValueChange={(v) => setInvoiceType(v as “business” | “private”)}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value=”business”>Zakelijk (met BTW)</SelectItem>
+                        <SelectItem value=”private”>Particulier (geen BTW)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className=”grid gap-2”>
+                    <Label>BTW-percentage</Label>
+                    <Input type=”number” value={invoiceType === “private” ? “0” : btwPercentage} onChange={(e) => setBtwPercentage(e.target.value)} disabled={invoiceType === “private”} />
                   </div>
                 </div>
-              )}
+              </div>
 
-              {createMode === "hours" && uninvoicedEntries.length > 0 && (
-                <div className="grid gap-2">
-                  <Label>Selecteer uren</Label>
-                  <div className="border rounded-md max-h-48 overflow-y-auto">
-                    {uninvoicedEntries.map((entry) => (
-                      <label key={entry.id} className="flex items-center gap-3 px-3 py-2 hover:bg-muted/50 cursor-pointer">
-                        <input type="checkbox" checked={selectedEntries.includes(entry.id)} onChange={() => toggleEntry(entry.id)} className="rounded" />
-                        <span className="text-sm">{new Date(entry.date).toLocaleDateString("nl-NL")}</span>
-                        <span className="text-sm text-muted-foreground flex-1 truncate">{entry.description}</span>
-                        <span className="text-sm font-medium">{Number(entry.hours).toFixed(2)}u</span>
-                      </label>
-                    ))}
-                  </div>
+              {/* Sectie 2: Inhoud */}
+              <div className=”border-t pt-4 space-y-3”>
+                <p className=”text-xs font-semibold text-muted-foreground uppercase tracking-wide”>Factuurinhoud</p>
+                <div className=”grid gap-2”>
+                  <Label>Type regels</Label>
+                  <Select value={createMode} onValueChange={(v) => setCreateMode(v as “hours” | “service” | “product”)}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value=”hours”>Uren</SelectItem>
+                      <SelectItem value=”service”>Dienst / vast bedrag</SelectItem>
+                      <SelectItem value=”product”>Producten van deze klant</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
-              )}
 
-              {createMode === "product" && selectedCompany && (
-                <div className="grid gap-2">
-                  <Label>Producten</Label>
-                  {companyProducts.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">
-                      Geen producten voor deze klant. Voeg ze toe via de klantpagina.
-                    </p>
+                {createMode === “hours” && (
+                  uninvoicedEntries.length === 0 ? (
+                    selectedCompany && <p className=”text-sm text-muted-foreground”>Geen open uren voor deze klant.</p>
                   ) : (
-                    <div className="border rounded-md divide-y">
+                    <div className=”border rounded-md max-h-52 overflow-y-auto divide-y”>
+                      {uninvoicedEntries.map((entry) => (
+                        <label key={entry.id} className=”flex items-center gap-3 px-3 py-2 hover:bg-muted/50 cursor-pointer”>
+                          <input type=”checkbox” checked={selectedEntries.includes(entry.id)} onChange={() => toggleEntry(entry.id)} className=”rounded” />
+                          <span className=”text-sm text-muted-foreground w-20 shrink-0”>{new Date(entry.date).toLocaleDateString(“nl-NL”)}</span>
+                          <span className=”text-sm flex-1 truncate”>{entry.description}</span>
+                          <span className=”text-sm font-medium shrink-0”>{Number(entry.hours).toFixed(2)}u</span>
+                        </label>
+                      ))}
+                    </div>
+                  )
+                )}
+
+                {createMode === “product” && selectedCompany && (
+                  companyProducts.length === 0 ? (
+                    <p className=”text-sm text-muted-foreground”>Geen producten voor deze klant. Voeg ze toe via Producten of de klantpagina.</p>
+                  ) : (
+                    <div className=”border rounded-md divide-y max-h-52 overflow-y-auto”>
                       {companyProducts.map((p) => {
                         const qty = selectedProducts[p.id] ?? 0;
+                        const vat = p.vat_percentage ?? 21;
+                        const exVatPrice = p.price_includes_vat ? p.sale_price / (1 + vat / 100) : p.sale_price;
                         return (
-                          <div key={p.id} className="flex items-center gap-3 px-3 py-2">
+                          <div key={p.id} className=”flex items-center gap-3 px-3 py-2”>
                             <Checkbox
                               checked={qty > 0}
-                              onCheckedChange={(checked) =>
-                                setSelectedProducts((prev) => ({
-                                  ...prev,
-                                  [p.id]: checked ? 1 : 0,
-                                }))
-                              }
+                              onCheckedChange={(checked) => setSelectedProducts((prev) => ({ ...prev, [p.id]: checked ? 1 : 0 }))}
                             />
-                            <span className="flex-1 text-sm">{p.name}</span>
-                            <span className="text-sm text-muted-foreground w-24 text-right">
-                              € {Number(p.sale_price).toLocaleString("nl-NL", { minimumFractionDigits: 2 })}
+                            <div className=”flex-1 min-w-0”>
+                              <p className=”text-sm truncate”>{p.name}</p>
+                              {p.serial_number && <p className=”text-xs text-muted-foreground font-mono”>{p.serial_number}</p>}
+                            </div>
+                            <span className=”text-sm text-muted-foreground shrink-0”>
+                              € {exVatPrice.toLocaleString(“nl-NL”, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} excl.
                             </span>
                             <Input
-                              type="number"
-                              min={1}
-                              className="w-16 h-7 text-sm text-center"
-                              value={qty || ""}
+                              type=”number” min={1}
+                              className=”w-16 h-7 text-sm text-center shrink-0”
+                              value={qty || “”}
                               disabled={qty === 0}
                               onChange={(e) => {
                                 const n = Math.max(1, parseInt(e.target.value) || 1);
@@ -516,87 +484,116 @@ export default function Invoices() {
                         );
                       })}
                     </div>
-                  )}
-                </div>
-              )}
+                  )
+                )}
 
-              {createMode === "service" && (
-                <div className="grid gap-4">
-                  <div className="grid gap-2">
-                    <Label>Dienst</Label>
+                {createMode === “service” && (
+                  <div className=”space-y-3”>
                     <Select value={selectedService} onValueChange={setSelectedService}>
-                      <SelectTrigger><SelectValue placeholder={services.length ? "Kies dienst" : "Geen diensten (maak aan bij Instellingen)"} /></SelectTrigger>
+                      <SelectTrigger><SelectValue placeholder={services.length ? “Kies bestaande dienst (optioneel)” : “Geen diensten opgeslagen”} /></SelectTrigger>
                       <SelectContent>
                         {services.map((s) => (
                           <SelectItem key={s.id} value={s.id}>
-                            {s.name} — €{Number(s.amount).toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            {s.name} — €{Number(s.amount).toLocaleString(“nl-NL”, { minimumFractionDigits: 2 })}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="grid gap-2">
-                      <Label>Omschrijving (op factuurregel)</Label>
-                      <Input value={serviceDescription} onChange={(e) => setServiceDescription(e.target.value)} placeholder="Bijv. Website onderhoud" />
+                    <div className=”grid grid-cols-2 gap-3”>
+                      <div className=”grid gap-2”>
+                        <Label>Omschrijving op factuur</Label>
+                        <Input value={serviceDescription} onChange={(e) => setServiceDescription(e.target.value)} placeholder=”Bijv. Website onderhoud” />
+                      </div>
+                      <div className=”grid gap-2”>
+                        <Label>Bedrag (excl. BTW)</Label>
+                        <Input type=”number” step=”0.01” value={serviceAmount} onChange={(e) => setServiceAmount(e.target.value)} placeholder=”250.00” />
+                      </div>
                     </div>
-                    <div className="grid gap-2">
-                      <Label>Bedrag (excl. BTW)</Label>
-                      <Input type="number" step="0.01" value={serviceAmount} onChange={(e) => setServiceAmount(e.target.value)} placeholder="250.00" />
-                    </div>
                   </div>
-                </div>
-              )}
+                )}
+              </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2">
-                  <Label>BTW-percentage</Label>
-                  <Input type="number" value={invoiceType === "private" ? "0" : btwPercentage} onChange={(e) => setBtwPercentage(e.target.value)} disabled={invoiceType === "private"} />
-                </div>
+              {/* Sectie 3: Saldo & notities */}
+              {selectedCompany && (() => {
+                const company = companies.find((c) => c.id === selectedCompany);
+                if (!company) return null;
+                const availableAdvance = round2(Math.max(0, Number(company.advance_balance ?? 0)));
+                return availableAdvance > 0 ? (
+                  <div className=”border-t pt-4 space-y-2”>
+                    <p className=”text-xs font-semibold text-muted-foreground uppercase tracking-wide”>Klantsaldo</p>
+                    <div className=”flex items-center justify-between”>
+                      <div className=”flex items-center gap-2”>
+                        <Checkbox id=”apply-advance” checked={applyAdvance} onCheckedChange={(c) => setApplyAdvance(c === true)} />
+                        <Label htmlFor=”apply-advance” className=”cursor-pointer”>Saldo verrekenen (€{availableAdvance.toLocaleString(“nl-NL”, { minimumFractionDigits: 2 })} beschikbaar)</Label>
+                      </div>
+                      {applyAdvance && (
+                        <Select value={advanceLabel} onValueChange={(v) => setAdvanceLabel(v as “krediet” | “voorschot”)}>
+                          <SelectTrigger className=”w-32 h-8”><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value=”krediet”>Krediet</SelectItem>
+                            <SelectItem value=”voorschot”>Voorschot</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      )}
+                    </div>
+                  </div>
+                ) : null;
+              })()}
+
+              <div className=”border-t pt-4 grid gap-2”>
+                <Label>Notities <span className=”text-muted-foreground font-normal text-xs”>(optioneel)</span></Label>
+                <Textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder=”Interne notitie of opmerking op de factuur” />
               </div>
-              <div className="grid gap-2">
-                <Label>Notities</Label>
-                <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} />
-              </div>
+
+              {/* Totaaloverzicht */}
               {selectedCompany && (() => {
                 const company = companies.find((c) => c.id === selectedCompany);
                 if (!company) return null;
                 const selectedHoursEntries = uninvoicedEntries.filter((e) => selectedEntries.includes(e.id));
                 const svcAmt = Number(serviceAmount);
                 const subtotal =
-                  createMode === "hours"
+                  createMode === “hours”
                     ? selectedHoursEntries.reduce((sum, e) => {
                         const rate = e.hourly_rate ?? company.default_hourly_rate ?? 0;
                         return sum + Number(e.hours) * Number(rate);
                       }, 0)
-                    : createMode === "product"
+                    : createMode === “product”
                       ? companyProducts
                           .filter((p) => (selectedProducts[p.id] ?? 0) > 0)
-                          .reduce((sum, p) => sum + p.sale_price * (selectedProducts[p.id] ?? 0), 0)
-                      : Number.isFinite(svcAmt)
-                        ? svcAmt
-                        : 0;
-                const vat = invoiceType === "private" ? 0 : parseFloat(btwPercentage || "0");
-                const vatAmount = invoiceType === "private" ? 0 : round2(subtotal * (vat / 100));
-                const grossTotal = invoiceType === "private" ? round2(subtotal) : round2(subtotal + vatAmount);
+                          .reduce((sum, p) => {
+                            const vat = p.vat_percentage ?? 21;
+                            const exVat = p.price_includes_vat ? p.sale_price / (1 + vat / 100) : p.sale_price;
+                            return sum + exVat * (selectedProducts[p.id] ?? 0);
+                          }, 0)
+                      : Number.isFinite(svcAmt) ? svcAmt : 0;
+                const vat = invoiceType === “private” ? 0 : parseFloat(btwPercentage || “0”);
+                const vatAmount = round2(subtotal * (vat / 100));
+                const grossTotal = round2(subtotal + vatAmount);
                 const availableAdvance = round2(Math.max(0, Number(company.advance_balance ?? 0)));
                 const appliedAdvance = applyAdvance ? round2(Math.min(availableAdvance, grossTotal)) : 0;
                 const netTotal = round2(grossTotal - appliedAdvance);
-                const labelWord = advanceLabel === "voorschot" ? "voorschot" : "krediet";
                 return (
-                  <div className="rounded-md border bg-muted/30 p-3 text-sm space-y-1">
-                    <p>Totaal: <span className="font-medium">€{grossTotal.toLocaleString("nl-NL", { minimumFractionDigits: 2 })}</span></p>
-                    <p>Beschikbaar saldo: <span className="font-medium">€{availableAdvance.toLocaleString("nl-NL", { minimumFractionDigits: 2 })}</span></p>
-                    {applyAdvance ? (
+                  <div className=”rounded-md bg-muted/40 px-4 py-3 text-sm space-y-1.5”>
+                    <div className=”flex justify-between text-muted-foreground”>
+                      <span>Subtotaal</span><span>€ {subtotal.toLocaleString(“nl-NL”, { minimumFractionDigits: 2 })}</span>
+                    </div>
+                    {invoiceType !== “private” && (
+                      <div className=”flex justify-between text-muted-foreground”>
+                        <span>BTW ({vat}%)</span><span>€ {vatAmount.toLocaleString(“nl-NL”, { minimumFractionDigits: 2 })}</span>
+                      </div>
+                    )}
+                    <div className=”flex justify-between font-semibold border-t pt-1.5 mt-1”>
+                      <span>Totaal</span><span>€ {grossTotal.toLocaleString(“nl-NL”, { minimumFractionDigits: 2 })}</span>
+                    </div>
+                    {appliedAdvance > 0 && (
                       <>
-                        <p>
-                          Verrekend op deze factuur ({labelWord}):{" "}
-                          <span className="font-medium">€{appliedAdvance.toLocaleString("nl-NL", { minimumFractionDigits: 2 })}</span>
-                        </p>
-                        <p>Te betalen: <span className="font-medium">€{netTotal.toLocaleString("nl-NL", { minimumFractionDigits: 2 })}</span></p>
+                        <div className=”flex justify-between text-muted-foreground”>
+                          <span>Af: {advanceLabel}</span><span>− € {appliedAdvance.toLocaleString(“nl-NL”, { minimumFractionDigits: 2 })}</span>
+                        </div>
+                        <div className=”flex justify-between font-bold border-t pt-1.5”>
+                          <span>Te betalen</span><span>€ {netTotal.toLocaleString(“nl-NL”, { minimumFractionDigits: 2 })}</span>
+                        </div>
                       </>
-                    ) : (
-                      <p className="text-muted-foreground">Geen saldo-verrekening — te betalen: <span className="font-medium text-foreground">€{grossTotal.toLocaleString("nl-NL", { minimumFractionDigits: 2 })}</span></p>
                     )}
                   </div>
                 );

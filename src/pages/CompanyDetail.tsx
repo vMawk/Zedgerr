@@ -8,11 +8,15 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, FileText, FileCheck, Package, Plus, Pencil, Trash2 } from "lucide-react";
+import { ArrowLeft, FileText, FileCheck, Package, Plus, Pencil, Trash2, ExternalLink } from "lucide-react";
+import { Link as RouterLink } from "react-router-dom";
 
 const STATUS_LABELS: Record<string, string> = {
   concept: "Concept", verzonden: "Verzonden", betaald: "Betaald",
@@ -24,7 +28,7 @@ const STATUS_VARIANTS: Record<string, "default" | "secondary" | "destructive" | 
   verlopen: "destructive", afgewezen: "destructive",
 };
 
-const emptyProduct = { name: "", sale_price: "", cost_price: "" };
+const emptyProduct = { name: "", serial_number: "", url: "", internal_notes: "", sale_price: "", price_includes_vat: false, vat_percentage: "21", cost_price: "" };
 
 export default function CompanyDetail() {
   const { id } = useParams<{ id: string }>();
@@ -66,7 +70,12 @@ export default function CompanyDetail() {
     setEditProduct(p);
     setProductForm({
       name: p.name,
+      serial_number: p.serial_number ?? "",
+      url: p.url ?? "",
+      internal_notes: p.internal_notes ?? "",
       sale_price: String(p.sale_price),
+      price_includes_vat: Boolean(p.price_includes_vat),
+      vat_percentage: String(p.vat_percentage ?? 21),
       cost_price: p.cost_price != null ? String(p.cost_price) : "",
     });
     setProductOpen(true);
@@ -76,7 +85,12 @@ export default function CompanyDetail() {
     if (!id || !productForm.name.trim() || !productForm.sale_price) return;
     const body = {
       name: productForm.name.trim(),
+      serial_number: productForm.serial_number || null,
+      url: productForm.url || null,
+      internal_notes: productForm.internal_notes || null,
       sale_price: parseFloat(productForm.sale_price),
+      price_includes_vat: productForm.price_includes_vat,
+      vat_percentage: parseFloat(productForm.vat_percentage) || 21,
       cost_price: productForm.cost_price ? parseFloat(productForm.cost_price) : null,
     };
     try {
@@ -262,11 +276,21 @@ export default function CompanyDetail() {
                 </TableHeader>
                 <TableBody>
                   {products.map((p) => {
-                    const margin = p.cost_price != null ? p.sale_price - p.cost_price : null;
+                    const vat = p.vat_percentage ?? 21;
+                    const exVat = p.price_includes_vat ? p.sale_price / (1 + vat / 100) : p.sale_price;
+                    const margin = p.cost_price != null ? exVat - p.cost_price : null;
                     return (
                       <TableRow key={p.id}>
-                        <TableCell className="font-medium">{p.name}</TableCell>
-                        <TableCell className="text-right">{fmt(p.sale_price)}</TableCell>
+                        <TableCell>
+                          <p className="font-medium">{p.name}</p>
+                          {p.serial_number && <p className="text-xs text-muted-foreground font-mono">{p.serial_number}</p>}
+                          {p.url && (
+                            <a href={p.url} target="_blank" rel="noopener noreferrer" className="text-xs text-primary flex items-center gap-1 hover:underline">
+                              <ExternalLink className="h-3 w-3" />link
+                            </a>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right">{fmt(exVat)}<span className="text-xs text-muted-foreground ml-1">ex.</span></TableCell>
                         <TableCell className="text-right">{p.cost_price != null ? fmt(p.cost_price) : "—"}</TableCell>
                         <TableCell className="text-right">
                           {margin != null ? (
@@ -300,43 +324,51 @@ export default function CompanyDetail() {
           <DialogHeader>
             <DialogTitle>{editProduct ? "Product bewerken" : "Product toevoegen"}</DialogTitle>
           </DialogHeader>
-          <div className="grid gap-4 py-2">
+          <div className="space-y-4 py-2">
             <div className="grid gap-2">
-              <Label>Naam</Label>
-              <Input
-                value={productForm.name}
-                onChange={(e) => setProductForm((f) => ({ ...f, name: e.target.value }))}
-                placeholder="Bijv. Website licentie"
-              />
+              <Label>Naam *</Label>
+              <Input value={productForm.name} onChange={(e) => setProductForm((f) => ({ ...f, name: e.target.value }))} placeholder="Bijv. Website licentie" />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="grid gap-2">
-                <Label>Verkoopprijs (€)</Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={productForm.sale_price}
-                  onChange={(e) => setProductForm((f) => ({ ...f, sale_price: e.target.value }))}
-                  placeholder="0.00"
-                />
+                <Label>Serienummer <span className="text-muted-foreground font-normal text-xs">(intern)</span></Label>
+                <Input value={productForm.serial_number} onChange={(e) => setProductForm((f) => ({ ...f, serial_number: e.target.value }))} placeholder="SN-12345" className="font-mono text-sm" />
               </div>
               <div className="grid gap-2">
-                <Label>Inkoopprijs (€)</Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={productForm.cost_price}
-                  onChange={(e) => setProductForm((f) => ({ ...f, cost_price: e.target.value }))}
-                  placeholder="optioneel"
-                />
+                <Label>BTW (%)</Label>
+                <Select value={productForm.vat_percentage} onValueChange={(v) => setProductForm((f) => ({ ...f, vat_percentage: v }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="21">21%</SelectItem>
+                    <SelectItem value="9">9%</SelectItem>
+                    <SelectItem value="0">0%</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
-            <Button
-              onClick={handleSaveProduct}
-              disabled={!productForm.name.trim() || !productForm.sale_price}
-            >
+            <div className="grid gap-2">
+              <Label>Link <span className="text-muted-foreground font-normal text-xs">(intern)</span></Label>
+              <Input type="url" value={productForm.url} onChange={(e) => setProductForm((f) => ({ ...f, url: e.target.value }))} placeholder="https://…" />
+            </div>
+            <div className="grid gap-2">
+              <Label>Interne notities</Label>
+              <Textarea rows={2} value={productForm.internal_notes} onChange={(e) => setProductForm((f) => ({ ...f, internal_notes: e.target.value }))} placeholder="Niet zichtbaar op factuur" />
+            </div>
+            <div className="flex items-center gap-3">
+              <Switch id="cd-incl-vat" checked={productForm.price_includes_vat} onCheckedChange={(v) => setProductForm((f) => ({ ...f, price_includes_vat: v }))} />
+              <Label htmlFor="cd-incl-vat" className="cursor-pointer">Prijs inclusief BTW invoeren</Label>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="grid gap-2">
+                <Label>Verkoopprijs ({productForm.price_includes_vat ? "incl." : "excl."} BTW) *</Label>
+                <Input type="number" step="0.01" min="0" value={productForm.sale_price} onChange={(e) => setProductForm((f) => ({ ...f, sale_price: e.target.value }))} placeholder="0.00" />
+              </div>
+              <div className="grid gap-2">
+                <Label>Inkoopprijs (excl. BTW)</Label>
+                <Input type="number" step="0.01" min="0" value={productForm.cost_price} onChange={(e) => setProductForm((f) => ({ ...f, cost_price: e.target.value }))} placeholder="optioneel" />
+              </div>
+            </div>
+            <Button className="w-full" onClick={handleSaveProduct} disabled={!productForm.name.trim() || !productForm.sale_price}>
               {editProduct ? "Opslaan" : "Toevoegen"}
             </Button>
           </div>

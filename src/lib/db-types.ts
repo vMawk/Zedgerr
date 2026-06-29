@@ -170,7 +170,12 @@ export type CompanyProduct = {
   user_id: string;
   company_id: string;
   name: string;
+  serial_number: string | null;
+  url: string | null;
+  internal_notes: string | null;
   sale_price: number;
+  price_includes_vat: boolean;
+  vat_percentage: number;
   cost_price: number | null;
   created_at: string;
   updated_at: string;
