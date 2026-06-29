@@ -32,7 +32,7 @@ const statusColors: Record<string, string> = {
 export default function Quotes() {
   const { user } = useAuth();
   const { toast } = useToast();
-  const [quotes, setQuotes] = useState<(Quote & { companies: { name: string | null } | null })[]>([]);
+  const [quotes, setQuotes] = useState<(Quote & { companies: { name: string | null; contact_person: string | null } | null })[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [open, setOpen] = useState(false);
   const [selectedCompany, setSelectedCompany] = useState("");
@@ -40,7 +40,7 @@ export default function Quotes() {
   const [notes, setNotes] = useState("");
   const [btwPercentage, setBtwPercentage] = useState("21");
   const [editOpen, setEditOpen] = useState(false);
-  const [quoteToEdit, setQuoteToEdit] = useState<(Quote & { companies: { name: string | null } | null }) | null>(null);
+  const [quoteToEdit, setQuoteToEdit] = useState<(Quote & { companies: { name: string | null; contact_person: string | null } | null }) | null>(null);
   const [editQuoteNumber, setEditQuoteNumber] = useState("");
   const [editQuoteDate, setEditQuoteDate] = useState("");
   const [editValidUntil, setEditValidUntil] = useState("");
@@ -114,7 +114,7 @@ export default function Quotes() {
     }
   };
 
-  const handleDownloadPDF = async (quote: Quote & { companies: { name: string | null } | null }) => {
+  const handleDownloadPDF = async (quote: Quote & { companies: { name: string | null; contact_person: string | null } | null }) => {
     const [linesRes, settingsRes, companyRes] = await Promise.all([
       api.getQuoteLines(quote.id),
       api.getBusinessSettings(),
@@ -123,7 +123,7 @@ export default function Quotes() {
     await generateQuotePDF(quote, linesRes, settingsRes, companyRes);
   };
 
-  const openEdit = (q: Quote & { companies: { name: string | null } | null }) => {
+  const openEdit = (q: Quote & { companies: { name: string | null; contact_person: string | null } | null }) => {
     setQuoteToEdit(q);
     setEditQuoteNumber(q.quote_number);
     setEditQuoteDate(q.quote_date);
@@ -181,7 +181,7 @@ export default function Quotes() {
                 <Select value={selectedCompany} onValueChange={setSelectedCompany}>
                   <SelectTrigger><SelectValue placeholder="Selecteer bedrijf" /></SelectTrigger>
                   <SelectContent>
-                    {companies.map((c) => <SelectItem key={c.id} value={c.id}>{c.name || "Klant"}</SelectItem>)}
+                    {companies.map((c) => <SelectItem key={c.id} value={c.id}>{c.name || c.contact_person || "Klant"}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
@@ -252,7 +252,7 @@ export default function Quotes() {
               {quotes.map((quote) => (
                 <TableRow key={quote.id}>
                   <TableCell className="font-medium">{quote.quote_number}</TableCell>
-                  <TableCell>{quote.companies?.name || "Klant"}</TableCell>
+                  <TableCell>{quote.companies?.name || quote.companies?.contact_person || "Klant"}</TableCell>
                   <TableCell>{new Date(quote.quote_date).toLocaleDateString("nl-NL")}</TableCell>
                   <TableCell>€{Number(quote.total).toLocaleString("nl-NL", { minimumFractionDigits: 2 })}</TableCell>
                   <TableCell>

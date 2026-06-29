@@ -7,6 +7,7 @@ import { AuthProvider, useAuth } from "@/lib/auth";
 import { AppLayout } from "@/components/AppLayout";
 import Dashboard from "./pages/Dashboard";
 import Companies from "./pages/Companies";
+import CompanyDetail from "./pages/CompanyDetail";
 import TimeEntries from "./pages/TimeEntries";
 import Invoices from "./pages/Invoices";
 import Quotes from "./pages/Quotes";
@@ -83,6 +84,7 @@ const App = () => (
             <Route element={<ProtectedRoutes />}>
               <Route path="/" element={<Dashboard />} />
               <Route path="/bedrijven" element={<Companies />} />
+              <Route path="/bedrijven/:id" element={<CompanyDetail />} />
               <Route path="/uren" element={<TimeEntries />} />
               <Route path="/facturen" element={<Invoices />} />
               <Route path="/offertes" element={<Quotes />} />

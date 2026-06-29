@@ -17,9 +17,10 @@ CREATE TABLE companies_new (
   btw_number TEXT,
   default_hourly_rate REAL,
   notes TEXT,
-  advance_balance REAL NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  advance_balance REAL NOT NULL DEFAULT 0,
+  debt_to_client REAL NOT NULL DEFAULT 0
 );
 
 INSERT INTO companies_new SELECT * FROM companies;

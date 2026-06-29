@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { Plus, Pencil, Trash2, Building2, MonitorSmartphone, RefreshCw } from "lucide-react";
+import { Link } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 
 function generateClientPassword(): string {
@@ -302,7 +303,11 @@ export default function Companies() {
             <Card key={company.id}>
               <CardHeader className="flex flex-row items-start justify-between pb-2">
                 <div className="space-y-1">
-                  <CardTitle className="text-base">{company.name || "Klant"}</CardTitle>
+                  <CardTitle className="text-base">
+                    <Link to={`/bedrijven/${company.id}`} className="hover:underline">
+                      {company.name || company.contact_person || "Klant"}
+                    </Link>
+                  </CardTitle>
                   {company.has_portal && (
                     <Badge variant="secondary" className="text-xs font-normal">
                       Klantenportaal

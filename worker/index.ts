@@ -890,7 +890,7 @@ api.get("/api/invoices", async (c) => {
   const userId = c.get("userId")!;
   const { results } = await c.env.DB
     .prepare(
-      `SELECT i.*, c.name as company_name FROM invoices i
+      `SELECT i.*, c.name as company_name, c.contact_person as company_contact_person FROM invoices i
        LEFT JOIN companies c ON c.id = i.company_id
        WHERE i.user_id = ?
        ORDER BY i.created_at DESC`,
@@ -899,8 +899,9 @@ api.get("/api/invoices", async (c) => {
     .all<Record<string, unknown>>();
   const mapped = (results ?? []).map((r) => {
     const company_name = r.company_name;
-    const { company_name: _cn, ...inv } = r;
-    return { ...inv, companies: { name: company_name } };
+    const company_contact_person = r.company_contact_person;
+    const { company_name: _cn, company_contact_person: _ccp, ...inv } = r;
+    return { ...inv, companies: { name: company_name, contact_person: company_contact_person } };
   });
   return c.json(mapped);
 });
@@ -1300,7 +1301,7 @@ api.get("/api/quotes", async (c) => {
   const userId = c.get("userId")!;
   const { results } = await c.env.DB
     .prepare(
-      `SELECT q.*, c.name as company_name FROM quotes q
+      `SELECT q.*, c.name as company_name, c.contact_person as company_contact_person FROM quotes q
        LEFT JOIN companies c ON c.id = q.company_id
        WHERE q.user_id = ?
        ORDER BY q.created_at DESC`,
@@ -1309,8 +1310,9 @@ api.get("/api/quotes", async (c) => {
     .all<Record<string, unknown>>();
   const mapped = (results ?? []).map((r) => {
     const company_name = r.company_name;
-    const { company_name: _cn, ...q } = r;
-    return { ...q, companies: { name: company_name } };
+    const company_contact_person = r.company_contact_person;
+    const { company_name: _cn, company_contact_person: _ccp, ...q } = r;
+    return { ...q, companies: { name: company_name, contact_person: company_contact_person } };
   });
   return c.json(mapped);
 });
