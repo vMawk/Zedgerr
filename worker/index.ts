@@ -612,8 +612,8 @@ api.post("/api/companies/:id/products", async (c) => {
   const productId = crypto.randomUUID();
   const now = new Date().toISOString();
   await c.env.DB
-    .prepare("INSERT INTO company_products (id, user_id, company_id, name, sale_price, cost_price, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
-    .bind(productId, userId, id, req.name, req.sale_price, req.cost_price ?? null, now, now)
+    .prepare("INSERT INTO company_products (id, user_id, company_id, name, sale_price, cost_price, serial_number, url, internal_notes, price_includes_vat, vat_percentage, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+    .bind(productId, userId, id, req.name, req.sale_price, req.cost_price ?? null, req.serial_number ?? null, req.url ?? null, req.internal_notes ?? null, req.price_includes_vat ? 1 : 0, req.vat_percentage ?? 21, now, now)
     .run();
   const row = await c.env.DB.prepare("SELECT * FROM company_products WHERE id = ?").bind(productId).first();
   return c.json(row);
@@ -630,8 +630,8 @@ api.patch("/api/companies/:id/products/:productId", async (c) => {
   const req = await c.req.json<Record<string, unknown>>();
   const now = new Date().toISOString();
   await c.env.DB
-    .prepare("UPDATE company_products SET name = ?, sale_price = ?, cost_price = ?, updated_at = ? WHERE id = ?")
-    .bind(req.name, req.sale_price, req.cost_price ?? null, now, productId)
+    .prepare("UPDATE company_products SET name = ?, sale_price = ?, cost_price = ?, serial_number = ?, url = ?, internal_notes = ?, price_includes_vat = ?, vat_percentage = ?, updated_at = ? WHERE id = ?")
+    .bind(req.name, req.sale_price, req.cost_price ?? null, req.serial_number ?? null, req.url ?? null, req.internal_notes ?? null, req.price_includes_vat ? 1 : 0, req.vat_percentage ?? 21, now, productId)
     .run();
   const row = await c.env.DB.prepare("SELECT * FROM company_products WHERE id = ?").bind(productId).first();
   return c.json(row);
