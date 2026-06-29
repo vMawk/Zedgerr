@@ -164,6 +164,17 @@ export type SubscriptionPayment = {
   created_at: string;
 };
 
+export type CompanyProduct = {
+  id: string;
+  user_id: string;
+  company_id: string;
+  name: string;
+  sale_price: number;
+  cost_price: number | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type LeadStatus =
   | "new"
   | "emailed"
