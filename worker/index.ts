@@ -1039,8 +1039,8 @@ api.post("/api/invoices", async (c) => {
   await c.env.DB.batch([
     c.env.DB
       .prepare(
-        `INSERT INTO invoices (id, user_id, company_id, invoice_number, invoice_date, due_date, status, subtotal, btw_percentage, btw_amount, total, advance_payment, advance_label, notes, invoice_type, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO invoices (id, user_id, company_id, invoice_number, invoice_date, due_date, status, subtotal, btw_percentage, btw_amount, total, advance_payment, advance_label, notes, invoice_type, payment_method, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         id,
@@ -1058,6 +1058,7 @@ api.post("/api/invoices", async (c) => {
         advanceLabel,
         req.notes ?? null,
         invoiceType,
+        (req.payment_method as string) === "contant" ? "contant" : "overboeking",
         now,
         now,
       ),
@@ -1107,6 +1108,7 @@ api.patch("/api/invoices/:id", async (c) => {
         btw_amount = ?,
         total = ?,
         invoice_type = ?,
+        payment_method = COALESCE(?, payment_method),
         updated_at = ?
        WHERE id = ? AND user_id = ?`,
     )
@@ -1121,6 +1123,7 @@ api.patch("/api/invoices/:id", async (c) => {
       nextBtwAmt,
       nextTotal,
       nextType,
+      req.payment_method != null ? ((req.payment_method as string) === "contant" ? "contant" : "overboeking") : null,
       now,
       id,
       userId,
@@ -1326,6 +1329,48 @@ api.delete("/api/services/:id", async (c) => {
   const userId = c.get("userId")!;
   const { id } = c.req.param();
   await c.env.DB.prepare("DELETE FROM services WHERE id = ? AND user_id = ?").bind(id, userId).run();
+  return c.body(null, 204);
+});
+
+api.post("/api/invoice-lines", async (c) => {
+  const userId = c.get("userId")!;
+  const l = await c.req.json<Record<string, unknown>>();
+  const invoiceId = l.invoice_id as string;
+  const owns = await c.env.DB.prepare("SELECT id, btw_percentage, invoice_type FROM invoices WHERE id = ? AND user_id = ?").bind(invoiceId, userId).first<{ id: string; btw_percentage: number; invoice_type: string }>();
+  if (!owns) return c.json({ error: "Not found" }, 404);
+  const now = new Date().toISOString();
+  const lineId = crypto.randomUUID();
+  await c.env.DB
+    .prepare("INSERT INTO invoice_lines (id, invoice_id, time_entry_id, description, date, hours, hourly_rate, amount, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))")
+    .bind(lineId, invoiceId, null, l.description, l.date ?? null, null, null, l.amount)
+    .run();
+  const linesRow = await c.env.DB.prepare("SELECT COALESCE(SUM(amount), 0) as s FROM invoice_lines WHERE invoice_id = ?").bind(invoiceId).first<{ s: number }>();
+  const newSubtotal = Math.round((linesRow?.s ?? 0) * 100) / 100;
+  const isPrivate = owns.invoice_type === "private";
+  const newBtw = isPrivate ? 0 : Math.round(newSubtotal * Number(owns.btw_percentage)) / 100;
+  const newTotal = Math.round((newSubtotal + newBtw) * 100) / 100;
+  await c.env.DB.prepare("UPDATE invoices SET subtotal = ?, btw_amount = ?, total = ?, updated_at = ? WHERE id = ?").bind(newSubtotal, newBtw, newTotal, now, invoiceId).run();
+  const row = await c.env.DB.prepare("SELECT * FROM invoice_lines WHERE id = ?").bind(lineId).first();
+  return c.json(row);
+});
+
+api.delete("/api/invoice-lines/:id", async (c) => {
+  const userId = c.get("userId")!;
+  const { id } = c.req.param();
+  const line = await c.env.DB.prepare("SELECT il.invoice_id FROM invoice_lines il JOIN invoices i ON i.id = il.invoice_id WHERE il.id = ? AND i.user_id = ?").bind(id, userId).first<{ invoice_id: string }>();
+  if (!line) return c.body(null, 204);
+  const invoiceId = line.invoice_id;
+  const inv = await c.env.DB.prepare("SELECT btw_percentage, invoice_type FROM invoices WHERE id = ?").bind(invoiceId).first<{ btw_percentage: number; invoice_type: string }>();
+  await c.env.DB.prepare("DELETE FROM invoice_lines WHERE id = ?").bind(id).run();
+  if (inv) {
+    const now = new Date().toISOString();
+    const linesRow = await c.env.DB.prepare("SELECT COALESCE(SUM(amount), 0) as s FROM invoice_lines WHERE invoice_id = ?").bind(invoiceId).first<{ s: number }>();
+    const newSubtotal = Math.round((linesRow?.s ?? 0) * 100) / 100;
+    const isPrivate = inv.invoice_type === "private";
+    const newBtw = isPrivate ? 0 : Math.round(newSubtotal * Number(inv.btw_percentage)) / 100;
+    const newTotal = Math.round((newSubtotal + newBtw) * 100) / 100;
+    await c.env.DB.prepare("UPDATE invoices SET subtotal = ?, btw_amount = ?, total = ?, updated_at = ? WHERE id = ?").bind(newSubtotal, newBtw, newTotal, now, invoiceId).run();
+  }
   return c.body(null, 204);
 });
 

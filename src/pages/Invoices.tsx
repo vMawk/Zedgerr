@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
-import type { Company, Invoice, Service, TimeEntry } from "@/lib/db-types";
+import type { Company, CompanyProduct, Invoice, InvoiceLine, Service, TimeEntry } from "@/lib/db-types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -21,7 +21,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Plus, FileText, Download, Trash2, Pencil, Split } from "lucide-react";
+import { Plus, FileText, Download, Trash2, Pencil, Split, Rows3 } from "lucide-react";
 import { generateInvoicePDF } from "@/lib/pdf";
 import { Checkbox } from "@/components/ui/checkbox";
 
@@ -53,7 +53,9 @@ export default function Invoices() {
   const [selectedCompany, setSelectedCompany] = useState("");
   const [uninvoicedEntries, setUninvoicedEntries] = useState<(TimeEntry & { companies: Company | null })[]>([]);
   const [selectedEntries, setSelectedEntries] = useState<string[]>([]);
-  const [createMode, setCreateMode] = useState<"hours" | "service">("hours");
+  const [createMode, setCreateMode] = useState<"hours" | "service" | "product">("hours");
+  const [companyProducts, setCompanyProducts] = useState<CompanyProduct[]>([]);
+  const [selectedProducts, setSelectedProducts] = useState<Record<string, number>>({});
   const [selectedService, setSelectedService] = useState("");
   const [serviceAmount, setServiceAmount] = useState("");
   const [serviceDescription, setServiceDescription] = useState("");
@@ -78,6 +80,14 @@ export default function Invoices() {
   const [splitFirstDueDate, setSplitFirstDueDate] = useState("");
   const [applyAdvance, setApplyAdvance] = useState(true);
   const [advanceLabel, setAdvanceLabel] = useState<"krediet" | "voorschot">("krediet");
+  const [paymentMethod, setPaymentMethod] = useState<"overboeking" | "contant">("overboeking");
+
+  const [linesOpen, setLinesOpen] = useState(false);
+  const [linesInvoice, setLinesInvoice] = useState<Invoice | null>(null);
+  const [invoiceLines, setInvoiceLines] = useState<InvoiceLine[]>([]);
+  const [newLineDesc, setNewLineDesc] = useState("");
+  const [newLineAmount, setNewLineAmount] = useState("");
+  const [editPaymentMethod, setEditPaymentMethod] = useState<"overboeking" | "contant">("overboeking");
 
   const fetchData = async () => {
     const [invList, compList, svcList] = await Promise.all([api.getInvoices(), api.getCompanies(), api.getServices()]);
@@ -89,8 +99,14 @@ export default function Invoices() {
   useEffect(() => { if (user) fetchData(); }, [user]);
 
   useEffect(() => {
-    if (!selectedCompany) { setUninvoicedEntries([]); return; }
+    if (!selectedCompany) {
+      setUninvoicedEntries([]);
+      setCompanyProducts([]);
+      setSelectedProducts({});
+      return;
+    }
     api.getTimeEntries({ company_id: selectedCompany, invoiced: false }).then(setUninvoicedEntries);
+    api.getCompanyProducts(selectedCompany).then(setCompanyProducts);
   }, [selectedCompany]);
 
   useEffect(() => {
@@ -115,15 +131,20 @@ export default function Invoices() {
 
     const entries = uninvoicedEntries.filter((e) => selectedEntries.includes(e.id));
     const svcAmt = Number(serviceAmount);
+    const productLines = companyProducts
+      .filter((p) => (selectedProducts[p.id] ?? 0) > 0)
+      .map((p) => ({ product: p, qty: selectedProducts[p.id]! }));
     const subtotal =
       createMode === "hours"
         ? entries.reduce((sum, e) => {
             const rate = e.hourly_rate ?? company.default_hourly_rate ?? 0;
             return sum + Number(e.hours) * Number(rate);
           }, 0)
-        : Number.isFinite(svcAmt)
-          ? svcAmt
-          : NaN;
+        : createMode === "product"
+          ? productLines.reduce((sum, { product, qty }) => sum + product.sale_price * qty, 0)
+          : Number.isFinite(svcAmt)
+            ? svcAmt
+            : NaN;
     const btw = invoiceType === "private" ? 0 : parseFloat(btwPercentage);
     const btwAmount = invoiceType === "private" ? 0 : round2(subtotal * (btw / 100));
     const total = invoiceType === "private" ? round2(subtotal) : round2(subtotal + btwAmount);
@@ -146,6 +167,7 @@ export default function Invoices() {
         advance_label: advanceLabel,
         due_date: new Date(Date.now() + 30 * 86400000).toISOString().split("T")[0],
         invoice_type: invoiceType,
+        payment_method: paymentMethod,
       });
 
       const lines =
@@ -159,17 +181,27 @@ export default function Invoices() {
               amount: Number(e.hours) * Number(e.hourly_rate ?? company.default_hourly_rate ?? 0),
               time_entry_id: e.id,
             }))
-          : [
-              {
+          : createMode === "product"
+            ? productLines.map(({ product, qty }) => ({
                 invoice_id: invoice.id,
-                description: serviceDescription.trim() || "Dienst",
+                description: qty > 1 ? `${product.name} (${qty}×)` : product.name,
                 date: invDate,
                 hours: null,
                 hourly_rate: null,
-                amount: svcAmt,
+                amount: product.sale_price * qty,
                 time_entry_id: null,
-              },
-            ];
+              }))
+            : [
+                {
+                  invoice_id: invoice.id,
+                  description: serviceDescription.trim() || "Dienst",
+                  date: invDate,
+                  hours: null,
+                  hourly_rate: null,
+                  amount: svcAmt,
+                  time_entry_id: null,
+                },
+              ];
       await api.createInvoiceLinesBatch(lines);
       if (createMode === "hours") {
         await api.markTimeEntriesInvoiced({ ids: selectedEntries, invoice_id: invoice.id });
@@ -187,6 +219,8 @@ export default function Invoices() {
       setInvoiceDate(new Date().toISOString().split("T")[0]);
       setApplyAdvance(true);
       setAdvanceLabel("krediet");
+      setSelectedProducts({});
+      setPaymentMethod("overboeking");
       fetchData();
       toast({
         title: "Factuur aangemaakt",
@@ -232,7 +266,37 @@ export default function Invoices() {
     setEditStatus(inv.status);
     setEditNotes(inv.notes ?? "");
     setEditInvoiceType((inv.invoice_type as "business" | "private") || "business");
+    setEditPaymentMethod((inv.payment_method as "overboeking" | "contant") || "overboeking");
     setEditOpen(true);
+  };
+
+  const openLines = async (inv: Invoice) => {
+    setLinesInvoice(inv);
+    const lines = await api.getInvoiceLines(inv.id);
+    setInvoiceLines(lines);
+    setNewLineDesc("");
+    setNewLineAmount("");
+    setLinesOpen(true);
+  };
+
+  const handleAddLine = async () => {
+    if (!linesInvoice || !newLineDesc.trim() || !newLineAmount) return;
+    const line = await api.createInvoiceLine({
+      invoice_id: linesInvoice.id,
+      description: newLineDesc.trim(),
+      amount: parseFloat(newLineAmount),
+    });
+    setInvoiceLines((prev) => [...prev, line]);
+    setNewLineDesc("");
+    setNewLineAmount("");
+    fetchData();
+  };
+
+  const handleDeleteLine = async (lineId: string) => {
+    if (!linesInvoice) return;
+    await api.deleteInvoiceLine(lineId);
+    setInvoiceLines((prev) => prev.filter((l) => l.id !== lineId));
+    fetchData();
   };
 
   const handleSaveEdit = async () => {
@@ -245,6 +309,7 @@ export default function Invoices() {
         status: editStatus,
         notes: editNotes.trim() ? editNotes.trim() : null,
         invoice_type: editInvoiceType,
+        payment_method: editPaymentMethod,
       });
       setEditOpen(false);
       setInvoiceToEdit(null);
@@ -326,12 +391,23 @@ export default function Invoices() {
                 )}
               </div>
               <div className="grid gap-2">
+                <Label>Betaalwijze</Label>
+                <Select value={paymentMethod} onValueChange={(v) => setPaymentMethod(v as "overboeking" | "contant")}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="overboeking">Overboeking</SelectItem>
+                    <SelectItem value="contant">Contant</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2">
                 <Label>Type factuur</Label>
-                <Select value={createMode} onValueChange={(v) => setCreateMode(v as "hours" | "service")}>
+                <Select value={createMode} onValueChange={(v) => setCreateMode(v as "hours" | "service" | "product")}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="hours">Op basis van uren</SelectItem>
                     <SelectItem value="service">Op basis van dienst (vast bedrag)</SelectItem>
+                    <SelectItem value="product">Op basis van producten</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -399,6 +475,51 @@ export default function Invoices() {
                 </div>
               )}
 
+              {createMode === "product" && selectedCompany && (
+                <div className="grid gap-2">
+                  <Label>Producten</Label>
+                  {companyProducts.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      Geen producten voor deze klant. Voeg ze toe via de klantpagina.
+                    </p>
+                  ) : (
+                    <div className="border rounded-md divide-y">
+                      {companyProducts.map((p) => {
+                        const qty = selectedProducts[p.id] ?? 0;
+                        return (
+                          <div key={p.id} className="flex items-center gap-3 px-3 py-2">
+                            <Checkbox
+                              checked={qty > 0}
+                              onCheckedChange={(checked) =>
+                                setSelectedProducts((prev) => ({
+                                  ...prev,
+                                  [p.id]: checked ? 1 : 0,
+                                }))
+                              }
+                            />
+                            <span className="flex-1 text-sm">{p.name}</span>
+                            <span className="text-sm text-muted-foreground w-24 text-right">
+                              € {Number(p.sale_price).toLocaleString("nl-NL", { minimumFractionDigits: 2 })}
+                            </span>
+                            <Input
+                              type="number"
+                              min={1}
+                              className="w-16 h-7 text-sm text-center"
+                              value={qty || ""}
+                              disabled={qty === 0}
+                              onChange={(e) => {
+                                const n = Math.max(1, parseInt(e.target.value) || 1);
+                                setSelectedProducts((prev) => ({ ...prev, [p.id]: n }));
+                              }}
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+
               {createMode === "service" && (
                 <div className="grid gap-4">
                   <div className="grid gap-2">
@@ -448,9 +569,13 @@ export default function Invoices() {
                         const rate = e.hourly_rate ?? company.default_hourly_rate ?? 0;
                         return sum + Number(e.hours) * Number(rate);
                       }, 0)
-                    : Number.isFinite(svcAmt)
-                      ? svcAmt
-                      : 0;
+                    : createMode === "product"
+                      ? companyProducts
+                          .filter((p) => (selectedProducts[p.id] ?? 0) > 0)
+                          .reduce((sum, p) => sum + p.sale_price * (selectedProducts[p.id] ?? 0), 0)
+                      : Number.isFinite(svcAmt)
+                        ? svcAmt
+                        : 0;
                 const vat = invoiceType === "private" ? 0 : parseFloat(btwPercentage || "0");
                 const vatAmount = invoiceType === "private" ? 0 : round2(subtotal * (vat / 100));
                 const grossTotal = invoiceType === "private" ? round2(subtotal) : round2(subtotal + vatAmount);
@@ -481,7 +606,9 @@ export default function Invoices() {
                 disabled={
                   createMode === "hours"
                     ? selectedEntries.length === 0
-                    : !selectedCompany || !serviceDescription.trim() || !Number.isFinite(Number(serviceAmount))
+                    : createMode === "product"
+                      ? !selectedCompany || !companyProducts.some((p) => (selectedProducts[p.id] ?? 0) > 0)
+                      : !selectedCompany || !serviceDescription.trim() || !Number.isFinite(Number(serviceAmount))
                 }
               >
                 Factuur aanmaken
@@ -554,6 +681,9 @@ export default function Invoices() {
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-1">
+                      <Button variant="ghost" size="icon" onClick={() => openLines(invoice)} title="Regels bewerken">
+                        <Rows3 className="h-4 w-4" />
+                      </Button>
                       <Button variant="ghost" size="icon" onClick={() => openEdit(invoice)} title="Bewerken">
                         <Pencil className="h-4 w-4" />
                       </Button>
@@ -649,10 +779,95 @@ export default function Invoices() {
               </Select>
             </div>
             <div className="grid gap-2">
+              <Label>Betaalwijze</Label>
+              <Select value={editPaymentMethod} onValueChange={(v) => setEditPaymentMethod(v as "overboeking" | "contant")}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="overboeking">Overboeking</SelectItem>
+                  <SelectItem value="contant">Contant</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
               <Label>Notities</Label>
               <Textarea value={editNotes} onChange={(e) => setEditNotes(e.target.value)} />
             </div>
             <Button onClick={handleSaveEdit}>Opslaan</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={linesOpen} onOpenChange={(v) => { setLinesOpen(v); if (!v) { setLinesInvoice(null); setInvoiceLines([]); } }}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Regels — {linesInvoice?.invoice_number}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            {invoiceLines.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Nog geen regels.</p>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Omschrijving</TableHead>
+                    <TableHead className="text-right w-28">Bedrag</TableHead>
+                    <TableHead className="w-10" />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {invoiceLines.map((line) => (
+                    <TableRow key={line.id}>
+                      <TableCell>
+                        <p className="text-sm">{line.description}</p>
+                        {line.hours && (
+                          <p className="text-xs text-muted-foreground">
+                            {Number(line.hours).toFixed(2)}u × €{Number(line.hourly_rate).toFixed(2)}
+                          </p>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right font-medium">
+                        €{Number(line.amount).toLocaleString("nl-NL", { minimumFractionDigits: 2 })}
+                      </TableCell>
+                      <TableCell>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleDeleteLine(line.id)}
+                          className="h-7 w-7 text-destructive hover:text-destructive"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+            <div className="border-t pt-4 space-y-3">
+              <p className="text-sm font-medium">Regel toevoegen</p>
+              <div className="flex gap-2">
+                <Input
+                  className="flex-1"
+                  placeholder="Omschrijving"
+                  value={newLineDesc}
+                  onChange={(e) => setNewLineDesc(e.target.value)}
+                />
+                <Input
+                  className="w-32"
+                  type="number"
+                  step="0.01"
+                  placeholder="Bedrag"
+                  value={newLineAmount}
+                  onChange={(e) => setNewLineAmount(e.target.value)}
+                />
+                <Button
+                  onClick={handleAddLine}
+                  disabled={!newLineDesc.trim() || !newLineAmount || isNaN(parseFloat(newLineAmount))}
+                >
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
           </div>
         </DialogContent>
       </Dialog>

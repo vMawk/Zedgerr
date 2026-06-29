@@ -190,9 +190,11 @@ export async function generateInvoicePDF(
   const paymentBlockY = totalsY + 8;
 
   // Payment info
-  if (settings?.iban) {
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(9);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  if (invoice.payment_method === "contant") {
+    doc.text("Betaalwijze: Contant", 20, paymentBlockY);
+  } else if (settings?.iban) {
     doc.text(`Gelieve te betalen op IBAN: ${settings.iban}`, 20, paymentBlockY);
     doc.text(`o.v.v. factuurnummer ${invoice.invoice_number}`, 20, paymentBlockY + 5);
   }
