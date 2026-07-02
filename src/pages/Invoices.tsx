@@ -21,8 +21,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Plus, FileText, FileCheck, Download, Trash2, Pencil, Split, Rows3 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { Plus, FileText, Download, Trash2, Pencil, Split, Rows3 } from "lucide-react";
 import { generateInvoicePDF } from "@/lib/pdf";
 import { Checkbox } from "@/components/ui/checkbox";
 
@@ -47,7 +46,6 @@ function round2(n: number): number {
 export default function Invoices() {
   const { user } = useAuth();
   const { toast } = useToast();
-  const navigate = useNavigate();
   const [invoices, setInvoices] = useState<(Invoice & { companies: { name: string | null; contact_person: string | null } | null })[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [services, setServices] = useState<Service[]>([]);
@@ -80,7 +78,6 @@ export default function Invoices() {
   const [splitParts, setSplitParts] = useState("3");
   const [splitIntervalDays, setSplitIntervalDays] = useState("30");
   const [splitFirstDueDate, setSplitFirstDueDate] = useState("");
-  const [creatingQuoteFromId, setCreatingQuoteFromId] = useState<string | null>(null);
   const [applyAdvance, setApplyAdvance] = useState(true);
   const [advanceLabel, setAdvanceLabel] = useState<"krediet" | "voorschot">("krediet");
   const [paymentMethod, setPaymentMethod] = useState<"overboeking" | "contant">("overboeking");
@@ -234,24 +231,6 @@ export default function Invoices() {
       });
     } catch (error: unknown) {
       toast({ title: "Fout", description: error instanceof Error ? error.message : String(error), variant: "destructive" });
-    }
-  };
-
-  const handleCreateQuoteFromInvoice = async (
-    invoice: Invoice & { companies: { name: string | null; contact_person: string | null } | null },
-  ) => {
-    setCreatingQuoteFromId(invoice.id);
-    try {
-      const quote = await api.createQuoteFromInvoice(invoice.id);
-      toast({
-        title: "Offerte aangemaakt",
-        description: `${quote.quote_number} — gebaseerd op ${invoice.invoice_number}`,
-      });
-      navigate("/offertes");
-    } catch (error: unknown) {
-      toast({ title: "Fout", description: error instanceof Error ? error.message : String(error), variant: "destructive" });
-    } finally {
-      setCreatingQuoteFromId(null);
     }
   };
 
@@ -707,15 +686,6 @@ export default function Invoices() {
                       </Button>
                       <Button variant="ghost" size="icon" onClick={() => openSplit(invoice)} title="Splitsen in termijnen">
                         <Split className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => handleCreateQuoteFromInvoice(invoice)}
-                        title="Offerte maken van factuur"
-                        disabled={creatingQuoteFromId === invoice.id}
-                      >
-                        <FileCheck className="h-4 w-4" />
                       </Button>
                       <Button
                         variant="ghost"

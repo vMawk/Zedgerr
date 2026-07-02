@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
-import type { Company, Quote } from "@/lib/db-types";
+import type { Company, CompanyProduct, Quote } from "@/lib/db-types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -13,6 +13,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { Plus, FileCheck, FileText, Trash2, Download, Pencil } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Switch } from "@/components/ui/switch";
 import { useNavigate } from "react-router-dom";
 import { generateQuotePDF } from "@/lib/pdf";
 
@@ -30,6 +32,26 @@ const statusColors: Record<string, string> = {
   afgewezen: "bg-destructive/10 text-destructive",
 };
 
+const emptyProductForm = {
+  name: "",
+  serial_number: "",
+  url: "",
+  internal_notes: "",
+  sale_price: "",
+  price_includes_vat: false,
+  vat_percentage: "21",
+  cost_price: "",
+};
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+function productExVatPrice(p: CompanyProduct): number {
+  const vatPct = p.vat_percentage ?? 21;
+  return p.price_includes_vat ? p.sale_price / (1 + vatPct / 100) : p.sale_price;
+}
+
 export default function Quotes() {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -38,6 +60,12 @@ export default function Quotes() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [open, setOpen] = useState(false);
   const [selectedCompany, setSelectedCompany] = useState("");
+  const [createMode, setCreateMode] = useState<"lines" | "product">("lines");
+  const [companyProducts, setCompanyProducts] = useState<CompanyProduct[]>([]);
+  const [selectedProducts, setSelectedProducts] = useState<Record<string, number>>({});
+  const [productOpen, setProductOpen] = useState(false);
+  const [editProduct, setEditProduct] = useState<CompanyProduct | null>(null);
+  const [productForm, setProductForm] = useState(emptyProductForm);
   const [lines, setLines] = useState<QuoteLine[]>([{ description: "", hours: "", hourly_rate: "", amount: "" }]);
   const [notes, setNotes] = useState("");
   const [btwPercentage, setBtwPercentage] = useState("21");
@@ -58,6 +86,80 @@ export default function Quotes() {
 
   useEffect(() => { if (user) fetchData(); }, [user]);
 
+  useEffect(() => {
+    if (!selectedCompany) {
+      setCompanyProducts([]);
+      setSelectedProducts({});
+      return;
+    }
+    api.getCompanyProducts(selectedCompany).then(setCompanyProducts);
+  }, [selectedCompany]);
+
+  const refreshCompanyProducts = async () => {
+    if (!selectedCompany) return;
+    const prods = await api.getCompanyProducts(selectedCompany);
+    setCompanyProducts(prods);
+  };
+
+  const resetCreateForm = () => {
+    setSelectedCompany("");
+    setCreateMode("lines");
+    setCompanyProducts([]);
+    setSelectedProducts({});
+    setLines([{ description: "", hours: "", hourly_rate: "", amount: "" }]);
+    setNotes("");
+    setBtwPercentage("21");
+  };
+
+  const openNewProduct = () => {
+    setEditProduct(null);
+    setProductForm(emptyProductForm);
+    setProductOpen(true);
+  };
+
+  const openEditProduct = (p: CompanyProduct) => {
+    setEditProduct(p);
+    setProductForm({
+      name: p.name,
+      serial_number: p.serial_number ?? "",
+      url: p.url ?? "",
+      internal_notes: p.internal_notes ?? "",
+      sale_price: String(p.sale_price),
+      price_includes_vat: Boolean(p.price_includes_vat),
+      vat_percentage: String(p.vat_percentage ?? 21),
+      cost_price: p.cost_price != null ? String(p.cost_price) : "",
+    });
+    setProductOpen(true);
+  };
+
+  const handleSaveProduct = async () => {
+    if (!selectedCompany || !productForm.name.trim() || !productForm.sale_price) return;
+    const body = {
+      name: productForm.name.trim(),
+      serial_number: productForm.serial_number || null,
+      url: productForm.url || null,
+      internal_notes: productForm.internal_notes || null,
+      sale_price: parseFloat(productForm.sale_price),
+      price_includes_vat: productForm.price_includes_vat,
+      vat_percentage: parseFloat(productForm.vat_percentage) || 21,
+      cost_price: productForm.cost_price ? parseFloat(productForm.cost_price) : null,
+    };
+    try {
+      if (editProduct) {
+        await api.updateCompanyProduct(selectedCompany, editProduct.id, body);
+        toast({ title: "Product bijgewerkt" });
+      } else {
+        await api.createCompanyProduct(selectedCompany, body);
+        toast({ title: "Product toegevoegd" });
+      }
+      setProductOpen(false);
+      setEditProduct(null);
+      await refreshCompanyProducts();
+    } catch (e: unknown) {
+      toast({ title: "Fout", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
+    }
+  };
+
   const updateLine = (index: number, field: keyof QuoteLine, value: string) => {
     setLines((prev) => {
       const updated = [...prev];
@@ -75,11 +177,40 @@ export default function Quotes() {
   const removeLine = (i: number) => setLines((prev) => prev.filter((_, idx) => idx !== i));
 
   const handleCreate = async () => {
-    if (!user || !selectedCompany || lines.length === 0) return;
-    const subtotal = lines.reduce((sum, l) => sum + (parseFloat(l.amount) || 0), 0);
+    if (!user || !selectedCompany) return;
+
+    const productLines = companyProducts
+      .filter((p) => (selectedProducts[p.id] ?? 0) > 0)
+      .map((p) => ({ product: p, qty: selectedProducts[p.id]! }));
+
+    const quoteLines =
+      createMode === "product"
+        ? productLines.map(({ product, qty }) => ({
+            description: qty > 1 ? `${product.name} (${qty}×)` : product.name,
+            hours: null as number | null,
+            hourly_rate: null as number | null,
+            amount: round2(productExVatPrice(product) * qty),
+          }))
+        : lines.map((l) => ({
+            description: l.description || "Werkzaamheden",
+            hours: l.hours ? parseFloat(l.hours) : null,
+            hourly_rate: l.hourly_rate ? parseFloat(l.hourly_rate) : null,
+            amount: parseFloat(l.amount) || 0,
+          }));
+
+    if (quoteLines.length === 0 || quoteLines.every((l) => l.amount <= 0)) {
+      toast({
+        title: "Geen regels",
+        description: createMode === "product" ? "Selecteer minimaal één product." : "Voeg minimaal één regel met bedrag toe.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const subtotal = round2(quoteLines.reduce((sum, l) => sum + l.amount, 0));
     const btw = parseFloat(btwPercentage);
-    const btwAmount = subtotal * (btw / 100);
-    const total = subtotal + btwAmount;
+    const btwAmount = round2(subtotal * (btw / 100));
+    const total = round2(subtotal + btwAmount);
 
     const now = new Date();
     const count = quotes.filter((q) => q.quote_number.startsWith(`O${now.getFullYear()}`)).length + 1;
@@ -97,19 +228,17 @@ export default function Quotes() {
         valid_until: new Date(Date.now() + 30 * 86400000).toISOString().split("T")[0],
       });
 
-      const dbLines = lines.map((l) => ({
+      const dbLines = quoteLines.map((l) => ({
         quote_id: quote.id,
-        description: l.description || "Werkzaamheden",
-        hours: l.hours ? parseFloat(l.hours) : null,
-        hourly_rate: l.hourly_rate ? parseFloat(l.hourly_rate) : null,
-        amount: parseFloat(l.amount) || 0,
+        description: l.description,
+        hours: l.hours,
+        hourly_rate: l.hourly_rate,
+        amount: l.amount,
       }));
       await api.createQuoteLinesBatch(dbLines);
 
       setOpen(false);
-      setSelectedCompany("");
-      setLines([{ description: "", hours: "", hourly_rate: "", amount: "" }]);
-      setNotes("");
+      resetCreateForm();
       fetchData();
       toast({ title: "Offerte aangemaakt", description: quoteNumber });
     } catch (error: unknown) {
@@ -188,7 +317,13 @@ export default function Quotes() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Offertes</h1>
-        <Dialog open={open} onOpenChange={setOpen}>
+        <Dialog
+          open={open}
+          onOpenChange={(v) => {
+            setOpen(v);
+            if (!v) resetCreateForm();
+          }}
+        >
           <DialogTrigger asChild>
             <Button><Plus className="mr-2 h-4 w-4" />Offerte aanmaken</Button>
           </DialogTrigger>
@@ -207,6 +342,18 @@ export default function Quotes() {
                 </Select>
               </div>
 
+              <div className="grid gap-2">
+                <Label>Type offerte</Label>
+                <Select value={createMode} onValueChange={(v) => setCreateMode(v as "lines" | "product")}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="lines">Handmatige regels</SelectItem>
+                    <SelectItem value="product">Op basis van producten</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {createMode === "lines" && (
               <div className="grid gap-2">
                 <Label>Regels</Label>
                 {lines.map((line, i) => (
@@ -232,6 +379,68 @@ export default function Quotes() {
                 ))}
                 <Button variant="outline" size="sm" onClick={addLine}><Plus className="mr-1 h-3 w-3" />Regel toevoegen</Button>
               </div>
+              )}
+
+              {createMode === "product" && selectedCompany && (
+                <div className="grid gap-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <Label>Producten</Label>
+                    <Button type="button" variant="outline" size="sm" onClick={openNewProduct}>
+                      <Plus className="mr-1 h-3 w-3" />Product toevoegen
+                    </Button>
+                  </div>
+                  {companyProducts.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      Nog geen producten voor deze klant. Voeg er een toe met de knop hierboven.
+                    </p>
+                  ) : (
+                    <div className="border rounded-md divide-y">
+                      {companyProducts.map((p) => {
+                        const qty = selectedProducts[p.id] ?? 0;
+                        const exVatPrice = productExVatPrice(p);
+                        return (
+                          <div key={p.id} className="flex items-center gap-2 px-3 py-2">
+                            <Checkbox
+                              checked={qty > 0}
+                              onCheckedChange={(checked) =>
+                                setSelectedProducts((prev) => ({
+                                  ...prev,
+                                  [p.id]: checked ? 1 : 0,
+                                }))
+                              }
+                            />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm truncate">{p.name}</p>
+                              {p.serial_number && <p className="text-xs text-muted-foreground font-mono">{p.serial_number}</p>}
+                            </div>
+                            <span className="text-sm text-muted-foreground shrink-0 w-24 text-right">
+                              {exVatPrice.toLocaleString("nl-NL", { minimumFractionDigits: 2 })} excl.
+                            </span>
+                            <Input
+                              type="number"
+                              min={1}
+                              className="w-16 h-7 text-sm text-center"
+                              value={qty || ""}
+                              disabled={qty === 0}
+                              onChange={(e) => {
+                                const n = Math.max(1, parseInt(e.target.value) || 1);
+                                setSelectedProducts((prev) => ({ ...prev, [p.id]: n }));
+                              }}
+                            />
+                            <Button type="button" variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => openEditProduct(p)} title="Product bewerken">
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {createMode === "product" && !selectedCompany && (
+                <p className="text-sm text-muted-foreground">Selecteer eerst een bedrijf om producten te kiezen.</p>
+              )}
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">
@@ -239,11 +448,85 @@ export default function Quotes() {
                   <Input type="number" value={btwPercentage} onChange={(e) => setBtwPercentage(e.target.value)} />
                 </div>
               </div>
+              {selectedCompany && (() => {
+                const productLines = companyProducts
+                  .filter((p) => (selectedProducts[p.id] ?? 0) > 0)
+                  .map((p) => ({ product: p, qty: selectedProducts[p.id]! }));
+                const subtotal =
+                  createMode === "product"
+                    ? round2(productLines.reduce((sum, { product, qty }) => sum + productExVatPrice(product) * qty, 0))
+                    : round2(lines.reduce((sum, l) => sum + (parseFloat(l.amount) || 0), 0));
+                const vat = parseFloat(btwPercentage || "0");
+                const vatAmount = round2(subtotal * (vat / 100));
+                const grossTotal = round2(subtotal + vatAmount);
+                return (
+                  <div className="rounded-md border bg-muted/30 p-3 text-sm">
+                    Totaal: <span className="font-medium">€{grossTotal.toLocaleString("nl-NL", { minimumFractionDigits: 2 })}</span>
+                    <span className="text-muted-foreground"> (excl. €{subtotal.toLocaleString("nl-NL", { minimumFractionDigits: 2 })} + BTW)</span>
+                  </div>
+                );
+              })()}
               <div className="grid gap-2">
                 <Label>Notities</Label>
                 <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} />
               </div>
               <Button onClick={handleCreate}>Offerte aanmaken</Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={productOpen} onOpenChange={(v) => { setProductOpen(v); if (!v) setEditProduct(null); }}>
+          <DialogContent className="max-w-sm">
+            <DialogHeader>
+              <DialogTitle>{editProduct ? "Product bewerken" : "Product toevoegen"}</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              <div className="grid gap-2">
+                <Label>Naam *</Label>
+                <Input value={productForm.name} onChange={(e) => setProductForm((f) => ({ ...f, name: e.target.value }))} placeholder="Bijv. Website licentie" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="grid gap-2">
+                  <Label>Serienummer</Label>
+                  <Input value={productForm.serial_number} onChange={(e) => setProductForm((f) => ({ ...f, serial_number: e.target.value }))} placeholder="SN-12345" className="font-mono text-sm" />
+                </div>
+                <div className="grid gap-2">
+                  <Label>BTW (%)</Label>
+                  <Select value={productForm.vat_percentage} onValueChange={(v) => setProductForm((f) => ({ ...f, vat_percentage: v }))}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="21">21%</SelectItem>
+                      <SelectItem value="9">9%</SelectItem>
+                      <SelectItem value="0">0%</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="grid gap-2">
+                <Label>Link</Label>
+                <Input type="url" value={productForm.url} onChange={(e) => setProductForm((f) => ({ ...f, url: e.target.value }))} placeholder="https://…" />
+              </div>
+              <div className="grid gap-2">
+                <Label>Interne notities</Label>
+                <Textarea rows={2} value={productForm.internal_notes} onChange={(e) => setProductForm((f) => ({ ...f, internal_notes: e.target.value }))} />
+              </div>
+              <div className="flex items-center gap-3">
+                <Switch id="quote-incl-vat" checked={productForm.price_includes_vat} onCheckedChange={(v) => setProductForm((f) => ({ ...f, price_includes_vat: v }))} />
+                <Label htmlFor="quote-incl-vat" className="cursor-pointer">Prijs inclusief BTW invoeren</Label>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="grid gap-2">
+                  <Label>Verkoopprijs ({productForm.price_includes_vat ? "incl." : "excl."} BTW) *</Label>
+                  <Input type="number" step="0.01" min="0" value={productForm.sale_price} onChange={(e) => setProductForm((f) => ({ ...f, sale_price: e.target.value }))} />
+                </div>
+                <div className="grid gap-2">
+                  <Label>Inkoopprijs (excl. BTW)</Label>
+                  <Input type="number" step="0.01" min="0" value={productForm.cost_price} onChange={(e) => setProductForm((f) => ({ ...f, cost_price: e.target.value }))} placeholder="optioneel" />
+                </div>
+              </div>
+              <Button onClick={handleSaveProduct} disabled={!productForm.name.trim() || !productForm.sale_price}>
+                {editProduct ? "Opslaan" : "Toevoegen"}
+              </Button>
             </div>
           </DialogContent>
         </Dialog>
