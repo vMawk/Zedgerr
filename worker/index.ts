@@ -1163,16 +1163,6 @@ async function nextInvoiceNumberForYear(db: D1Database, userId: string, year: nu
   return `${prefix}${String(n).padStart(4, "0")}`;
 }
 
-async function nextQuoteNumberForYear(db: D1Database, userId: string, year: number): Promise<string> {
-  const prefix = `O${year}-`;
-  const row = await db
-    .prepare("SELECT COUNT(*) as c FROM quotes WHERE user_id = ? AND quote_number LIKE ?")
-    .bind(userId, `${prefix}%`)
-    .first<{ c: number }>();
-  const n = (row?.c ?? 0) + 1;
-  return `${prefix}${String(n).padStart(4, "0")}`;
-}
-
 api.post("/api/invoices/:id/split", async (c) => {
   const userId = c.get("userId")!;
   const { id } = c.req.param();
@@ -1272,71 +1262,6 @@ api.post("/api/invoices/:id/split", async (c) => {
 
   await c.env.DB.batch(stmts);
   return c.json({ ok: true, created_invoice_ids: createdIds });
-});
-
-api.post("/api/invoices/:id/quote", async (c) => {
-  const userId = c.get("userId")!;
-  const { id } = c.req.param();
-  const invoice = await c.env.DB
-    .prepare(
-      "SELECT id, company_id, invoice_number, subtotal, btw_percentage, btw_amount, total, notes, invoice_type FROM invoices WHERE id = ? AND user_id = ?",
-    )
-    .bind(id, userId)
-    .first<{
-      id: string;
-      company_id: string;
-      invoice_number: string;
-      subtotal: number;
-      btw_percentage: number;
-      btw_amount: number;
-      total: number;
-      notes: string | null;
-      invoice_type: string;
-    }>();
-  if (!invoice) return c.json({ error: "Factuur niet gevonden" }, 404);
-
-  const { results: invoiceLines } = await c.env.DB
-    .prepare("SELECT description, hours, hourly_rate, amount FROM invoice_lines WHERE invoice_id = ? ORDER BY date, created_at")
-    .bind(id)
-    .all<{ description: string; hours: number | null; hourly_rate: number | null; amount: number }>();
-
-  const today = new Date().toISOString().split("T")[0]!;
-  const now = new Date().toISOString();
-  const year = new Date().getFullYear();
-  const quoteId = crypto.randomUUID();
-  const quoteNumber = await nextQuoteNumberForYear(c.env.DB, userId, year);
-  const validUntil = addDaysIso(today, 30);
-  const isPrivate = invoice.invoice_type === "private";
-  const btwPct = isPrivate ? 0 : Number(invoice.btw_percentage);
-  const subtotal = toMoney(invoice.subtotal);
-  const btwAmount = isPrivate ? 0 : toMoney(invoice.btw_amount);
-  const total = isPrivate ? subtotal : toMoney(invoice.total);
-  const baseNote = `Gebaseerd op factuur ${invoice.invoice_number}`;
-  const notes = invoice.notes ? `${invoice.notes}\n\n${baseNote}` : baseNote;
-
-  const stmts: D1PreparedStatement[] = [
-    c.env.DB
-      .prepare(
-        `INSERT INTO quotes (id, user_id, company_id, quote_number, quote_date, valid_until, status, subtotal, btw_percentage, btw_amount, total, notes, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, 'concept', ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .bind(quoteId, userId, invoice.company_id, quoteNumber, today, validUntil, subtotal, btwPct, btwAmount, total, notes, now, now),
-  ];
-
-  for (const line of invoiceLines ?? []) {
-    stmts.push(
-      c.env.DB
-        .prepare(
-          `INSERT INTO quote_lines (id, quote_id, description, hours, hourly_rate, amount, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`,
-        )
-        .bind(crypto.randomUUID(), quoteId, line.description, line.hours ?? null, line.hourly_rate ?? null, line.amount),
-    );
-  }
-
-  await c.env.DB.batch(stmts);
-  const row = await c.env.DB.prepare("SELECT * FROM quotes WHERE id = ?").bind(quoteId).first();
-  return c.json(row);
 });
 
 api.delete("/api/invoices/:id", async (c) => {
