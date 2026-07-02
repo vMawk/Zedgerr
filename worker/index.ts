@@ -1552,6 +1552,77 @@ api.patch("/api/quotes/:id", async (c) => {
   return c.json(row);
 });
 
+api.post("/api/quotes/:id/invoice", async (c) => {
+  const userId = c.get("userId")!;
+  const { id } = c.req.param();
+  const quote = await c.env.DB
+    .prepare(
+      "SELECT id, company_id, quote_number, quote_date, subtotal, btw_percentage, btw_amount, total, notes FROM quotes WHERE id = ? AND user_id = ?",
+    )
+    .bind(id, userId)
+    .first<{
+      id: string;
+      company_id: string;
+      quote_number: string;
+      quote_date: string;
+      subtotal: number;
+      btw_percentage: number;
+      btw_amount: number;
+      total: number;
+      notes: string | null;
+    }>();
+  if (!quote) return c.json({ error: "Offerte niet gevonden" }, 404);
+
+  const company = await c.env.DB
+    .prepare("SELECT id FROM companies WHERE id = ? AND user_id = ?")
+    .bind(quote.company_id, userId)
+    .first<{ id: string }>();
+  if (!company) return c.json({ error: "Bedrijf niet gevonden" }, 404);
+
+  const { results: quoteLines } = await c.env.DB
+    .prepare("SELECT description, hours, hourly_rate, amount FROM quote_lines WHERE quote_id = ? ORDER BY created_at")
+    .bind(id)
+    .all<{ description: string; hours: number | null; hourly_rate: number | null; amount: number }>();
+
+  const today = new Date().toISOString().split("T")[0]!;
+  const now = new Date().toISOString();
+  const year = new Date().getFullYear();
+  const invoiceId = crypto.randomUUID();
+  const invoiceNumber = await nextInvoiceNumberForYear(c.env.DB, userId, year, 0);
+  const dueDate = addDaysIso(today, 30);
+  const subtotal = toMoney(quote.subtotal);
+  const btwPct = Number(quote.btw_percentage);
+  const btwAmount = toMoney(quote.btw_amount);
+  const total = toMoney(quote.total);
+  const baseNote = `Gebaseerd op offerte ${quote.quote_number}`;
+  const notes = quote.notes ? `${quote.notes}\n\n${baseNote}` : baseNote;
+  const lineDate = quote.quote_date || today;
+
+  const stmts: D1PreparedStatement[] = [
+    c.env.DB
+      .prepare(
+        `INSERT INTO invoices (id, user_id, company_id, invoice_number, invoice_date, due_date, status, subtotal, btw_percentage, btw_amount, total, advance_payment, advance_label, notes, invoice_type, payment_method, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, 'concept', ?, ?, ?, ?, 0, 'krediet', ?, 'business', 'overboeking', ?, ?)`,
+      )
+      .bind(invoiceId, userId, quote.company_id, invoiceNumber, today, dueDate, subtotal, btwPct, btwAmount, total, notes, now, now),
+  ];
+
+  for (const line of quoteLines ?? []) {
+    stmts.push(
+      c.env.DB
+        .prepare(
+          `INSERT INTO invoice_lines (id, invoice_id, time_entry_id, description, date, hours, hourly_rate, amount, created_at)
+           VALUES (?, ?, NULL, ?, ?, ?, ?, ?, datetime('now'))`,
+        )
+        .bind(crypto.randomUUID(), invoiceId, line.description, lineDate, line.hours ?? null, line.hourly_rate ?? null, line.amount),
+    );
+  }
+
+  await c.env.DB.batch(stmts);
+  const row = await c.env.DB.prepare("SELECT * FROM invoices WHERE id = ?").bind(invoiceId).first();
+  return c.json(row);
+});
+
 api.delete("/api/quotes/:id", async (c) => {
   const userId = c.get("userId")!;
   const { id } = c.req.param();

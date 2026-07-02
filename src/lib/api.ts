@@ -143,6 +143,7 @@ export const api = {
   deleteInvoiceLine: (id: string) => req<void>("DELETE", `/invoice-lines/${id}`),
   createInvoice: (body: Record<string, unknown>) => req<Invoice>("POST", "/invoices", body),
   createQuoteFromInvoice: (invoiceId: string) => req<Quote>("POST", `/invoices/${invoiceId}/quote`),
+  createInvoiceFromQuote: (quoteId: string) => req<Invoice>("POST", `/quotes/${quoteId}/invoice`),
   splitInvoice: (id: string, body?: { parts?: number; interval_days?: number; first_due_date?: string }) =>
     req<{ ok: boolean; created_invoice_ids: string[] }>("POST", `/invoices/${id}/split`, body ?? {}),
   updateInvoice: (

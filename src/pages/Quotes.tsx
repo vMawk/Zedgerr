@@ -12,7 +12,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, FileCheck, Trash2, Download, Pencil } from "lucide-react";
+import { Plus, FileCheck, FileText, Trash2, Download, Pencil } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { generateQuotePDF } from "@/lib/pdf";
 
 interface QuoteLine {
@@ -32,6 +33,7 @@ const statusColors: Record<string, string> = {
 export default function Quotes() {
   const { user } = useAuth();
   const { toast } = useToast();
+  const navigate = useNavigate();
   const [quotes, setQuotes] = useState<(Quote & { companies: { name: string | null; contact_person: string | null } | null })[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [open, setOpen] = useState(false);
@@ -46,6 +48,7 @@ export default function Quotes() {
   const [editValidUntil, setEditValidUntil] = useState("");
   const [editStatus, setEditStatus] = useState("concept");
   const [editNotes, setEditNotes] = useState("");
+  const [creatingInvoiceFromId, setCreatingInvoiceFromId] = useState<string | null>(null);
 
   const fetchData = async () => {
     const [quotesRes, companiesRes] = await Promise.all([api.getQuotes(), api.getCompanies()]);
@@ -111,6 +114,24 @@ export default function Quotes() {
       toast({ title: "Offerte aangemaakt", description: quoteNumber });
     } catch (error: unknown) {
       toast({ title: "Fout", description: error instanceof Error ? error.message : String(error), variant: "destructive" });
+    }
+  };
+
+  const handleCreateInvoiceFromQuote = async (
+    quote: Quote & { companies: { name: string | null; contact_person: string | null } | null },
+  ) => {
+    setCreatingInvoiceFromId(quote.id);
+    try {
+      const invoice = await api.createInvoiceFromQuote(quote.id);
+      toast({
+        title: "Factuur aangemaakt",
+        description: `${invoice.invoice_number} — gebaseerd op ${quote.quote_number}`,
+      });
+      navigate("/facturen");
+    } catch (error: unknown) {
+      toast({ title: "Fout", description: error instanceof Error ? error.message : String(error), variant: "destructive" });
+    } finally {
+      setCreatingInvoiceFromId(null);
     }
   };
 
@@ -262,6 +283,15 @@ export default function Quotes() {
                     <div className="flex justify-end gap-1">
                       <Button variant="ghost" size="icon" onClick={() => openEdit(quote)} title="Bewerken">
                         <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => handleCreateInvoiceFromQuote(quote)}
+                        title="Factuur maken van offerte"
+                        disabled={creatingInvoiceFromId === quote.id}
+                      >
+                        <FileText className="h-4 w-4" />
                       </Button>
                       <Button variant="ghost" size="icon" onClick={() => handleDownloadPDF(quote)} title="PDF downloaden">
                         <Download className="h-4 w-4" />
