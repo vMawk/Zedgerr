@@ -1,4 +1,5 @@
 import type {
+  Attachment,
   BusinessSettings,
   Company,
   CompanyProduct,
@@ -251,4 +252,31 @@ export const api = {
   createMileageEntry: (body: Record<string, unknown>) => req<MileageEntry>("POST", "/mileage", body),
   updateMileageEntry: (id: string, body: Record<string, unknown>) => req<MileageEntry>("PATCH", `/mileage/${id}`, body),
   deleteMileageEntry: (id: string) => req<void>("DELETE", `/mileage/${id}`),
+
+  getAttachments: (entityType: string, entityId: string) => {
+    const p = new URLSearchParams({ entity_type: entityType, entity_id: entityId });
+    return req<Attachment[]>("GET", `/attachments?${p}`);
+  },
+  uploadAttachment: (entityType: string, entityId: string, file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("entity_type", entityType);
+    form.append("entity_id", entityId);
+    const token = getStoredToken();
+    return fetch(apiUrl("/api/attachments/upload"), {
+      method: "POST",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: form,
+    }).then(async (r) => {
+      if (!r.ok) {
+        const t = await r.text();
+        let msg = t || r.statusText;
+        try { const j = JSON.parse(t) as { error?: string }; if (j?.error) msg = j.error; } catch { /* noop */ }
+        throw new Error(msg);
+      }
+      return r.json() as Promise<Attachment>;
+    });
+  },
+  downloadAttachmentUrl: (id: string) => apiUrl(`/api/attachments/${id}/download`),
+  deleteAttachment: (id: string) => req<void>("DELETE", `/attachments/${id}`),
 };

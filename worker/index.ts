@@ -11,6 +11,7 @@ export type Env = {
   JWT_SECRET: string;
   AI: Ai;
   ASSETS?: Fetcher;
+  FILES: R2Bucket;
   /** Extra accounts na de eerste gebruiker: zet op "true" in wrangler.toml. Anders alleen eerste account (lege `users`). */
   ALLOW_REGISTRATION?: string;
   TELEGRAM_BOT_TOKEN?: string;
@@ -2016,6 +2017,90 @@ api.delete("/api/mileage/:id", async (c) => {
   const userId = c.get("userId")!;
   const { id } = c.req.param();
   await c.env.DB.prepare("DELETE FROM mileage_entries WHERE id = ? AND user_id = ?").bind(id, userId).run();
+  return c.body(null, 204);
+});
+
+// --- Bijlagen (R2) ---
+const ALLOWED_TYPES = new Set([
+  "image/jpeg", "image/png", "image/gif", "image/webp", "image/heic", "image/heif",
+  "application/pdf",
+]);
+const MAX_SIZE = 10 * 1024 * 1024; // 10 MB
+
+api.post("/api/attachments/upload", async (c) => {
+  const userId = c.get("userId")!;
+  const formData = await c.req.formData();
+  const file = formData.get("file");
+  const entityType = formData.get("entity_type");
+  const entityId = formData.get("entity_id");
+
+  if (!(file instanceof File)) return c.json({ error: "Geen bestand meegegeven" }, 400);
+  if (!entityType || typeof entityType !== "string") return c.json({ error: "entity_type verplicht" }, 400);
+  if (!entityId || typeof entityId !== "string") return c.json({ error: "entity_id verplicht" }, 400);
+  if (!ALLOWED_TYPES.has(file.type)) return c.json({ error: "Bestandstype niet toegestaan. Gebruik JPEG, PNG, GIF, WebP, HEIC of PDF." }, 400);
+  if (file.size > MAX_SIZE) return c.json({ error: "Bestand te groot (max 10 MB)" }, 400);
+
+  const ext = file.name.split(".").pop()?.toLowerCase() ?? "bin";
+  const id = crypto.randomUUID();
+  const r2Key = `${userId}/${entityType}/${entityId}/${id}.${ext}`;
+
+  await c.env.FILES.put(r2Key, file.stream(), {
+    httpMetadata: { contentType: file.type },
+    customMetadata: { userId, entityType, entityId, originalFilename: file.name },
+  });
+
+  const now = new Date().toISOString();
+  await c.env.DB
+    .prepare(`INSERT INTO attachments (id, user_id, entity_type, entity_id, filename, content_type, r2_key, size_bytes, created_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .bind(id, userId, entityType, entityId, file.name, file.type, r2Key, file.size, now)
+    .run();
+
+  const row = await c.env.DB.prepare("SELECT * FROM attachments WHERE id = ?").bind(id).first();
+  return c.json(row, 201);
+});
+
+api.get("/api/attachments", async (c) => {
+  const userId = c.get("userId")!;
+  const entityType = c.req.query("entity_type");
+  const entityId = c.req.query("entity_id");
+  if (!entityType || !entityId) return c.json({ error: "entity_type en entity_id verplicht" }, 400);
+  const rows = await c.env.DB
+    .prepare("SELECT * FROM attachments WHERE user_id = ? AND entity_type = ? AND entity_id = ? ORDER BY created_at ASC")
+    .bind(userId, entityType, entityId)
+    .all();
+  return c.json(rows.results ?? []);
+});
+
+api.get("/api/attachments/:id/download", async (c) => {
+  const userId = c.get("userId")!;
+  const { id } = c.req.param();
+  const row = await c.env.DB
+    .prepare("SELECT * FROM attachments WHERE id = ? AND user_id = ?")
+    .bind(id, userId)
+    .first<{ r2_key: string; filename: string; content_type: string | null }>();
+  if (!row) return c.json({ error: "Niet gevonden" }, 404);
+
+  const obj = await c.env.FILES.get(row.r2_key);
+  if (!obj) return c.json({ error: "Bestand niet gevonden in opslag" }, 404);
+
+  const headers = new Headers();
+  headers.set("Content-Type", row.content_type ?? "application/octet-stream");
+  headers.set("Content-Disposition", `inline; filename="${encodeURIComponent(row.filename)}"`);
+  headers.set("Cache-Control", "private, max-age=3600");
+  return new Response(obj.body, { headers });
+});
+
+api.delete("/api/attachments/:id", async (c) => {
+  const userId = c.get("userId")!;
+  const { id } = c.req.param();
+  const row = await c.env.DB
+    .prepare("SELECT r2_key FROM attachments WHERE id = ? AND user_id = ?")
+    .bind(id, userId)
+    .first<{ r2_key: string }>();
+  if (!row) return c.json({ error: "Niet gevonden" }, 404);
+  await c.env.FILES.delete(row.r2_key);
+  await c.env.DB.prepare("DELETE FROM attachments WHERE id = ? AND user_id = ?").bind(id, userId).run();
   return c.body(null, 204);
 });
 
