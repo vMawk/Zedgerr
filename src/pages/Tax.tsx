@@ -157,6 +157,26 @@ function BtwTab() {
             </CardContent>
           </Card>
 
+          {data.verkoop_btw > 0 && (
+            <Card className="border-amber-400/40 bg-amber-50/30 dark:bg-amber-950/20">
+              <CardContent className="pt-4 pb-4 flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">Zet nu opzij</p>
+                  <p className="text-xl font-bold tabular-nums text-amber-700 dark:text-amber-400">
+                    €{fmt(Math.max(0, data.saldo_btw))}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Te betalen aan Belastingdienst voor Q{quarter} {year}
+                  </p>
+                </div>
+                <div className="text-right text-xs text-muted-foreground space-y-0.5">
+                  <p>Ontvangen van klanten: <span className="font-medium text-foreground">€{fmt(data.verkoop_btw)}</span></p>
+                  {data.inkoop_btw > 0 && <p>Terug te vragen: <span className="font-medium text-foreground">€{fmt(data.inkoop_btw)}</span></p>}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           <p className="text-xs text-muted-foreground">
             Verkoop-BTW: facturen met status <em>verzonden</em> of <em>betaald</em> in dit kwartaal.
             Inkoop-BTW: uitgaven geregistreerd in dit kwartaal. Dit overzicht is een hulpmiddel — controleer altijd in het portaal van de Belastingdienst.
@@ -276,6 +296,7 @@ function ProfitTab() {
 
 // --- Belastingschatting ---
 function TaxEstimateTab() {
+  const { user } = useAuth();
   const currentYear = new Date().getFullYear();
   const [winst, setWinst] = useState("");
   const [jaar, setJaar] = useState(currentYear);
@@ -283,7 +304,18 @@ function TaxEstimateTab() {
   const [startersaftrek, setStartersaftrek] = useState(false);
   const [startersAftrekBedrag] = useState("2123");
   const [mkbPct, setMkbPct] = useState("13.31");
+  const [autoLoaded, setAutoLoaded] = useState(false);
   const years = Array.from({ length: 5 }, (_, i) => currentYear - i);
+
+  useEffect(() => {
+    if (!user || autoLoaded) return;
+    api.getProfitReport(jaar).then((data) => {
+      if (data.winst > 0 && !winst) {
+        setWinst(String(Math.round(data.winst)));
+        setAutoLoaded(true);
+      }
+    }).catch(() => {});
+  }, [user, jaar]);
 
   const winstNum = parseFloat(winst) || 0;
   const zelfstandigenNum = parseFloat(zelfstandigenaftrek) || 0;
@@ -309,7 +341,8 @@ function TaxEstimateTab() {
         <div className="grid grid-cols-2 gap-4">
           <div className="grid gap-2">
             <Label>Winst voor belasting (€)</Label>
-            <Input type="number" step="100" min="0" placeholder="bijv. 45000" value={winst} onChange={(e) => setWinst(e.target.value)} />
+            <Input type="number" step="100" min="0" placeholder="bijv. 45000" value={winst} onChange={(e) => { setWinst(e.target.value); }} />
+            {autoLoaded && <p className="text-xs text-muted-foreground">Automatisch ingevuld vanuit winst &amp; verlies {jaar}</p>}
           </div>
           <div className="grid gap-2">
             <Label>Jaar</Label>
