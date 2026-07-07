@@ -1950,7 +1950,7 @@ api.get("/api/reports/profit", async (c) => {
 
     c.env.DB.prepare(
       `SELECT COALESCE(SUM(distance_km * 0.23), 0) AS kosten FROM mileage_entries
-       WHERE user_id = ? AND date >= ? AND date <= ?`,
+       WHERE user_id = ? AND date >= ? AND date <= ? AND is_private = 0`,
     ).bind(userId, from, to).first<{ kosten: number }>(),
   ]);
 
@@ -1987,13 +1987,19 @@ api.get("/api/mileage", async (c) => {
 api.post("/api/mileage", async (c) => {
   const userId = c.get("userId")!;
   const req = await c.req.json<Record<string, unknown>>();
-  if (!req.date || !req.distance_km || !req.purpose) return c.json({ error: "date, distance_km en purpose zijn verplicht" }, 400);
+  if (!req.date || !req.purpose) return c.json({ error: "date en purpose zijn verplicht" }, 400);
+  const odoStart = req.odometer_start != null ? Number(req.odometer_start) : null;
+  const odoEnd   = req.odometer_end   != null ? Number(req.odometer_end)   : null;
+  const distKm = (odoStart != null && odoEnd != null)
+    ? Math.max(0, odoEnd - odoStart)
+    : (req.distance_km != null ? Number(req.distance_km) : 0);
+  const isPrivate = req.is_private ? 1 : 0;
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
   await c.env.DB.prepare(
-    `INSERT INTO mileage_entries (id, user_id, date, from_location, to_location, distance_km, purpose, notes, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).bind(id, userId, req.date, req.from_location ?? null, req.to_location ?? null, Number(req.distance_km), req.purpose, req.notes ?? null, now, now).run();
+    `INSERT INTO mileage_entries (id, user_id, date, from_location, to_location, odometer_start, odometer_end, distance_km, purpose, is_private, notes, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).bind(id, userId, req.date, req.from_location ?? null, req.to_location ?? null, odoStart, odoEnd, distKm, req.purpose, isPrivate, req.notes ?? null, now, now).run();
   const row = await c.env.DB.prepare("SELECT * FROM mileage_entries WHERE id = ?").bind(id).first();
   return c.json(row);
 });
@@ -2004,11 +2010,17 @@ api.patch("/api/mileage/:id", async (c) => {
   const exists = await c.env.DB.prepare("SELECT id FROM mileage_entries WHERE id = ? AND user_id = ?").bind(id, userId).first();
   if (!exists) return c.json({ error: "Not found" }, 404);
   const req = await c.req.json<Record<string, unknown>>();
+  const odoStart = req.odometer_start != null ? Number(req.odometer_start) : null;
+  const odoEnd   = req.odometer_end   != null ? Number(req.odometer_end)   : null;
+  const distKm = (odoStart != null && odoEnd != null)
+    ? Math.max(0, odoEnd - odoStart)
+    : (req.distance_km != null ? Number(req.distance_km) : 0);
+  const isPrivate = req.is_private ? 1 : 0;
   const now = new Date().toISOString();
   await c.env.DB.prepare(
-    `UPDATE mileage_entries SET date = ?, from_location = ?, to_location = ?, distance_km = ?, purpose = ?, notes = ?, updated_at = ?
+    `UPDATE mileage_entries SET date = ?, from_location = ?, to_location = ?, odometer_start = ?, odometer_end = ?, distance_km = ?, purpose = ?, is_private = ?, notes = ?, updated_at = ?
      WHERE id = ? AND user_id = ?`,
-  ).bind(req.date, req.from_location ?? null, req.to_location ?? null, Number(req.distance_km), req.purpose, req.notes ?? null, now, id, userId).run();
+  ).bind(req.date, req.from_location ?? null, req.to_location ?? null, odoStart, odoEnd, distKm, req.purpose, isPrivate, req.notes ?? null, now, id, userId).run();
   const row = await c.env.DB.prepare("SELECT * FROM mileage_entries WHERE id = ?").bind(id).first();
   return c.json(row);
 });
