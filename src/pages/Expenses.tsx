@@ -14,6 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Plus, Pencil, Trash2, Receipt } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { AttachmentSection } from "@/components/AttachmentSection";
 
 export const EXPENSE_CATEGORIES: Record<string, string> = {
   kantoor: "Kantoor",
@@ -159,7 +160,7 @@ export default function Expenses() {
           <DialogTrigger asChild>
             <Button><Plus className="mr-2 h-4 w-4" />Uitgave toevoegen</Button>
           </DialogTrigger>
-          <DialogContent className="max-w-lg">
+          <DialogContent className="max-w-xl">
             <DialogHeader>
               <DialogTitle>{editExpense ? "Uitgave bewerken" : "Nieuwe uitgave"}</DialogTitle>
             </DialogHeader>
@@ -224,6 +225,11 @@ export default function Expenses() {
               <Button onClick={handleSave} disabled={saving || !form.description.trim() || !form.amount_excl_vat || !form.date}>
                 {saving ? "Bezig…" : editExpense ? "Opslaan" : "Toevoegen"}
               </Button>
+              {editExpense && (
+                <div className="border-t pt-4 mt-2">
+                  <AttachmentSection entityType="expense" entityId={editExpense.id} />
+                </div>
+              )}
             </div>
           </DialogContent>
         </Dialog>

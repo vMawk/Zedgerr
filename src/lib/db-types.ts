@@ -73,6 +73,18 @@ export type MileageEntry = {
   updated_at: string;
 };
 
+export type Attachment = {
+  id: string;
+  user_id: string;
+  entity_type: string;
+  entity_id: string;
+  filename: string;
+  content_type: string | null;
+  r2_key: string;
+  size_bytes: number | null;
+  created_at: string;
+};
+
 export type InvoiceLine = {
   id: string;
   invoice_id: string;

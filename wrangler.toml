@@ -26,6 +26,10 @@ database_name = "client-flow"
 database_id = "edfd0cb4-569d-42e7-a3ff-e44583881b67"
 migrations_dir = "migrations"
 
+[[r2_buckets]]
+binding = "FILES"
+bucket_name = "client-flow-files"
+
 [assets]
 directory = "./dist"
 binding = "ASSETS"
@@ -64,6 +68,10 @@ binding = "DB"
 database_name = "client-flow-dev"
 database_id = "0f18a32a-7e53-4fb7-b33f-978369336326"
 migrations_dir = "migrations"
+
+[[env.dev.r2_buckets]]
+binding = "FILES"
+bucket_name = "client-flow-files"
 
 [env.dev.assets]
 directory = "./dist"
