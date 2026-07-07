@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
-import { Building2, Clock, Euro, FileText, Loader2, Send } from "lucide-react";
+import { Building2, Clock, Euro, FileText, Loader2, Receipt, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { NavLink } from "@/components/NavLink";
 import type { Company, Invoice, TimeEntry } from "@/lib/db-types";
@@ -72,6 +72,7 @@ export default function Dashboard() {
   const [toSendCount, setToSendCount] = useState(0);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [customerTableSort, setCustomerTableSort] = useState<"revenue" | "hours">("revenue");
+  const [btwQuarter, setBtwQuarter] = useState<{ verkoop_btw: number; inkoop_btw: number; saldo_btw: number } | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -95,6 +96,17 @@ export default function Dashboard() {
       .catch((e: unknown) => setLoadError(e instanceof Error ? e.message : "Dashboard data kon niet geladen worden."))
       .finally(() => setLoading(false));
   }, [user, period, companyFilter]);
+
+  useEffect(() => {
+    if (!user) return;
+    const now = new Date();
+    const q = Math.ceil((now.getMonth() + 1) / 3);
+    const qStarts = ["01-01", "04-01", "07-01", "10-01"];
+    const qEnds   = ["03-31", "06-30", "09-30", "12-31"];
+    const qFrom = `${now.getFullYear()}-${qStarts[q - 1]}`;
+    const qTo   = `${now.getFullYear()}-${qEnds[q - 1]}`;
+    api.getTaxReport(qFrom, qTo).then(setBtwQuarter).catch(() => {});
+  }, [user]);
 
   useEffect(() => {
     if (!user) return;
@@ -263,12 +275,32 @@ export default function Dashboard() {
         </Card>
       ) : (
         <>
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
             <Card><CardHeader className="flex flex-row items-center justify-between pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Klanten in beeld</CardTitle><Building2 className="h-4 w-4 text-muted-foreground" /></CardHeader><CardContent><div className="text-2xl font-bold">{kpis.clientsCount}</div></CardContent></Card>
             <Card><CardHeader className="flex flex-row items-center justify-between pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Uren in periode</CardTitle><Clock className="h-4 w-4 text-muted-foreground" /></CardHeader><CardContent><div className="text-2xl font-bold">{kpis.hours.toFixed(1)}</div></CardContent></Card>
             <Card><CardHeader className="flex flex-row items-center justify-between pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Openstaande facturen</CardTitle><FileText className="h-4 w-4 text-muted-foreground" /></CardHeader><CardContent><div className="text-2xl font-bold">{kpis.openInvoicesCount}</div><p className="text-xs text-muted-foreground mt-1">{numberMoney(kpis.openAmount)}</p></CardContent></Card>
             <Card><CardHeader className="flex flex-row items-center justify-between pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Omzet ontvangen</CardTitle><Euro className="h-4 w-4 text-muted-foreground" /></CardHeader><CardContent><div className="text-2xl font-bold">{numberMoney(kpis.paidRevenue)}</div></CardContent></Card>
             <Card><CardHeader className="flex flex-row items-center justify-between pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Klaar om te sturen</CardTitle><Send className="h-4 w-4 text-muted-foreground" /></CardHeader><CardContent><div className="text-2xl font-bold">{toSendCount}</div></CardContent></Card>
+            <Card className={btwQuarter && btwQuarter.saldo_btw > 0 ? "border-amber-400/50 bg-amber-50/30 dark:bg-amber-950/20" : ""}>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  BTW reserveren Q{Math.ceil((new Date().getMonth() + 1) / 3)}
+                </CardTitle>
+                <Receipt className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className={`text-2xl font-bold tabular-nums ${btwQuarter && btwQuarter.saldo_btw > 0 ? "text-amber-700 dark:text-amber-400" : ""}`}>
+                  {btwQuarter !== null ? numberMoney(Math.max(0, btwQuarter.saldo_btw)) : "—"}
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {btwQuarter
+                    ? btwQuarter.inkoop_btw > 0
+                      ? `Excl. €${btwQuarter.inkoop_btw.toFixed(2)} aftrek`
+                      : "Huidig kwartaal"
+                    : "Laden…"}
+                </p>
+              </CardContent>
+            </Card>
           </div>
 
           <div className="grid gap-4 xl:grid-cols-2">
