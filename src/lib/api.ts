@@ -1,5 +1,6 @@
 import type {
   Attachment,
+  BankTransaction,
   BusinessSettings,
   Company,
   CompanyProduct,
@@ -279,4 +280,17 @@ export const api = {
   },
   downloadAttachmentUrl: (id: string) => apiUrl(`/api/attachments/${id}/download`),
   deleteAttachment: (id: string) => req<void>("DELETE", `/attachments/${id}`),
+
+  getBankTransactions: (q?: { from?: string; to?: string }) => {
+    const p = new URLSearchParams();
+    if (q?.from) p.set("from", q.from);
+    if (q?.to) p.set("to", q.to);
+    const qs = p.toString();
+    return req<BankTransaction[]>("GET", `/bank-transactions${qs ? `?${qs}` : ""}`);
+  },
+  getBankBalance: () => req<{ saldo: number }>("GET", "/bank-balance"),
+  createBankTransaction: (body: Record<string, unknown>) => req<BankTransaction>("POST", "/bank-transactions", body),
+  updateBankTransaction: (id: string, body: Record<string, unknown>) =>
+    req<BankTransaction>("PATCH", `/bank-transactions/${id}`, body),
+  deleteBankTransaction: (id: string) => req<void>("DELETE", `/bank-transactions/${id}`),
 };

@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
-import { Building2, Clock, Euro, FileText, Loader2, Receipt, Send } from "lucide-react";
+import { Building2, Clock, Euro, FileText, Landmark, Loader2, Receipt, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { NavLink } from "@/components/NavLink";
 import type { Company, Invoice, TimeEntry } from "@/lib/db-types";
@@ -73,6 +73,7 @@ export default function Dashboard() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [customerTableSort, setCustomerTableSort] = useState<"revenue" | "hours">("revenue");
   const [btwQuarter, setBtwQuarter] = useState<{ verkoop_btw: number; inkoop_btw: number; saldo_btw: number } | null>(null);
+  const [bankSaldo, setBankSaldo] = useState<number | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -106,6 +107,11 @@ export default function Dashboard() {
     const qFrom = `${now.getFullYear()}-${qStarts[q - 1]}`;
     const qTo   = `${now.getFullYear()}-${qEnds[q - 1]}`;
     api.getTaxReport(qFrom, qTo).then(setBtwQuarter).catch(() => {});
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    api.getBankBalance().then((r) => setBankSaldo(r.saldo)).catch(() => {});
   }, [user]);
 
   useEffect(() => {
@@ -275,7 +281,20 @@ export default function Dashboard() {
         </Card>
       ) : (
         <>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7">
+            <Card className={`xl:col-span-1 ${bankSaldo !== null && bankSaldo < 0 ? "border-red-400/50" : bankSaldo !== null && bankSaldo >= 0 ? "border-green-400/40" : ""}`}>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  <NavLink to="/bankrekening" className="hover:underline">Banksaldo</NavLink>
+                </CardTitle>
+                <Landmark className={`h-4 w-4 ${bankSaldo !== null && bankSaldo < 0 ? "text-red-500" : "text-muted-foreground"}`} />
+              </CardHeader>
+              <CardContent>
+                <div className={`text-2xl font-bold tabular-nums ${bankSaldo !== null && bankSaldo < 0 ? "text-red-500" : bankSaldo !== null && bankSaldo > 0 ? "text-green-600 dark:text-green-400" : ""}`}>
+                  {bankSaldo !== null ? `${bankSaldo < 0 ? "−" : ""}€${Math.abs(bankSaldo).toLocaleString("nl-NL", { minimumFractionDigits: 2 })}` : "—"}
+                </div>
+              </CardContent>
+            </Card>
             <Card><CardHeader className="flex flex-row items-center justify-between pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Klanten in beeld</CardTitle><Building2 className="h-4 w-4 text-muted-foreground" /></CardHeader><CardContent><div className="text-2xl font-bold">{kpis.clientsCount}</div></CardContent></Card>
             <Card><CardHeader className="flex flex-row items-center justify-between pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Uren in periode</CardTitle><Clock className="h-4 w-4 text-muted-foreground" /></CardHeader><CardContent><div className="text-2xl font-bold">{kpis.hours.toFixed(1)}</div></CardContent></Card>
             <Card><CardHeader className="flex flex-row items-center justify-between pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Openstaande facturen</CardTitle><FileText className="h-4 w-4 text-muted-foreground" /></CardHeader><CardContent><div className="text-2xl font-bold">{kpis.openInvoicesCount}</div><p className="text-xs text-muted-foreground mt-1">{numberMoney(kpis.openAmount)}</p></CardContent></Card>

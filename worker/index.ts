@@ -2032,6 +2032,61 @@ api.delete("/api/mileage/:id", async (c) => {
   return c.body(null, 204);
 });
 
+// --- Bankrekening ---
+api.get("/api/bank-transactions", async (c) => {
+  const userId = c.get("userId")!;
+  const { from, to } = c.req.query();
+  let sql = "SELECT * FROM bank_transactions WHERE user_id = ?";
+  const params: unknown[] = [userId];
+  if (from) { sql += " AND date >= ?"; params.push(from); }
+  if (to)   { sql += " AND date <= ?"; params.push(to); }
+  sql += " ORDER BY date DESC, created_at DESC";
+  const rows = await c.env.DB.prepare(sql).bind(...params).all();
+  return c.json(rows.results);
+});
+
+api.get("/api/bank-balance", async (c) => {
+  const userId = c.get("userId")!;
+  const row = await c.env.DB.prepare(
+    "SELECT COALESCE(SUM(amount), 0) AS saldo FROM bank_transactions WHERE user_id = ?",
+  ).bind(userId).first<{ saldo: number }>();
+  return c.json({ saldo: row?.saldo ?? 0 });
+});
+
+api.post("/api/bank-transactions", async (c) => {
+  const userId = c.get("userId")!;
+  const req = await c.req.json<Record<string, unknown>>();
+  if (!req.date || !req.description || req.amount == null) return c.json({ error: "date, description en amount zijn verplicht" }, 400);
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  await c.env.DB.prepare(
+    `INSERT INTO bank_transactions (id, user_id, date, description, amount, type, notes, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).bind(id, userId, req.date, req.description, Number(req.amount), req.type ?? "overig", req.notes ?? null, now).run();
+  const row = await c.env.DB.prepare("SELECT * FROM bank_transactions WHERE id = ?").bind(id).first();
+  return c.json(row);
+});
+
+api.patch("/api/bank-transactions/:id", async (c) => {
+  const userId = c.get("userId")!;
+  const { id } = c.req.param();
+  const exists = await c.env.DB.prepare("SELECT id FROM bank_transactions WHERE id = ? AND user_id = ?").bind(id, userId).first();
+  if (!exists) return c.json({ error: "Not found" }, 404);
+  const req = await c.req.json<Record<string, unknown>>();
+  await c.env.DB.prepare(
+    `UPDATE bank_transactions SET date = ?, description = ?, amount = ?, type = ?, notes = ? WHERE id = ? AND user_id = ?`,
+  ).bind(req.date, req.description, Number(req.amount), req.type ?? "overig", req.notes ?? null, id, userId).run();
+  const row = await c.env.DB.prepare("SELECT * FROM bank_transactions WHERE id = ?").bind(id).first();
+  return c.json(row);
+});
+
+api.delete("/api/bank-transactions/:id", async (c) => {
+  const userId = c.get("userId")!;
+  const { id } = c.req.param();
+  await c.env.DB.prepare("DELETE FROM bank_transactions WHERE id = ? AND user_id = ?").bind(id, userId).run();
+  return c.body(null, 204);
+});
+
 // --- Bijlagen (R2) ---
 const ALLOWED_TYPES = new Set([
   "image/jpeg", "image/png", "image/gif", "image/webp", "image/heic", "image/heif",
