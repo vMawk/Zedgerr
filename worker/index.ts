@@ -1835,7 +1835,7 @@ api.get("/api/expenses", async (c) => {
 api.post("/api/expenses", async (c) => {
   const userId = c.get("userId")!;
   const req = await c.req.json<Record<string, unknown>>();
-  const id = crypto.randomUUID();
+  const id = typeof req.id === "string" && req.id ? req.id : crypto.randomUUID();
   const now = new Date().toISOString();
   const vatPct = Number(req.vat_percentage ?? 21);
   const exclVat = toMoney(req.amount_excl_vat);

@@ -64,6 +64,7 @@ export default function Expenses() {
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const [editExpense, setEditExpense] = useState<Expense | null>(null);
+  const [pendingId, setPendingId] = useState(() => crypto.randomUUID());
   const [deleteTarget, setDeleteTarget] = useState<Expense | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -77,6 +78,7 @@ export default function Expenses() {
   const resetForm = () => {
     setForm(emptyForm);
     setEditExpense(null);
+    setPendingId(crypto.randomUUID());
   };
 
   const openEdit = (e: Expense) => {
@@ -115,7 +117,7 @@ export default function Expenses() {
         await api.updateExpense(editExpense.id, body);
         toast({ title: "Uitgave bijgewerkt" });
       } else {
-        await api.createExpense(body);
+        await api.createExpense({ id: pendingId, ...body });
         toast({ title: "Uitgave toegevoegd" });
       }
       setOpen(false);
@@ -225,11 +227,9 @@ export default function Expenses() {
               <Button onClick={handleSave} disabled={saving || !form.description.trim() || !form.amount_excl_vat || !form.date}>
                 {saving ? "Bezig…" : editExpense ? "Opslaan" : "Toevoegen"}
               </Button>
-              {editExpense && (
-                <div className="border-t pt-4 mt-2">
-                  <AttachmentSection entityType="expense" entityId={editExpense.id} />
-                </div>
-              )}
+              <div className="border-t pt-4 mt-2">
+                <AttachmentSection entityType="expense" entityId={editExpense?.id ?? pendingId} />
+              </div>
             </div>
           </DialogContent>
         </Dialog>
