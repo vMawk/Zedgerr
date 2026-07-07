@@ -66,8 +66,11 @@ export type MileageEntry = {
   date: string;
   from_location: string | null;
   to_location: string | null;
+  odometer_start: number | null;
+  odometer_end: number | null;
   distance_km: number;
   purpose: string;
+  is_private: boolean;
   notes: string | null;
   created_at: string;
   updated_at: string;

@@ -10,19 +10,30 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
 import { Plus, Pencil, Trash2, Car } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 const KM_RATE = 0.23;
 
+const PURPOSES = ["Klantbezoek", "Vergadering", "Leverancier", "Woon-werk", "Overig"];
+
 const emptyForm = {
   date: new Date().toISOString().split("T")[0],
   from_location: "",
   to_location: "",
+  odometer_start: "",
+  odometer_end: "",
   distance_km: "",
   purpose: "",
+  is_private: false,
   notes: "",
 };
+
+function fmtNum(n: number | null | undefined, decimals = 0): string {
+  if (n == null) return "—";
+  return n.toLocaleString("nl-NL", { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+}
 
 export default function Mileage() {
   const { user } = useAuth();
@@ -53,21 +64,34 @@ export default function Mileage() {
       date: e.date,
       from_location: e.from_location ?? "",
       to_location: e.to_location ?? "",
+      odometer_start: e.odometer_start != null ? String(e.odometer_start) : "",
+      odometer_end: e.odometer_end != null ? String(e.odometer_end) : "",
       distance_km: String(e.distance_km),
       purpose: e.purpose,
+      is_private: Boolean(e.is_private),
       notes: e.notes ?? "",
     });
     setOpen(true);
   };
 
+  // Auto-bereken distance_km vanuit odometerstanden
+  const odoStart = parseFloat(form.odometer_start) || null;
+  const odoEnd = parseFloat(form.odometer_end) || null;
+  const derivedKm = odoStart != null && odoEnd != null ? Math.max(0, odoEnd - odoStart) : null;
+
+  const effectiveKm = derivedKm ?? (parseFloat(form.distance_km) || 0);
+
   const handleSave = async () => {
-    if (!form.date || !form.distance_km || !form.purpose.trim()) return;
-    const body = {
+    if (!form.date || !form.purpose.trim()) return;
+    const body: Record<string, unknown> = {
       date: form.date,
       from_location: form.from_location.trim() || null,
       to_location: form.to_location.trim() || null,
-      distance_km: parseFloat(form.distance_km),
+      odometer_start: odoStart,
+      odometer_end: odoEnd,
+      distance_km: derivedKm ?? (parseFloat(form.distance_km) || 0),
       purpose: form.purpose.trim(),
+      is_private: form.is_private,
       notes: form.notes.trim() || null,
     };
     setSaving(true);
@@ -104,9 +128,12 @@ export default function Mileage() {
     }
   };
 
-  const totalKm = entries.reduce((s, e) => s + Number(e.distance_km), 0);
-  const totalDeduction = Math.round(totalKm * KM_RATE * 100) / 100;
-  const kmPreview = parseFloat(form.distance_km) || 0;
+  const zakelijkeEntries = entries.filter((e) => !e.is_private);
+  const totalKmAll = entries.reduce((s, e) => s + Number(e.distance_km), 0);
+  const totalKmZakelijk = zakelijkeEntries.reduce((s, e) => s + Number(e.distance_km), 0);
+  const totalDeduction = Math.round(totalKmZakelijk * KM_RATE * 100) / 100;
+
+  const canSave = !!form.date && !!form.purpose.trim() && (effectiveKm > 0 || !!form.distance_km);
 
   return (
     <div className="space-y-6">
@@ -121,41 +148,131 @@ export default function Mileage() {
               <DialogTitle>{editEntry ? "Rit bewerken" : "Nieuwe rit"}</DialogTitle>
             </DialogHeader>
             <div className="grid gap-4 py-2">
-              <div className="grid gap-2">
-                <Label>Datum *</Label>
-                <Input type="date" value={form.date} onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))} />
-              </div>
+
+              {/* Datum + zakelijk/privé */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">
-                  <Label>Van</Label>
+                  <Label>Datum *</Label>
+                  <Input type="date" value={form.date} onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))} />
+                </div>
+                <div className="grid gap-2">
+                  <Label>Type</Label>
+                  <div className="flex gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setForm((f) => ({ ...f, is_private: false }))}
+                      className={`flex-1 rounded-md border px-3 py-1.5 text-sm font-medium transition-colors ${!form.is_private ? "bg-primary text-primary-foreground border-primary" : "hover:bg-accent"}`}
+                    >
+                      Zakelijk
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setForm((f) => ({ ...f, is_private: true }))}
+                      className={`flex-1 rounded-md border px-3 py-1.5 text-sm font-medium transition-colors ${form.is_private ? "bg-secondary text-secondary-foreground border-secondary" : "hover:bg-accent"}`}
+                    >
+                      Privé
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Van / Naar */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-2">
+                  <Label>Beginadres</Label>
                   <Input placeholder="Bijv. Amsterdam" value={form.from_location} onChange={(e) => setForm((f) => ({ ...f, from_location: e.target.value }))} />
                 </div>
                 <div className="grid gap-2">
-                  <Label>Naar</Label>
+                  <Label>Eindadres</Label>
                   <Input placeholder="Bijv. Utrecht" value={form.to_location} onChange={(e) => setForm((f) => ({ ...f, to_location: e.target.value }))} />
                 </div>
               </div>
+
+              {/* Odometer */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">
-                  <Label>Kilometers *</Label>
-                  <Input type="number" step="0.1" min="0" placeholder="bijv. 47" value={form.distance_km} onChange={(e) => setForm((f) => ({ ...f, distance_km: e.target.value }))} />
+                  <Label>Beginstand (km)</Label>
+                  <Input
+                    type="number"
+                    step="1"
+                    min="0"
+                    placeholder="bijv. 25430"
+                    value={form.odometer_start}
+                    onChange={(e) => setForm((f) => ({ ...f, odometer_start: e.target.value }))}
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label>Eindstand (km)</Label>
+                  <Input
+                    type="number"
+                    step="1"
+                    min="0"
+                    placeholder="bijv. 25482"
+                    value={form.odometer_end}
+                    onChange={(e) => setForm((f) => ({ ...f, odometer_end: e.target.value }))}
+                  />
+                </div>
+              </div>
+
+              {/* Aantal km — auto of handmatig */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-2">
+                  <Label>Aantal kilometers</Label>
+                  {derivedKm != null ? (
+                    <div className="h-9 flex items-center px-3 rounded-md border bg-muted/40 text-sm font-medium tabular-nums">
+                      {fmtNum(derivedKm, 1)} km
+                      <span className="ml-2 text-xs text-muted-foreground">(berekend)</span>
+                    </div>
+                  ) : (
+                    <Input
+                      type="number"
+                      step="0.1"
+                      min="0"
+                      placeholder="bijv. 52"
+                      value={form.distance_km}
+                      onChange={(e) => setForm((f) => ({ ...f, distance_km: e.target.value }))}
+                    />
+                  )}
                 </div>
                 <div className="grid gap-2">
                   <Label>Aftrekbaar (€0,23/km)</Label>
                   <div className="h-9 flex items-center px-3 rounded-md border bg-muted/40 text-sm font-medium tabular-nums">
-                    €{(kmPreview * KM_RATE).toLocaleString("nl-NL", { minimumFractionDigits: 2 })}
+                    {form.is_private
+                      ? <span className="text-muted-foreground text-xs">Privé — niet aftrekbaar</span>
+                      : `€${(effectiveKm * KM_RATE).toLocaleString("nl-NL", { minimumFractionDigits: 2 })}`
+                    }
                   </div>
                 </div>
               </div>
+
+              {/* Doel */}
               <div className="grid gap-2">
-                <Label>Doel / reden *</Label>
-                <Input placeholder="Bijv. klantbezoek Acme BV, vergadering, ophalen materiaal…" value={form.purpose} onChange={(e) => setForm((f) => ({ ...f, purpose: e.target.value }))} />
+                <Label>Doel van de rit *</Label>
+                <div className="flex flex-wrap gap-1.5 mb-1">
+                  {PURPOSES.map((p) => (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => setForm((f) => ({ ...f, purpose: p }))}
+                      className={`rounded-full border px-3 py-0.5 text-xs font-medium transition-colors ${form.purpose === p ? "bg-primary text-primary-foreground border-primary" : "hover:bg-accent"}`}
+                    >
+                      {p}
+                    </button>
+                  ))}
+                </div>
+                <Input
+                  placeholder="Of typ zelf…"
+                  value={form.purpose}
+                  onChange={(e) => setForm((f) => ({ ...f, purpose: e.target.value }))}
+                />
               </div>
+
               <div className="grid gap-2">
                 <Label>Notities</Label>
                 <Textarea rows={2} value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} />
               </div>
-              <Button onClick={handleSave} disabled={saving || !form.date || !form.distance_km || !form.purpose.trim()}>
+
+              <Button onClick={handleSave} disabled={saving || !canSave}>
                 {saving ? "Bezig…" : editEntry ? "Opslaan" : "Toevoegen"}
               </Button>
             </div>
@@ -175,22 +292,28 @@ export default function Mileage() {
         </div>
       </div>
 
-      {/* Totaalbalk */}
+      {/* Statistieken */}
       {entries.length > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <Card>
             <CardContent className="pt-4 pb-4">
-              <p className="text-xs text-muted-foreground mb-1">Totaal kilometers</p>
-              <p className="text-2xl font-bold tabular-nums">{totalKm.toLocaleString("nl-NL", { maximumFractionDigits: 1 })} km</p>
+              <p className="text-xs text-muted-foreground mb-1">Totaal km</p>
+              <p className="text-2xl font-bold tabular-nums">{fmtNum(totalKmAll, 1)} km</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-4 pb-4">
+              <p className="text-xs text-muted-foreground mb-1">Zakelijk km</p>
+              <p className="text-2xl font-bold tabular-nums">{fmtNum(totalKmZakelijk, 1)} km</p>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="pt-4 pb-4">
               <p className="text-xs text-muted-foreground mb-1">Aftrekbaar (€0,23/km)</p>
-              <p className="text-2xl font-bold tabular-nums text-success">€{totalDeduction.toLocaleString("nl-NL", { minimumFractionDigits: 2 })}</p>
+              <p className="text-2xl font-bold tabular-nums text-green-600 dark:text-green-400">€{totalDeduction.toLocaleString("nl-NL", { minimumFractionDigits: 2 })}</p>
             </CardContent>
           </Card>
-          <Card className="hidden sm:block">
+          <Card>
             <CardContent className="pt-4 pb-4">
               <p className="text-xs text-muted-foreground mb-1">Ritten</p>
               <p className="text-2xl font-bold">{entries.length}</p>
@@ -199,6 +322,7 @@ export default function Mileage() {
         </div>
       )}
 
+      {/* Tabel */}
       {entries.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12 text-muted-foreground">
@@ -209,45 +333,70 @@ export default function Mileage() {
         </Card>
       ) : (
         <Card>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Datum</TableHead>
-                <TableHead>Van → Naar</TableHead>
-                <TableHead>Doel</TableHead>
-                <TableHead className="text-right">Km</TableHead>
-                <TableHead className="text-right">Aftrek</TableHead>
-                <TableHead className="w-20 text-right">Acties</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {entries.map((e) => (
-                <TableRow key={e.id}>
-                  <TableCell className="whitespace-nowrap text-sm">{new Date(e.date).toLocaleDateString("nl-NL")}</TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
-                    {e.from_location && e.to_location
-                      ? `${e.from_location} → ${e.to_location}`
-                      : e.from_location || e.to_location || "—"}
-                  </TableCell>
-                  <TableCell className="text-sm">{e.purpose}</TableCell>
-                  <TableCell className="text-right tabular-nums text-sm">{Number(e.distance_km).toLocaleString("nl-NL", { maximumFractionDigits: 1 })}</TableCell>
-                  <TableCell className="text-right tabular-nums text-sm font-medium">
-                    €{(Number(e.distance_km) * KM_RATE).toLocaleString("nl-NL", { minimumFractionDigits: 2 })}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex justify-end gap-1">
-                      <Button variant="ghost" size="icon" onClick={() => openEdit(e)} title="Bewerken">
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => setDeleteTarget(e)} title="Verwijderen">
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </TableCell>
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="whitespace-nowrap">Datum</TableHead>
+                  <TableHead>Van</TableHead>
+                  <TableHead>Naar</TableHead>
+                  <TableHead>Doel</TableHead>
+                  <TableHead className="text-right whitespace-nowrap">Beginstand</TableHead>
+                  <TableHead className="text-right whitespace-nowrap">Eindstand</TableHead>
+                  <TableHead className="text-right">Km</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead className="text-right">Aftrek</TableHead>
+                  <TableHead className="w-20 text-right">Acties</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {entries.map((e) => (
+                  <TableRow key={e.id}>
+                    <TableCell className="whitespace-nowrap text-sm">
+                      {new Date(e.date).toLocaleDateString("nl-NL")}
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground max-w-[120px] truncate">
+                      {e.from_location || "—"}
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground max-w-[120px] truncate">
+                      {e.to_location || "—"}
+                    </TableCell>
+                    <TableCell className="text-sm max-w-[160px] truncate">{e.purpose}</TableCell>
+                    <TableCell className="text-right tabular-nums text-sm text-muted-foreground">
+                      {e.odometer_start != null ? fmtNum(e.odometer_start) : "—"}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums text-sm text-muted-foreground">
+                      {e.odometer_end != null ? fmtNum(e.odometer_end) : "—"}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums text-sm font-medium">
+                      {fmtNum(Number(e.distance_km), 1)}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={e.is_private ? "secondary" : "outline"} className="text-xs whitespace-nowrap">
+                        {e.is_private ? "Privé" : "Zakelijk"}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums text-sm font-medium">
+                      {e.is_private
+                        ? <span className="text-muted-foreground">—</span>
+                        : `€${(Number(e.distance_km) * KM_RATE).toLocaleString("nl-NL", { minimumFractionDigits: 2 })}`
+                      }
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-1">
+                        <Button variant="ghost" size="icon" onClick={() => openEdit(e)} title="Bewerken">
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => setDeleteTarget(e)} title="Verwijderen">
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
         </Card>
       )}
 
