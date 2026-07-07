@@ -20,6 +20,7 @@ import Products from "./pages/Products";
 import Expenses from "./pages/Expenses";
 import Tax from "./pages/Tax";
 import Mileage from "./pages/Mileage";
+import Bankrekening from "./pages/Bankrekening";
 import NotFound from "./pages/NotFound";
 import Auth from "./pages/Auth";
 import { PortalProvider, usePortalAuth } from "@/lib/portal-auth";
@@ -100,6 +101,7 @@ const App = () => (
               <Route path="/uitgaven" element={<Expenses />} />
               <Route path="/belasting" element={<Tax />} />
               <Route path="/kilometers" element={<Mileage />} />
+              <Route path="/bankrekening" element={<Bankrekening />} />
               <Route path="/instellingen" element={<Settings />} />
             </Route>
             <Route path="*" element={<NotFound />} />

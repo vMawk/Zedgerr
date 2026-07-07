@@ -236,6 +236,25 @@ export type Expense = {
   updated_at: string;
 };
 
+export type BankTransactionType =
+  | "inkomst"
+  | "uitgave"
+  | "prive_storting"
+  | "prive_onttrekking"
+  | "beginstand"
+  | "overig";
+
+export type BankTransaction = {
+  id: string;
+  user_id: string;
+  date: string;
+  description: string;
+  amount: number;
+  type: BankTransactionType;
+  notes: string | null;
+  created_at: string;
+};
+
 export type Lead = {
   id: string;
   user_id: string;
