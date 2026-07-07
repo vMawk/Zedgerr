@@ -60,7 +60,6 @@ export default function Quotes() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [open, setOpen] = useState(false);
   const [selectedCompany, setSelectedCompany] = useState("");
-  const [createMode, setCreateMode] = useState<"lines" | "product">("lines");
   const [companyProducts, setCompanyProducts] = useState<CompanyProduct[]>([]);
   const [selectedProducts, setSelectedProducts] = useState<Record<string, number>>({});
   const [productOpen, setProductOpen] = useState(false);
@@ -103,10 +102,9 @@ export default function Quotes() {
 
   const resetCreateForm = () => {
     setSelectedCompany("");
-    setCreateMode("lines");
     setCompanyProducts([]);
     setSelectedProducts({});
-    setLines([{ description: "", hours: "", hourly_rate: "", amount: "" }]);
+    setLines([]);
     setNotes("");
     setBtwPercentage("21");
   };
@@ -176,32 +174,46 @@ export default function Quotes() {
   const addLine = () => setLines((prev) => [...prev, { description: "", hours: "", hourly_rate: "", amount: "" }]);
   const removeLine = (i: number) => setLines((prev) => prev.filter((_, idx) => idx !== i));
 
+  const addSelectedProductsToLines = () => {
+    const toAdd = companyProducts
+      .filter((p) => (selectedProducts[p.id] ?? 0) > 0)
+      .map((p) => {
+        const qty = selectedProducts[p.id]!;
+        return {
+          description: qty > 1 ? `${p.name} (${qty}×)` : p.name,
+          hours: "",
+          hourly_rate: "",
+          amount: round2(productExVatPrice(p) * qty).toFixed(2),
+        };
+      });
+    if (toAdd.length === 0) {
+      toast({ title: "Geen producten geselecteerd", description: "Vink minimaal één product aan.", variant: "destructive" });
+      return;
+    }
+    setLines((prev) => [...prev, ...toAdd]);
+    setSelectedProducts({});
+    toast({ title: `${toAdd.length} productregel${toAdd.length === 1 ? "" : "s"} toegevoegd`, description: "Je kunt de regels hieronder nog aanpassen." });
+  };
+
+  const validLines = () =>
+    lines.filter((l) => l.description.trim() || (parseFloat(l.amount) || 0) > 0);
+
+  const quoteSubtotal = () => round2(validLines().reduce((sum, l) => sum + (parseFloat(l.amount) || 0), 0));
+
   const handleCreate = async () => {
     if (!user || !selectedCompany) return;
 
-    const productLines = companyProducts
-      .filter((p) => (selectedProducts[p.id] ?? 0) > 0)
-      .map((p) => ({ product: p, qty: selectedProducts[p.id]! }));
-
-    const quoteLines =
-      createMode === "product"
-        ? productLines.map(({ product, qty }) => ({
-            description: qty > 1 ? `${product.name} (${qty}×)` : product.name,
-            hours: null as number | null,
-            hourly_rate: null as number | null,
-            amount: round2(productExVatPrice(product) * qty),
-          }))
-        : lines.map((l) => ({
-            description: l.description || "Werkzaamheden",
-            hours: l.hours ? parseFloat(l.hours) : null,
-            hourly_rate: l.hourly_rate ? parseFloat(l.hourly_rate) : null,
-            amount: parseFloat(l.amount) || 0,
-          }));
+    const quoteLines = validLines().map((l) => ({
+      description: l.description.trim() || "Werkzaamheden",
+      hours: l.hours ? parseFloat(l.hours) : null,
+      hourly_rate: l.hourly_rate ? parseFloat(l.hourly_rate) : null,
+      amount: parseFloat(l.amount) || 0,
+    }));
 
     if (quoteLines.length === 0 || quoteLines.every((l) => l.amount <= 0)) {
       toast({
         title: "Geen regels",
-        description: createMode === "product" ? "Selecteer minimaal één product." : "Voeg minimaal één regel met bedrag toe.",
+        description: "Voeg handmatig regels toe of selecteer producten.",
         variant: "destructive",
       });
       return;
@@ -343,58 +355,66 @@ export default function Quotes() {
               </div>
 
               <div className="grid gap-2">
-                <Label>Type offerte</Label>
-                <Select value={createMode} onValueChange={(v) => setCreateMode(v as "lines" | "product")}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="lines">Handmatige regels</SelectItem>
-                    <SelectItem value="product">Op basis van producten</SelectItem>
-                  </SelectContent>
-                </Select>
+                <div className="flex items-center justify-between gap-2">
+                  <Label>Regels</Label>
+                  <Button type="button" variant="outline" size="sm" onClick={addLine}>
+                    <Plus className="mr-1 h-3 w-3" />Regel toevoegen
+                  </Button>
+                </div>
+                {lines.length === 0 ? (
+                  <p className="text-sm text-muted-foreground rounded-md border border-dashed p-4 text-center">
+                    Nog geen regels. Voeg handmatig een regel toe of kies producten hieronder.
+                  </p>
+                ) : (
+                  lines.map((line, i) => (
+                    <div key={i} className="grid grid-cols-12 gap-2 items-end">
+                      <div className="col-span-4">
+                        <Input placeholder="Omschrijving" value={line.description} onChange={(e) => updateLine(i, "description", e.target.value)} />
+                      </div>
+                      <div className="col-span-2">
+                        <Input type="number" placeholder="Uren" value={line.hours} onChange={(e) => updateLine(i, "hours", e.target.value)} />
+                      </div>
+                      <div className="col-span-2">
+                        <Input type="number" placeholder="Tarief" value={line.hourly_rate} onChange={(e) => updateLine(i, "hourly_rate", e.target.value)} />
+                      </div>
+                      <div className="col-span-3">
+                        <Input type="number" placeholder="Bedrag" value={line.amount} onChange={(e) => updateLine(i, "amount", e.target.value)} />
+                      </div>
+                      <div className="col-span-1">
+                        <Button type="button" variant="ghost" size="icon" onClick={() => removeLine(i)} title="Regel verwijderen">
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
 
-              {createMode === "lines" && (
-              <div className="grid gap-2">
-                <Label>Regels</Label>
-                {lines.map((line, i) => (
-                  <div key={i} className="grid grid-cols-12 gap-2 items-end">
-                    <div className="col-span-4">
-                      <Input placeholder="Omschrijving" value={line.description} onChange={(e) => updateLine(i, "description", e.target.value)} />
-                    </div>
-                    <div className="col-span-2">
-                      <Input type="number" placeholder="Uren" value={line.hours} onChange={(e) => updateLine(i, "hours", e.target.value)} />
-                    </div>
-                    <div className="col-span-2">
-                      <Input type="number" placeholder="Tarief" value={line.hourly_rate} onChange={(e) => updateLine(i, "hourly_rate", e.target.value)} />
-                    </div>
-                    <div className="col-span-3">
-                      <Input type="number" placeholder="Bedrag" value={line.amount} onChange={(e) => updateLine(i, "amount", e.target.value)} />
-                    </div>
-                    <div className="col-span-1">
-                      {lines.length > 1 && (
-                        <Button variant="ghost" size="icon" onClick={() => removeLine(i)}><Trash2 className="h-3 w-3" /></Button>
-                      )}
+              {selectedCompany && (
+                <div className="grid gap-2 rounded-md border p-3 bg-muted/20">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <Label className="mb-0">Producten van klant</Label>
+                    <div className="flex gap-2">
+                      <Button type="button" variant="outline" size="sm" onClick={openNewProduct}>
+                        <Plus className="mr-1 h-3 w-3" />Nieuw product
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={addSelectedProductsToLines}
+                        disabled={!companyProducts.some((p) => (selectedProducts[p.id] ?? 0) > 0)}
+                      >
+                        Toevoegen aan regels
+                      </Button>
                     </div>
                   </div>
-                ))}
-                <Button variant="outline" size="sm" onClick={addLine}><Plus className="mr-1 h-3 w-3" />Regel toevoegen</Button>
-              </div>
-              )}
-
-              {createMode === "product" && selectedCompany && (
-                <div className="grid gap-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <Label>Producten</Label>
-                    <Button type="button" variant="outline" size="sm" onClick={openNewProduct}>
-                      <Plus className="mr-1 h-3 w-3" />Product toevoegen
-                    </Button>
-                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Selecteer producten en voeg ze toe. Daarna kun je omschrijving en bedrag per regel nog aanpassen.
+                  </p>
                   {companyProducts.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">
-                      Nog geen producten voor deze klant. Voeg er een toe met de knop hierboven.
-                    </p>
+                    <p className="text-sm text-muted-foreground">Nog geen producten voor deze klant.</p>
                   ) : (
-                    <div className="border rounded-md divide-y">
+                    <div className="border rounded-md divide-y bg-background">
                       {companyProducts.map((p) => {
                         const qty = selectedProducts[p.id] ?? 0;
                         const exVatPrice = productExVatPrice(p);
@@ -438,27 +458,18 @@ export default function Quotes() {
                 </div>
               )}
 
-              {createMode === "product" && !selectedCompany && (
-                <p className="text-sm text-muted-foreground">Selecteer eerst een bedrijf om producten te kiezen.</p>
-              )}
-
               <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">
                   <Label>BTW-percentage</Label>
                   <Input type="number" value={btwPercentage} onChange={(e) => setBtwPercentage(e.target.value)} />
                 </div>
               </div>
-              {selectedCompany && (() => {
-                const productLines = companyProducts
-                  .filter((p) => (selectedProducts[p.id] ?? 0) > 0)
-                  .map((p) => ({ product: p, qty: selectedProducts[p.id]! }));
-                const subtotal =
-                  createMode === "product"
-                    ? round2(productLines.reduce((sum, { product, qty }) => sum + productExVatPrice(product) * qty, 0))
-                    : round2(lines.reduce((sum, l) => sum + (parseFloat(l.amount) || 0), 0));
+              {(() => {
+                const subtotal = quoteSubtotal();
                 const vat = parseFloat(btwPercentage || "0");
                 const vatAmount = round2(subtotal * (vat / 100));
                 const grossTotal = round2(subtotal + vatAmount);
+                if (subtotal <= 0) return null;
                 return (
                   <div className="rounded-md border bg-muted/30 p-3 text-sm">
                     Totaal: <span className="font-medium">€{grossTotal.toLocaleString("nl-NL", { minimumFractionDigits: 2 })}</span>

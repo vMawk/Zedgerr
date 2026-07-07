@@ -12,10 +12,14 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "deploy": "npm run build && npx wrangler deploy",
+    "deploy:dev": "npm run build && npx wrangler deploy --env dev",
     "test": "vitest run",
     "test:watch": "vitest",
     "db:migrate:local": "wrangler d1 migrations apply client-flow --local",
-    "db:migrate:remote": "wrangler d1 migrations apply client-flow --remote"
+    "db:migrate:remote": "wrangler d1 migrations apply client-flow --remote",
+    "db:migrate:dev": "wrangler d1 migrations apply client-flow-dev --remote --env dev",
+    "db:pull:local": "node scripts/db-copy.mjs local",
+    "db:pull:dev": "node scripts/db-copy.mjs dev"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

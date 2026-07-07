@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
 import type { Company, CompanyProduct, Invoice, InvoiceLine, Service, TimeEntry } from "@/lib/db-types";
@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
@@ -21,7 +22,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Plus, FileText, Download, Trash2, Pencil, Split, Rows3 } from "lucide-react";
+import { Plus, FileText, Download, Trash2, Pencil, Split, Rows3, Clock, Package, Briefcase, FileMinus } from "lucide-react";
 import { generateInvoicePDF } from "@/lib/pdf";
 import { Checkbox } from "@/components/ui/checkbox";
 
@@ -31,6 +32,28 @@ const statusColors: Record<string, string> = {
   betaald: "bg-success/10 text-success",
   vervallen: "bg-destructive/10 text-destructive",
 };
+
+const emptyProductForm = {
+  name: "",
+  serial_number: "",
+  url: "",
+  internal_notes: "",
+  sale_price: "",
+  price_includes_vat: false,
+  vat_percentage: "21",
+  cost_price: "",
+};
+
+interface InvoiceLineDraft {
+  description: string;
+  hours: string;
+  hourly_rate: string;
+  amount: string;
+  /** datum voor deze regel (uren gebruiken de urendatum, rest de factuurdatum) */
+  date: string | null;
+  /** gekoppelde urenregistratie — wordt na aanmaken op 'gefactureerd' gezet */
+  time_entry_id: string | null;
+}
 
 function statusLabel(status: string, notes: string | null): string {
   if (status === "vervallen" && (notes ?? "").toLowerCase().includes("gesplitst")) {
@@ -43,6 +66,11 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
+function productExVatPrice(p: CompanyProduct): number {
+  const vatPct = p.vat_percentage ?? 21;
+  return p.price_includes_vat ? p.sale_price / (1 + vatPct / 100) : p.sale_price;
+}
+
 export default function Invoices() {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -53,16 +81,24 @@ export default function Invoices() {
   const [selectedCompany, setSelectedCompany] = useState("");
   const [uninvoicedEntries, setUninvoicedEntries] = useState<(TimeEntry & { companies: Company | null })[]>([]);
   const [selectedEntries, setSelectedEntries] = useState<string[]>([]);
-  const [createMode, setCreateMode] = useState<"hours" | "service" | "product">("hours");
   const [companyProducts, setCompanyProducts] = useState<CompanyProduct[]>([]);
   const [selectedProducts, setSelectedProducts] = useState<Record<string, number>>({});
   const [selectedService, setSelectedService] = useState("");
-  const [serviceAmount, setServiceAmount] = useState("");
-  const [serviceDescription, setServiceDescription] = useState("");
+  const [lines, setLines] = useState<InvoiceLineDraft[]>([]);
   const [notes, setNotes] = useState("");
   const [btwPercentage, setBtwPercentage] = useState("21");
   const [invoiceType, setInvoiceType] = useState<"business" | "private">("business");
   const [invoiceDate, setInvoiceDate] = useState(() => new Date().toISOString().split("T")[0]);
+  const [applyAdvance, setApplyAdvance] = useState(true);
+  const [advanceLabel, setAdvanceLabel] = useState<"krediet" | "voorschot">("krediet");
+  const [paymentMethod, setPaymentMethod] = useState<"overboeking" | "contant">("overboeking");
+  const [creating, setCreating] = useState(false);
+
+  // Inline product aanmaken/bewerken (zelfde als op de klantpagina)
+  const [productOpen, setProductOpen] = useState(false);
+  const [editProduct, setEditProduct] = useState<CompanyProduct | null>(null);
+  const [productForm, setProductForm] = useState(emptyProductForm);
+
   const [invoiceToDelete, setInvoiceToDelete] = useState<Invoice | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -73,21 +109,21 @@ export default function Invoices() {
   const [editStatus, setEditStatus] = useState("concept");
   const [editNotes, setEditNotes] = useState("");
   const [editInvoiceType, setEditInvoiceType] = useState<"business" | "private">("business");
+  const [editPaymentMethod, setEditPaymentMethod] = useState<"overboeking" | "contant">("overboeking");
+  const [creditNoteOpen, setCreditNoteOpen] = useState(false);
+  const [creditNoteTarget, setCreditNoteTarget] = useState<(Invoice & { companies: { name: string | null; contact_person: string | null } | null }) | null>(null);
+  const [creatingCN, setCreatingCN] = useState(false);
   const [splitOpen, setSplitOpen] = useState(false);
   const [invoiceToSplit, setInvoiceToSplit] = useState<(Invoice & { companies: { name: string | null; contact_person: string | null } | null }) | null>(null);
   const [splitParts, setSplitParts] = useState("3");
   const [splitIntervalDays, setSplitIntervalDays] = useState("30");
   const [splitFirstDueDate, setSplitFirstDueDate] = useState("");
-  const [applyAdvance, setApplyAdvance] = useState(true);
-  const [advanceLabel, setAdvanceLabel] = useState<"krediet" | "voorschot">("krediet");
-  const [paymentMethod, setPaymentMethod] = useState<"overboeking" | "contant">("overboeking");
 
   const [linesOpen, setLinesOpen] = useState(false);
   const [linesInvoice, setLinesInvoice] = useState<Invoice | null>(null);
   const [invoiceLines, setInvoiceLines] = useState<InvoiceLine[]>([]);
   const [newLineDesc, setNewLineDesc] = useState("");
   const [newLineAmount, setNewLineAmount] = useState("");
-  const [editPaymentMethod, setEditPaymentMethod] = useState<"overboeking" | "contant">("overboeking");
 
   const fetchData = async () => {
     const [invList, compList, svcList] = await Promise.all([api.getInvoices(), api.getCompanies(), api.getServices()]);
@@ -103,19 +139,34 @@ export default function Invoices() {
       setUninvoicedEntries([]);
       setCompanyProducts([]);
       setSelectedProducts({});
+      setSelectedEntries([]);
       return;
     }
     api.getTimeEntries({ company_id: selectedCompany, invoiced: false }).then(setUninvoicedEntries);
     api.getCompanyProducts(selectedCompany).then(setCompanyProducts);
   }, [selectedCompany]);
 
-  useEffect(() => {
-    if (!selectedService) return;
-    const svc = services.find((s) => s.id === selectedService);
-    if (!svc) return;
-    setServiceAmount(String(svc.amount));
-    setServiceDescription(svc.name);
-  }, [selectedService, services]);
+  const refreshCompanyProducts = async () => {
+    if (!selectedCompany) return;
+    setCompanyProducts(await api.getCompanyProducts(selectedCompany));
+  };
+
+  const resetCreateForm = () => {
+    setSelectedCompany("");
+    setUninvoicedEntries([]);
+    setSelectedEntries([]);
+    setCompanyProducts([]);
+    setSelectedProducts({});
+    setSelectedService("");
+    setLines([]);
+    setNotes("");
+    setBtwPercentage("21");
+    setInvoiceType("business");
+    setInvoiceDate(new Date().toISOString().split("T")[0]);
+    setApplyAdvance(true);
+    setAdvanceLabel("krediet");
+    setPaymentMethod("overboeking");
+  };
 
   const generateInvoiceNumber = () => {
     const now = new Date();
@@ -124,35 +175,158 @@ export default function Invoices() {
     return `F${year}-${String(count).padStart(4, "0")}`;
   };
 
+  // ---- Regel-helpers (zelfde model als offertes) ----
+  const updateLine = (index: number, field: keyof InvoiceLineDraft, value: string) => {
+    setLines((prev) => {
+      const updated = [...prev];
+      updated[index] = { ...updated[index], [field]: value };
+      if (field === "hours" || field === "hourly_rate") {
+        const h = parseFloat(updated[index].hours) || 0;
+        const r = parseFloat(updated[index].hourly_rate) || 0;
+        updated[index].amount = (h * r).toFixed(2);
+      }
+      return updated;
+    });
+  };
+
+  const addLine = () =>
+    setLines((prev) => [...prev, { description: "", hours: "", hourly_rate: "", amount: "", date: null, time_entry_id: null }]);
+
+  const removeLine = (i: number) => setLines((prev) => prev.filter((_, idx) => idx !== i));
+
+  const addSelectedHoursToLines = () => {
+    const company = companies.find((c) => c.id === selectedCompany);
+    const toAdd = uninvoicedEntries
+      .filter((e) => selectedEntries.includes(e.id))
+      .map((e) => {
+        const rate = Number(e.hourly_rate ?? company?.default_hourly_rate ?? 0);
+        const hours = Number(e.hours);
+        return {
+          description: e.description || "Werkzaamheden",
+          hours: String(hours),
+          hourly_rate: String(rate),
+          amount: round2(hours * rate).toFixed(2),
+          date: e.date,
+          time_entry_id: e.id,
+        };
+      });
+    if (toAdd.length === 0) {
+      toast({ title: "Geen uren geselecteerd", description: "Vink minimaal één urenregistratie aan.", variant: "destructive" });
+      return;
+    }
+    setLines((prev) => [...prev, ...toAdd]);
+    setSelectedEntries([]);
+    toast({ title: `${toAdd.length} urenregel${toAdd.length === 1 ? "" : "s"} toegevoegd` });
+  };
+
+  const addSelectedProductsToLines = () => {
+    const toAdd = companyProducts
+      .filter((p) => (selectedProducts[p.id] ?? 0) > 0)
+      .map((p) => {
+        const qty = selectedProducts[p.id]!;
+        return {
+          description: qty > 1 ? `${p.name} (${qty}×)` : p.name,
+          hours: "",
+          hourly_rate: "",
+          amount: round2(productExVatPrice(p) * qty).toFixed(2),
+          date: null,
+          time_entry_id: null,
+        };
+      });
+    if (toAdd.length === 0) {
+      toast({ title: "Geen producten geselecteerd", description: "Vink minimaal één product aan.", variant: "destructive" });
+      return;
+    }
+    setLines((prev) => [...prev, ...toAdd]);
+    setSelectedProducts({});
+    toast({ title: `${toAdd.length} productregel${toAdd.length === 1 ? "" : "s"} toegevoegd`, description: "Je kunt omschrijving en bedrag per regel nog aanpassen." });
+  };
+
+  const addServiceToLines = () => {
+    const svc = services.find((s) => s.id === selectedService);
+    if (!svc) return;
+    setLines((prev) => [
+      ...prev,
+      { description: svc.name, hours: "", hourly_rate: "", amount: Number(svc.amount).toFixed(2), date: null, time_entry_id: null },
+    ]);
+    setSelectedService("");
+    toast({ title: "Dienst toegevoegd aan regels" });
+  };
+
+  const validLines = () => lines.filter((l) => l.description.trim() || (parseFloat(l.amount) || 0) > 0);
+  const invoiceSubtotal = () => round2(validLines().reduce((sum, l) => sum + (parseFloat(l.amount) || 0), 0));
+
+  // Inline product aanmaken/bewerken
+  const openNewProduct = () => {
+    setEditProduct(null);
+    setProductForm(emptyProductForm);
+    setProductOpen(true);
+  };
+
+  const openEditProduct = (p: CompanyProduct) => {
+    setEditProduct(p);
+    setProductForm({
+      name: p.name,
+      serial_number: p.serial_number ?? "",
+      url: p.url ?? "",
+      internal_notes: p.internal_notes ?? "",
+      sale_price: String(p.sale_price),
+      price_includes_vat: Boolean(p.price_includes_vat),
+      vat_percentage: String(p.vat_percentage ?? 21),
+      cost_price: p.cost_price != null ? String(p.cost_price) : "",
+    });
+    setProductOpen(true);
+  };
+
+  const handleSaveProduct = async () => {
+    if (!selectedCompany || !productForm.name.trim() || !productForm.sale_price) return;
+    const body = {
+      name: productForm.name.trim(),
+      serial_number: productForm.serial_number || null,
+      url: productForm.url || null,
+      internal_notes: productForm.internal_notes || null,
+      sale_price: parseFloat(productForm.sale_price),
+      price_includes_vat: productForm.price_includes_vat,
+      vat_percentage: parseFloat(productForm.vat_percentage) || 21,
+      cost_price: productForm.cost_price ? parseFloat(productForm.cost_price) : null,
+    };
+    try {
+      if (editProduct) {
+        await api.updateCompanyProduct(selectedCompany, editProduct.id, body);
+        toast({ title: "Product bijgewerkt" });
+      } else {
+        await api.createCompanyProduct(selectedCompany, body);
+        toast({ title: "Product toegevoegd" });
+      }
+      setProductOpen(false);
+      setEditProduct(null);
+      await refreshCompanyProducts();
+    } catch (e: unknown) {
+      toast({ title: "Fout", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
+    }
+  };
+
   const handleCreate = async () => {
     if (!user || !selectedCompany) return;
     const company = companies.find((c) => c.id === selectedCompany);
     if (!company) return;
 
-    const entries = uninvoicedEntries.filter((e) => selectedEntries.includes(e.id));
-    const svcAmt = Number(serviceAmount);
-    const productLines = companyProducts
-      .filter((p) => (selectedProducts[p.id] ?? 0) > 0)
-      .map((p) => ({ product: p, qty: selectedProducts[p.id]! }));
-    const subtotal =
-      createMode === "hours"
-        ? entries.reduce((sum, e) => {
-            const rate = e.hourly_rate ?? company.default_hourly_rate ?? 0;
-            return sum + Number(e.hours) * Number(rate);
-          }, 0)
-        : createMode === "product"
-          ? productLines.reduce((sum, { product, qty }) => sum + product.sale_price * qty, 0)
-          : Number.isFinite(svcAmt)
-            ? svcAmt
-            : NaN;
+    const draftLines = validLines();
+    if (draftLines.length === 0 || draftLines.every((l) => (parseFloat(l.amount) || 0) <= 0)) {
+      toast({ title: "Geen regels", description: "Voeg uren, producten, een dienst of een handmatige regel toe.", variant: "destructive" });
+      return;
+    }
+
+    const invDate = invoiceDate || new Date().toISOString().split("T")[0];
+    const subtotal = round2(draftLines.reduce((sum, l) => sum + (parseFloat(l.amount) || 0), 0));
     const btw = invoiceType === "private" ? 0 : parseFloat(btwPercentage);
     const btwAmount = invoiceType === "private" ? 0 : round2(subtotal * (btw / 100));
-    const total = invoiceType === "private" ? round2(subtotal) : round2(subtotal + btwAmount);
+    const total = round2(subtotal + btwAmount);
     const companyAdvance = round2(Math.max(0, Number(company.advance_balance ?? 0)));
     const appliedAdvance = applyAdvance ? round2(Math.min(companyAdvance, total)) : 0;
     const invoiceNumber = generateInvoiceNumber();
-    const invDate = invoiceDate || new Date().toISOString().split("T")[0];
 
+    setCreating(true);
     try {
       const invoice = await api.createInvoice({
         company_id: selectedCompany,
@@ -170,57 +344,24 @@ export default function Invoices() {
         payment_method: paymentMethod,
       });
 
-      const lines =
-        createMode === "hours"
-          ? entries.map((e) => ({
-              invoice_id: invoice.id,
-              description: e.description || "Werkzaamheden",
-              date: e.date,
-              hours: e.hours,
-              hourly_rate: e.hourly_rate ?? company.default_hourly_rate ?? 0,
-              amount: Number(e.hours) * Number(e.hourly_rate ?? company.default_hourly_rate ?? 0),
-              time_entry_id: e.id,
-            }))
-          : createMode === "product"
-            ? productLines.map(({ product, qty }) => ({
-                invoice_id: invoice.id,
-                description: qty > 1 ? `${product.name} (${qty}×)` : product.name,
-                date: invDate,
-                hours: null,
-                hourly_rate: null,
-                amount: product.sale_price * qty,
-                time_entry_id: null,
-              }))
-            : [
-                {
-                  invoice_id: invoice.id,
-                  description: serviceDescription.trim() || "Dienst",
-                  date: invDate,
-                  hours: null,
-                  hourly_rate: null,
-                  amount: svcAmt,
-                  time_entry_id: null,
-                },
-              ];
-      await api.createInvoiceLinesBatch(lines);
-      if (createMode === "hours") {
-        await api.markTimeEntriesInvoiced({ ids: selectedEntries, invoice_id: invoice.id });
+      const dbLines = draftLines.map((l) => ({
+        invoice_id: invoice.id,
+        description: l.description.trim() || "Werkzaamheden",
+        date: l.date ?? invDate,
+        hours: l.hours ? parseFloat(l.hours) : null,
+        hourly_rate: l.hourly_rate ? parseFloat(l.hourly_rate) : null,
+        amount: parseFloat(l.amount) || 0,
+        time_entry_id: l.time_entry_id,
+      }));
+      await api.createInvoiceLinesBatch(dbLines);
+
+      const entryIds = draftLines.map((l) => l.time_entry_id).filter((id): id is string => !!id);
+      if (entryIds.length > 0) {
+        await api.markTimeEntriesInvoiced({ ids: entryIds, invoice_id: invoice.id });
       }
 
       setOpen(false);
-      setSelectedCompany("");
-      setSelectedEntries([]);
-      setSelectedService("");
-      setServiceAmount("");
-      setServiceDescription("");
-      setCreateMode("hours");
-      setNotes("");
-      setInvoiceType("business");
-      setInvoiceDate(new Date().toISOString().split("T")[0]);
-      setApplyAdvance(true);
-      setAdvanceLabel("krediet");
-      setSelectedProducts({});
-      setPaymentMethod("overboeking");
+      resetCreateForm();
       fetchData();
       toast({
         title: "Factuur aangemaakt",
@@ -231,6 +372,8 @@ export default function Invoices() {
       });
     } catch (error: unknown) {
       toast({ title: "Fout", description: error instanceof Error ? error.message : String(error), variant: "destructive" });
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -320,6 +463,22 @@ export default function Invoices() {
     }
   };
 
+  const handleConfirmCreditNote = async () => {
+    if (!creditNoteTarget) return;
+    setCreatingCN(true);
+    try {
+      await api.createCreditNote(creditNoteTarget.id);
+      setCreditNoteOpen(false);
+      setCreditNoteTarget(null);
+      await fetchData();
+      toast({ title: "Creditnota aangemaakt", description: "Je vindt hem bovenaan de lijst." });
+    } catch (e: unknown) {
+      toast({ title: "Fout", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
+    } finally {
+      setCreatingCN(false);
+    }
+  };
+
   const openSplit = (inv: Invoice & { companies: { name: string | null; contact_person: string | null } | null }) => {
     setInvoiceToSplit(inv);
     setSplitParts("3");
@@ -346,8 +505,14 @@ export default function Invoices() {
   };
 
   const toggleEntry = (id: string) => {
-    setSelectedEntries((prev) => prev.includes(id) ? prev.filter((e) => e !== id) : [...prev, id]);
+    setSelectedEntries((prev) => (prev.includes(id) ? prev.filter((e) => e !== id) : [...prev, id]));
   };
+
+  const selectedCompanyObj = companies.find((c) => c.id === selectedCompany);
+  const availableAdvance = round2(Math.max(0, Number(selectedCompanyObj?.advance_balance ?? 0)));
+  // Uren die nog niet als regel zijn toegevoegd
+  const addedEntryIds = new Set(lines.map((l) => l.time_entry_id).filter(Boolean));
+  const pickableEntries = uninvoicedEntries.filter((e) => !addedEntryIds.has(e.id));
 
   return (
     <div className="space-y-6">
@@ -357,10 +522,7 @@ export default function Invoices() {
           open={open}
           onOpenChange={(v) => {
             setOpen(v);
-            if (!v) {
-              setApplyAdvance(true);
-              setAdvanceLabel("krediet");
-            }
+            if (!v) resetCreateForm();
           }}
         >
           <DialogTrigger asChild>
@@ -374,12 +536,169 @@ export default function Invoices() {
               <div className="grid gap-2">
                 <Label>Klant</Label>
                 <Select value={selectedCompany} onValueChange={setSelectedCompany}>
-                  <SelectTrigger><SelectValue placeholder="Selecteer bedrijf" /></SelectTrigger>
+                  <SelectTrigger><SelectValue placeholder="Selecteer klant" /></SelectTrigger>
                   <SelectContent>
                     {companies.map((c) => <SelectItem key={c.id} value={c.id}>{c.name || c.contact_person || "Klant"}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
+
+              {/* Regels — uren, producten en diensten samen op één factuur */}
+              <div className="grid gap-2">
+                <div className="flex items-center justify-between gap-2">
+                  <Label>Regels</Label>
+                  <Button type="button" variant="outline" size="sm" onClick={addLine}>
+                    <Plus className="mr-1 h-3 w-3" />Regel toevoegen
+                  </Button>
+                </div>
+                {lines.length === 0 ? (
+                  <p className="text-sm text-muted-foreground rounded-md border border-dashed p-4 text-center">
+                    Nog geen regels. Voeg hieronder uren, producten of een dienst toe — of maak een handmatige regel.
+                  </p>
+                ) : (
+                  lines.map((line, i) => (
+                    <div key={i} className="grid grid-cols-12 gap-2 items-end">
+                      <div className="col-span-4">
+                        <Input placeholder="Omschrijving" value={line.description} onChange={(e) => updateLine(i, "description", e.target.value)} />
+                      </div>
+                      <div className="col-span-2">
+                        <Input type="number" placeholder="Uren" value={line.hours} onChange={(e) => updateLine(i, "hours", e.target.value)} />
+                      </div>
+                      <div className="col-span-2">
+                        <Input type="number" placeholder="Tarief" value={line.hourly_rate} onChange={(e) => updateLine(i, "hourly_rate", e.target.value)} />
+                      </div>
+                      <div className="col-span-3">
+                        <Input type="number" placeholder="Bedrag" value={line.amount} onChange={(e) => updateLine(i, "amount", e.target.value)} />
+                      </div>
+                      <div className="col-span-1">
+                        <Button type="button" variant="ghost" size="icon" onClick={() => removeLine(i)} title="Regel verwijderen">
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {selectedCompany && (
+                <div className="grid gap-3">
+                  {/* Uren van klant */}
+                  <div className="grid gap-2 rounded-md border p-3 bg-muted/20">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <Label className="mb-0 flex items-center gap-1.5"><Clock className="h-3.5 w-3.5" />Openstaande uren</Label>
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={addSelectedHoursToLines}
+                        disabled={selectedEntries.length === 0}
+                      >
+                        Toevoegen aan regels
+                      </Button>
+                    </div>
+                    {pickableEntries.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">
+                        {uninvoicedEntries.length === 0 ? "Geen openstaande uren voor deze klant." : "Alle openstaande uren zijn al toegevoegd."}
+                      </p>
+                    ) : (
+                      <div className="border rounded-md max-h-48 overflow-y-auto bg-background">
+                        {pickableEntries.map((entry) => (
+                          <label key={entry.id} className="flex items-center gap-3 px-3 py-2 hover:bg-muted/50 cursor-pointer">
+                            <Checkbox checked={selectedEntries.includes(entry.id)} onCheckedChange={() => toggleEntry(entry.id)} />
+                            <span className="text-sm">{new Date(entry.date).toLocaleDateString("nl-NL")}</span>
+                            <span className="text-sm text-muted-foreground flex-1 truncate">{entry.description}</span>
+                            <span className="text-sm font-medium">{Number(entry.hours).toFixed(2)}u</span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Producten van klant */}
+                  <div className="grid gap-2 rounded-md border p-3 bg-muted/20">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <Label className="mb-0 flex items-center gap-1.5"><Package className="h-3.5 w-3.5" />Producten van klant</Label>
+                      <div className="flex gap-2">
+                        <Button type="button" variant="outline" size="sm" onClick={openNewProduct}>
+                          <Plus className="mr-1 h-3 w-3" />Nieuw product
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          onClick={addSelectedProductsToLines}
+                          disabled={!companyProducts.some((p) => (selectedProducts[p.id] ?? 0) > 0)}
+                        >
+                          Toevoegen aan regels
+                        </Button>
+                      </div>
+                    </div>
+                    {companyProducts.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">Nog geen producten voor deze klant.</p>
+                    ) : (
+                      <div className="border rounded-md divide-y bg-background">
+                        {companyProducts.map((p) => {
+                          const qty = selectedProducts[p.id] ?? 0;
+                          const exVatPrice = productExVatPrice(p);
+                          return (
+                            <div key={p.id} className="flex items-center gap-2 px-3 py-2">
+                              <Checkbox
+                                checked={qty > 0}
+                                onCheckedChange={(checked) =>
+                                  setSelectedProducts((prev) => ({ ...prev, [p.id]: checked ? 1 : 0 }))
+                                }
+                              />
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm truncate">{p.name}</p>
+                                {p.serial_number && <p className="text-xs text-muted-foreground font-mono">{p.serial_number}</p>}
+                              </div>
+                              <span className="text-sm text-muted-foreground shrink-0 w-24 text-right">
+                                {exVatPrice.toLocaleString("nl-NL", { minimumFractionDigits: 2 })} excl.
+                              </span>
+                              <Input
+                                type="number"
+                                min={1}
+                                className="w-16 h-7 text-sm text-center"
+                                value={qty || ""}
+                                disabled={qty === 0}
+                                onChange={(e) => {
+                                  const n = Math.max(1, parseInt(e.target.value) || 1);
+                                  setSelectedProducts((prev) => ({ ...prev, [p.id]: n }));
+                                }}
+                              />
+                              <Button type="button" variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => openEditProduct(p)} title="Product bewerken">
+                                <Pencil className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Dienst */}
+                  {services.length > 0 && (
+                    <div className="grid gap-2 rounded-md border p-3 bg-muted/20">
+                      <Label className="mb-0 flex items-center gap-1.5"><Briefcase className="h-3.5 w-3.5" />Dienst (vast bedrag)</Label>
+                      <div className="flex gap-2">
+                        <Select value={selectedService} onValueChange={setSelectedService}>
+                          <SelectTrigger className="flex-1"><SelectValue placeholder="Kies dienst" /></SelectTrigger>
+                          <SelectContent>
+                            {services.map((s) => (
+                              <SelectItem key={s.id} value={s.id}>
+                                {s.name} — €{Number(s.amount).toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Button type="button" size="sm" onClick={addServiceToLines} disabled={!selectedService}>
+                          Toevoegen
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Factuurinstellingen */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">
                   <Label>Factuurdatum</Label>
@@ -412,203 +731,126 @@ export default function Invoices() {
                   <Input type="number" value={invoiceType === "private" ? "0" : btwPercentage} onChange={(e) => setBtwPercentage(e.target.value)} disabled={invoiceType === "private"} />
                 </div>
               </div>
-              <div className="grid gap-2">
-                <Label>Type factuur</Label>
-                <Select value={createMode} onValueChange={(v) => setCreateMode(v as "hours" | "service" | "product")}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="hours">Op basis van uren</SelectItem>
-                    <SelectItem value="service">Op basis van dienst (vast bedrag)</SelectItem>
-                    <SelectItem value="product">Op basis van producten</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              {selectedCompany && (
+
+              {/* Saldo verrekenen — alleen als de klant saldo heeft */}
+              {selectedCompany && availableAdvance > 0 && (
                 <div className="rounded-md border p-3 space-y-3">
                   <div className="flex items-start gap-3">
-                    <Checkbox
-                      id="apply-advance"
-                      checked={applyAdvance}
-                      onCheckedChange={(c) => setApplyAdvance(c === true)}
-                      className="mt-1"
-                    />
+                    <Checkbox id="apply-advance" checked={applyAdvance} onCheckedChange={(c) => setApplyAdvance(c === true)} className="mt-1" />
                     <div className="grid gap-1 flex-1">
                       <Label htmlFor="apply-advance" className="font-medium leading-snug">
-                        Klantsaldo verrekenen
+                        Klantsaldo verrekenen (€{availableAdvance.toLocaleString("nl-NL", { minimumFractionDigits: 2 })} beschikbaar)
                       </Label>
                       <p className="text-xs text-muted-foreground">
                         Zo niet, dan blijft het saldo op de klant staan en wordt er niets op deze factuur afgetrokken.
                       </p>
                     </div>
                   </div>
-                  <div className="grid gap-2 pl-7 sm:pl-0">
-                    <Label>Op de factuur (PDF) tonen als</Label>
-                    <Select
-                      value={advanceLabel}
-                      onValueChange={(v) => setAdvanceLabel(v as "krediet" | "voorschot")}
-                      disabled={!applyAdvance}
-                    >
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="krediet">Krediet</SelectItem>
-                        <SelectItem value="voorschot">Voorschot</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    {!applyAdvance && (
-                      <p className="text-xs text-muted-foreground">Woordkeuze is alleen van toepassing als je saldo verrekent.</p>
-                    )}
-                  </div>
-                </div>
-              )}
-              {createMode === "hours" && uninvoicedEntries.length > 0 && (
-                <div className="grid gap-2">
-                  <Label>Selecteer uren</Label>
-                  <div className="border rounded-md max-h-48 overflow-y-auto">
-                    {uninvoicedEntries.map((entry) => (
-                      <label key={entry.id} className="flex items-center gap-3 px-3 py-2 hover:bg-muted/50 cursor-pointer">
-                        <input type="checkbox" checked={selectedEntries.includes(entry.id)} onChange={() => toggleEntry(entry.id)} className="rounded" />
-                        <span className="text-sm">{new Date(entry.date).toLocaleDateString("nl-NL")}</span>
-                        <span className="text-sm text-muted-foreground flex-1 truncate">{entry.description}</span>
-                        <span className="text-sm font-medium">{Number(entry.hours).toFixed(2)}u</span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {createMode === "product" && selectedCompany && (
-                <div className="grid gap-2">
-                  <Label>Producten</Label>
-                  {companyProducts.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">
-                      Geen producten voor deze klant. Voeg ze toe via de klantpagina.
-                    </p>
-                  ) : (
-                    <div className="border rounded-md divide-y">
-                      {companyProducts.map((p) => {
-                        const qty = selectedProducts[p.id] ?? 0;
-                        const vatPct = p.vat_percentage ?? 21;
-                        const exVatPrice = p.price_includes_vat ? p.sale_price / (1 + vatPct / 100) : p.sale_price;
-                        return (
-                          <div key={p.id} className="flex items-center gap-3 px-3 py-2">
-                            <Checkbox
-                              checked={qty > 0}
-                              onCheckedChange={(checked) =>
-                                setSelectedProducts((prev) => ({
-                                  ...prev,
-                                  [p.id]: checked ? 1 : 0,
-                                }))
-                              }
-                            />
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm truncate">{p.name}</p>
-                              {p.serial_number && <p className="text-xs text-muted-foreground font-mono">{p.serial_number}</p>}
-                            </div>
-                            <span className="text-sm text-muted-foreground shrink-0 w-24 text-right">
-                              {exVatPrice.toLocaleString("nl-NL", { minimumFractionDigits: 2 })} excl.
-                            </span>
-                            <Input
-                              type="number"
-                              min={1}
-                              className="w-16 h-7 text-sm text-center"
-                              value={qty || ""}
-                              disabled={qty === 0}
-                              onChange={(e) => {
-                                const n = Math.max(1, parseInt(e.target.value) || 1);
-                                setSelectedProducts((prev) => ({ ...prev, [p.id]: n }));
-                              }}
-                            />
-                          </div>
-                        );
-                      })}
+                  {applyAdvance && (
+                    <div className="grid gap-2 pl-7 sm:pl-0">
+                      <Label>Op de factuur (PDF) tonen als</Label>
+                      <Select value={advanceLabel} onValueChange={(v) => setAdvanceLabel(v as "krediet" | "voorschot")}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="krediet">Krediet</SelectItem>
+                          <SelectItem value="voorschot">Voorschot</SelectItem>
+                        </SelectContent>
+                      </Select>
                     </div>
                   )}
                 </div>
               )}
-              {createMode === "service" && (
-                <div className="grid gap-4">
-                  <div className="grid gap-2">
-                    <Label>Dienst</Label>
-                    <Select value={selectedService} onValueChange={setSelectedService}>
-                      <SelectTrigger><SelectValue placeholder={services.length ? "Kies dienst" : "Geen diensten (maak aan bij Instellingen)"} /></SelectTrigger>
-                      <SelectContent>
-                        {services.map((s) => (
-                          <SelectItem key={s.id} value={s.id}>
-                            {s.name} — €{Number(s.amount).toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="grid gap-2">
-                      <Label>Omschrijving (op factuurregel)</Label>
-                      <Input value={serviceDescription} onChange={(e) => setServiceDescription(e.target.value)} placeholder="Bijv. Website onderhoud" />
-                    </div>
-                    <div className="grid gap-2">
-                      <Label>Bedrag (excl. BTW)</Label>
-                      <Input type="number" step="0.01" value={serviceAmount} onChange={(e) => setServiceAmount(e.target.value)} placeholder="250.00" />
-                    </div>
-                  </div>
-                </div>
-              )}
+
               <div className="grid gap-2">
                 <Label>Notities</Label>
                 <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} />
               </div>
-              {selectedCompany && (() => {
-                const company = companies.find((c) => c.id === selectedCompany);
-                if (!company) return null;
-                const selectedHoursEntries = uninvoicedEntries.filter((e) => selectedEntries.includes(e.id));
-                const svcAmt = Number(serviceAmount);
-                const subtotal =
-                  createMode === "hours"
-                    ? selectedHoursEntries.reduce((sum, e) => {
-                        const rate = e.hourly_rate ?? company.default_hourly_rate ?? 0;
-                        return sum + Number(e.hours) * Number(rate);
-                      }, 0)
-                    : createMode === "product"
-                      ? companyProducts
-                          .filter((p) => (selectedProducts[p.id] ?? 0) > 0)
-                          .reduce((sum, p) => sum + (p.price_includes_vat ? p.sale_price / (1 + (p.vat_percentage ?? 21) / 100) : p.sale_price) * (selectedProducts[p.id] ?? 0), 0)
-                      : Number.isFinite(svcAmt)
-                        ? svcAmt
-                        : 0;
+
+              {/* Totaaloverzicht */}
+              {(() => {
+                const subtotal = invoiceSubtotal();
+                if (subtotal <= 0) return null;
                 const vat = invoiceType === "private" ? 0 : parseFloat(btwPercentage || "0");
                 const vatAmount = invoiceType === "private" ? 0 : round2(subtotal * (vat / 100));
-                const grossTotal = invoiceType === "private" ? round2(subtotal) : round2(subtotal + vatAmount);
-                const availableAdvance = round2(Math.max(0, Number(company.advance_balance ?? 0)));
+                const grossTotal = round2(subtotal + vatAmount);
                 const appliedAdvance = applyAdvance ? round2(Math.min(availableAdvance, grossTotal)) : 0;
                 const netTotal = round2(grossTotal - appliedAdvance);
                 const labelWord = advanceLabel === "voorschot" ? "voorschot" : "krediet";
                 return (
                   <div className="rounded-md border bg-muted/30 p-3 text-sm space-y-1">
-                    <p>Totaal: <span className="font-medium">€{grossTotal.toLocaleString("nl-NL", { minimumFractionDigits: 2 })}</span></p>
-                    <p>Beschikbaar saldo: <span className="font-medium">€{availableAdvance.toLocaleString("nl-NL", { minimumFractionDigits: 2 })}</span></p>
-                    {applyAdvance ? (
+                    <p>
+                      Totaal: <span className="font-medium">€{grossTotal.toLocaleString("nl-NL", { minimumFractionDigits: 2 })}</span>
+                      <span className="text-muted-foreground"> (excl. €{subtotal.toLocaleString("nl-NL", { minimumFractionDigits: 2 })}{vat > 0 ? ` + ${vat}% BTW` : ""})</span>
+                    </p>
+                    {appliedAdvance > 0 && (
                       <>
-                        <p>
-                          Verrekend op deze factuur ({labelWord}):{" "}
-                          <span className="font-medium">€{appliedAdvance.toLocaleString("nl-NL", { minimumFractionDigits: 2 })}</span>
-                        </p>
+                        <p>Verrekend ({labelWord}): <span className="font-medium">€{appliedAdvance.toLocaleString("nl-NL", { minimumFractionDigits: 2 })}</span></p>
                         <p>Te betalen: <span className="font-medium">€{netTotal.toLocaleString("nl-NL", { minimumFractionDigits: 2 })}</span></p>
                       </>
-                    ) : (
-                      <p className="text-muted-foreground">Geen saldo-verrekening — te betalen: <span className="font-medium text-foreground">€{grossTotal.toLocaleString("nl-NL", { minimumFractionDigits: 2 })}</span></p>
                     )}
                   </div>
                 );
               })()}
-              <Button
-                onClick={handleCreate}
-                disabled={
-                  createMode === "hours"
-                    ? selectedEntries.length === 0
-                    : createMode === "product"
-                      ? !selectedCompany || !companyProducts.some((p) => (selectedProducts[p.id] ?? 0) > 0)
-                      : !selectedCompany || !serviceDescription.trim() || !Number.isFinite(Number(serviceAmount))
-                }
-              >
-                Factuur aanmaken
+
+              <Button onClick={handleCreate} disabled={creating || !selectedCompany || validLines().length === 0}>
+                {creating ? "Bezig…" : "Factuur aanmaken"}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Inline product aanmaken/bewerken */}
+        <Dialog open={productOpen} onOpenChange={(v) => { setProductOpen(v); if (!v) setEditProduct(null); }}>
+          <DialogContent className="max-w-sm">
+            <DialogHeader>
+              <DialogTitle>{editProduct ? "Product bewerken" : "Product toevoegen"}</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              <div className="grid gap-2">
+                <Label>Naam *</Label>
+                <Input value={productForm.name} onChange={(e) => setProductForm((f) => ({ ...f, name: e.target.value }))} placeholder="Bijv. Website licentie" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="grid gap-2">
+                  <Label>Serienummer</Label>
+                  <Input value={productForm.serial_number} onChange={(e) => setProductForm((f) => ({ ...f, serial_number: e.target.value }))} placeholder="SN-12345" className="font-mono text-sm" />
+                </div>
+                <div className="grid gap-2">
+                  <Label>BTW (%)</Label>
+                  <Select value={productForm.vat_percentage} onValueChange={(v) => setProductForm((f) => ({ ...f, vat_percentage: v }))}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="21">21%</SelectItem>
+                      <SelectItem value="9">9%</SelectItem>
+                      <SelectItem value="0">0%</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="grid gap-2">
+                <Label>Link</Label>
+                <Input type="url" value={productForm.url} onChange={(e) => setProductForm((f) => ({ ...f, url: e.target.value }))} placeholder="https://…" />
+              </div>
+              <div className="grid gap-2">
+                <Label>Interne notities</Label>
+                <Textarea rows={2} value={productForm.internal_notes} onChange={(e) => setProductForm((f) => ({ ...f, internal_notes: e.target.value }))} />
+              </div>
+              <div className="flex items-center gap-3">
+                <Switch id="inv-incl-vat" checked={productForm.price_includes_vat} onCheckedChange={(v) => setProductForm((f) => ({ ...f, price_includes_vat: v }))} />
+                <Label htmlFor="inv-incl-vat" className="cursor-pointer">Prijs inclusief BTW invoeren</Label>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="grid gap-2">
+                  <Label>Verkoopprijs ({productForm.price_includes_vat ? "incl." : "excl."} BTW) *</Label>
+                  <Input type="number" step="0.01" min="0" value={productForm.sale_price} onChange={(e) => setProductForm((f) => ({ ...f, sale_price: e.target.value }))} />
+                </div>
+                <div className="grid gap-2">
+                  <Label>Inkoopprijs (excl. BTW)</Label>
+                  <Input type="number" step="0.01" min="0" value={productForm.cost_price} onChange={(e) => setProductForm((f) => ({ ...f, cost_price: e.target.value }))} placeholder="optioneel" />
+                </div>
+              </div>
+              <Button onClick={handleSaveProduct} disabled={!productForm.name.trim() || !productForm.sale_price}>
+                {editProduct ? "Opslaan" : "Toevoegen"}
               </Button>
             </div>
           </DialogContent>
@@ -648,7 +890,14 @@ export default function Invoices() {
                         : undefined
                   }
                 >
-                  <TableCell className="font-medium">{invoice.invoice_number}</TableCell>
+                  <TableCell className="font-medium">
+                    <div className="flex items-center gap-2">
+                      {invoice.invoice_number}
+                      {invoice.is_credit_note && (
+                        <Badge variant="secondary" className="bg-amber-500/10 text-amber-600 text-xs">CN</Badge>
+                      )}
+                    </div>
+                  </TableCell>
                   <TableCell>{invoice.companies?.name || invoice.companies?.contact_person || "Klant"}</TableCell>
                   <TableCell>{new Date(invoice.invoice_date).toLocaleDateString("nl-NL")}</TableCell>
                   <TableCell>
@@ -684,9 +933,16 @@ export default function Invoices() {
                       <Button variant="ghost" size="icon" onClick={() => openEdit(invoice)} title="Bewerken">
                         <Pencil className="h-4 w-4" />
                       </Button>
-                      <Button variant="ghost" size="icon" onClick={() => openSplit(invoice)} title="Splitsen in termijnen">
-                        <Split className="h-4 w-4" />
-                      </Button>
+                      {!invoice.is_credit_note && invoice.status !== "vervallen" && (
+                        <Button variant="ghost" size="icon" onClick={() => { setCreditNoteTarget(invoice); setCreditNoteOpen(true); }} title="Creditnota aanmaken">
+                          <FileMinus className="h-4 w-4" />
+                        </Button>
+                      )}
+                      {!invoice.is_credit_note && (
+                        <Button variant="ghost" size="icon" onClick={() => openSplit(invoice)} title="Splitsen in termijnen">
+                          <Split className="h-4 w-4" />
+                        </Button>
+                      )}
                       <Button
                         variant="ghost"
                         size="icon"
@@ -868,6 +1124,25 @@ export default function Invoices() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={creditNoteOpen} onOpenChange={(v) => { setCreditNoteOpen(v); if (!v) setCreditNoteTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Creditnota aanmaken?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Er wordt een creditnota aangemaakt voor factuur{" "}
+              <span className="font-medium text-foreground">{creditNoteTarget?.invoice_number}</span>.
+              De creditnota heeft hetzelfde bedrag als de originele factuur maar dan negatief.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={creatingCN}>Annuleren</AlertDialogCancel>
+            <Button onClick={handleConfirmCreditNote} disabled={creatingCN}>
+              {creatingCN ? "Bezig…" : "Creditnota aanmaken"}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <Dialog open={splitOpen} onOpenChange={(v) => { setSplitOpen(v); if (!v) setInvoiceToSplit(null); }}>
         <DialogContent className="max-w-lg">
