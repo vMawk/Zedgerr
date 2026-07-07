@@ -16,6 +16,9 @@ bun.lockb
 # Wrangler local D1 / cache
 .wrangler
 
+# Database-dumps (bevatten echte klantdata — nooit committen)
+.db-dumps/
+
 # Lokale SQLite (Express API)
 data/
 dist-ssr

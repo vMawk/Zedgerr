@@ -1755,6 +1755,270 @@ api.delete("/api/leads/:id", async (c) => {
   return c.body(null, 204);
 });
 
+// --- Creditnota ---
+api.post("/api/invoices/:id/credit-note", async (c) => {
+  const userId = c.get("userId")!;
+  const { id } = c.req.param();
+
+  const existing = await c.env.DB
+    .prepare("SELECT id FROM invoices WHERE credit_note_for_id = ? AND user_id = ? LIMIT 1")
+    .bind(id, userId).first();
+  if (existing) return c.json({ error: "Er bestaat al een creditnota voor deze factuur" }, 409);
+
+  const invoice = await c.env.DB
+    .prepare("SELECT * FROM invoices WHERE id = ? AND user_id = ?")
+    .bind(id, userId)
+    .first<{
+      id: string; company_id: string; invoice_number: string; invoice_date: string;
+      subtotal: number; btw_percentage: number; btw_amount: number; total: number;
+      invoice_type: string; is_credit_note: number;
+    }>();
+  if (!invoice) return c.json({ error: "Not found" }, 404);
+  if (invoice.is_credit_note) return c.json({ error: "Kan geen creditnota maken van een creditnota" }, 400);
+
+  const year = new Date().getFullYear();
+  const countRow = await c.env.DB
+    .prepare("SELECT COUNT(*) as c FROM invoices WHERE user_id = ? AND invoice_number LIKE ?")
+    .bind(userId, `CN${year}-%`).first<{ c: number }>();
+  const cnNumber = `CN${year}-${String((countRow?.c ?? 0) + 1).padStart(4, "0")}`;
+
+  const newId = crypto.randomUUID();
+  const today = new Date().toISOString().split("T")[0];
+  const now = new Date().toISOString();
+  const sub = -Math.abs(Number(invoice.subtotal));
+  const btwAmt = -Math.abs(Number(invoice.btw_amount));
+  const tot = -Math.abs(Number(invoice.total));
+
+  await c.env.DB.prepare(
+    `INSERT INTO invoices (id, user_id, company_id, invoice_number, invoice_date, due_date, status,
+      subtotal, btw_percentage, btw_amount, total, advance_payment, advance_label, notes, invoice_type,
+      payment_method, is_credit_note, credit_note_for_id, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, NULL, 'concept', ?, ?, ?, ?, 0, 'krediet', ?, ?, 'overboeking', 1, ?, ?, ?)`,
+  ).bind(newId, userId, invoice.company_id, cnNumber, today, sub, invoice.btw_percentage, btwAmt, tot,
+    `Creditnota voor factuur ${invoice.invoice_number}`, invoice.invoice_type, id, now, now).run();
+
+  const { results: lines } = await c.env.DB
+    .prepare("SELECT * FROM invoice_lines WHERE invoice_id = ? ORDER BY created_at")
+    .bind(id).all<{ description: string; date: string | null; hours: number | null; hourly_rate: number | null; amount: number }>();
+
+  if (lines?.length) {
+    const stmts = lines.map((l) =>
+      c.env.DB.prepare(
+        `INSERT INTO invoice_lines (id, invoice_id, time_entry_id, description, date, hours, hourly_rate, amount, created_at)
+         VALUES (?, ?, NULL, ?, ?, ?, ?, ?, datetime('now'))`,
+      ).bind(crypto.randomUUID(), newId, l.description, l.date ?? null, l.hours ?? null, l.hourly_rate ?? null, -Math.abs(Number(l.amount))),
+    );
+    await c.env.DB.batch(stmts);
+  }
+
+  const row = await c.env.DB.prepare("SELECT * FROM invoices WHERE id = ?").bind(newId).first<Record<string, unknown>>();
+  return c.json({ ...row, is_credit_note: Boolean(row?.is_credit_note) });
+});
+
+// --- Expenses ---
+api.get("/api/expenses", async (c) => {
+  const userId = c.get("userId")!;
+  const from = c.req.query("from");
+  const to = c.req.query("to");
+  const category = c.req.query("category");
+  let sql = "SELECT * FROM expenses WHERE user_id = ?";
+  const params: unknown[] = [userId];
+  if (from) { sql += " AND date >= ?"; params.push(from); }
+  if (to) { sql += " AND date <= ?"; params.push(to); }
+  if (category && category !== "all") { sql += " AND category = ?"; params.push(category); }
+  sql += " ORDER BY date DESC, created_at DESC";
+  const { results } = await c.env.DB.prepare(sql).bind(...params).all();
+  return c.json(results ?? []);
+});
+
+api.post("/api/expenses", async (c) => {
+  const userId = c.get("userId")!;
+  const req = await c.req.json<Record<string, unknown>>();
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const vatPct = Number(req.vat_percentage ?? 21);
+  const exclVat = toMoney(req.amount_excl_vat);
+  const vatAmt = req.vat_amount != null ? toMoney(req.vat_amount) : toMoney(exclVat * vatPct / 100);
+  const inclVat = req.amount_incl_vat != null ? toMoney(req.amount_incl_vat) : toMoney(exclVat + vatAmt);
+  await c.env.DB
+    .prepare(
+      `INSERT INTO expenses (id, user_id, date, supplier, description, category, amount_excl_vat, vat_percentage, vat_amount, amount_incl_vat, notes, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(id, userId, req.date, req.supplier ?? null, req.description, req.category ?? "overig", exclVat, vatPct, vatAmt, inclVat, req.notes ?? null, now, now)
+    .run();
+  const row = await c.env.DB.prepare("SELECT * FROM expenses WHERE id = ?").bind(id).first();
+  return c.json(row);
+});
+
+api.patch("/api/expenses/:id", async (c) => {
+  const userId = c.get("userId")!;
+  const { id } = c.req.param();
+  const existing = await c.env.DB.prepare("SELECT id FROM expenses WHERE id = ? AND user_id = ?").bind(id, userId).first();
+  if (!existing) return c.json({ error: "Not found" }, 404);
+  const req = await c.req.json<Record<string, unknown>>();
+  const now = new Date().toISOString();
+  const vatPct = Number(req.vat_percentage ?? 21);
+  const exclVat = toMoney(req.amount_excl_vat);
+  const vatAmt = req.vat_amount != null ? toMoney(req.vat_amount) : toMoney(exclVat * vatPct / 100);
+  const inclVat = req.amount_incl_vat != null ? toMoney(req.amount_incl_vat) : toMoney(exclVat + vatAmt);
+  await c.env.DB
+    .prepare(
+      `UPDATE expenses SET date = ?, supplier = ?, description = ?, category = ?, amount_excl_vat = ?, vat_percentage = ?, vat_amount = ?, amount_incl_vat = ?, notes = ?, updated_at = ?
+       WHERE id = ? AND user_id = ?`,
+    )
+    .bind(req.date, req.supplier ?? null, req.description, req.category ?? "overig", exclVat, vatPct, vatAmt, inclVat, req.notes ?? null, now, id, userId)
+    .run();
+  const row = await c.env.DB.prepare("SELECT * FROM expenses WHERE id = ?").bind(id).first();
+  return c.json(row);
+});
+
+api.delete("/api/expenses/:id", async (c) => {
+  const userId = c.get("userId")!;
+  const { id } = c.req.param();
+  await c.env.DB.prepare("DELETE FROM expenses WHERE id = ? AND user_id = ?").bind(id, userId).run();
+  return c.body(null, 204);
+});
+
+// --- BTW rapport ---
+api.get("/api/reports/btw", async (c) => {
+  const userId = c.get("userId")!;
+  const from = c.req.query("from");
+  const to = c.req.query("to");
+  if (!from || !to) return c.json({ error: "from and to required" }, 400);
+
+  const invRow = await c.env.DB
+    .prepare(
+      `SELECT COALESCE(SUM(subtotal), 0) AS omzet, COALESCE(SUM(btw_amount), 0) AS btw
+       FROM invoices
+       WHERE user_id = ? AND invoice_date >= ? AND invoice_date <= ?
+         AND status IN ('verzonden', 'betaald')`,
+    )
+    .bind(userId, from, to)
+    .first<{ omzet: number; btw: number }>();
+
+  const expRow = await c.env.DB
+    .prepare(
+      `SELECT COALESCE(SUM(amount_excl_vat), 0) AS excl, COALESCE(SUM(vat_amount), 0) AS btw
+       FROM expenses WHERE user_id = ? AND date >= ? AND date <= ?`,
+    )
+    .bind(userId, from, to)
+    .first<{ excl: number; btw: number }>();
+
+  const verkoopOmzet = toMoney(invRow?.omzet ?? 0);
+  const verkoopBtw = toMoney(invRow?.btw ?? 0);
+  const inkoopExcl = toMoney(expRow?.excl ?? 0);
+  const inkoopBtw = toMoney(expRow?.btw ?? 0);
+
+  return c.json({
+    verkoop_omzet: verkoopOmzet,
+    verkoop_btw: verkoopBtw,
+    inkoop_excl: inkoopExcl,
+    inkoop_btw: inkoopBtw,
+    saldo_btw: toMoney(verkoopBtw - inkoopBtw),
+  });
+});
+
+// --- Winst & verlies rapport ---
+api.get("/api/reports/profit", async (c) => {
+  const userId = c.get("userId")!;
+  const yearParam = c.req.query("year");
+  if (!yearParam || !/^\d{4}$/.test(yearParam)) return c.json({ error: "year required (YYYY)" }, 400);
+  const from = `${yearParam}-01-01`;
+  const to = `${yearParam}-12-31`;
+
+  const [invRow, expRow, subRow, kmRow] = await Promise.all([
+    c.env.DB.prepare(
+      `SELECT COALESCE(SUM(subtotal), 0) AS omzet FROM invoices
+       WHERE user_id = ? AND invoice_date >= ? AND invoice_date <= ? AND status = 'betaald' AND is_credit_note = 0`,
+    ).bind(userId, from, to).first<{ omzet: number }>(),
+
+    c.env.DB.prepare(
+      `SELECT COALESCE(SUM(amount_excl_vat), 0) AS kosten FROM expenses
+       WHERE user_id = ? AND date >= ? AND date <= ?`,
+    ).bind(userId, from, to).first<{ kosten: number }>(),
+
+    c.env.DB.prepare(
+      `SELECT COALESCE(SUM(sp.amount), 0) AS kosten
+       FROM subscription_payments sp
+       JOIN subscriptions s ON s.id = sp.subscription_id
+       WHERE sp.user_id = ? AND sp.paid = 1
+         AND sp.period_date >= ? AND sp.period_date <= ?
+         AND s.category = 'zakelijk'`,
+    ).bind(userId, from, to).first<{ kosten: number }>(),
+
+    c.env.DB.prepare(
+      `SELECT COALESCE(SUM(distance_km * 0.23), 0) AS kosten FROM mileage_entries
+       WHERE user_id = ? AND date >= ? AND date <= ?`,
+    ).bind(userId, from, to).first<{ kosten: number }>(),
+  ]);
+
+  const omzet = toMoney(invRow?.omzet ?? 0);
+  const inkoopKosten = toMoney(expRow?.kosten ?? 0);
+  const abonnementKosten = toMoney(subRow?.kosten ?? 0);
+  const kmKosten = toMoney(kmRow?.kosten ?? 0);
+  const totaalKosten = toMoney(inkoopKosten + abonnementKosten + kmKosten);
+
+  return c.json({
+    omzet,
+    inkoop_kosten: inkoopKosten,
+    abonnement_kosten: abonnementKosten,
+    km_kosten: kmKosten,
+    totaal_kosten: totaalKosten,
+    winst: toMoney(omzet - totaalKosten),
+  });
+});
+
+// --- Kilometerregistratie ---
+api.get("/api/mileage", async (c) => {
+  const userId = c.get("userId")!;
+  const from = c.req.query("from");
+  const to = c.req.query("to");
+  let sql = "SELECT * FROM mileage_entries WHERE user_id = ?";
+  const params: unknown[] = [userId];
+  if (from) { sql += " AND date >= ?"; params.push(from); }
+  if (to) { sql += " AND date <= ?"; params.push(to); }
+  sql += " ORDER BY date DESC, created_at DESC";
+  const { results } = await c.env.DB.prepare(sql).bind(...params).all();
+  return c.json(results ?? []);
+});
+
+api.post("/api/mileage", async (c) => {
+  const userId = c.get("userId")!;
+  const req = await c.req.json<Record<string, unknown>>();
+  if (!req.date || !req.distance_km || !req.purpose) return c.json({ error: "date, distance_km en purpose zijn verplicht" }, 400);
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  await c.env.DB.prepare(
+    `INSERT INTO mileage_entries (id, user_id, date, from_location, to_location, distance_km, purpose, notes, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).bind(id, userId, req.date, req.from_location ?? null, req.to_location ?? null, Number(req.distance_km), req.purpose, req.notes ?? null, now, now).run();
+  const row = await c.env.DB.prepare("SELECT * FROM mileage_entries WHERE id = ?").bind(id).first();
+  return c.json(row);
+});
+
+api.patch("/api/mileage/:id", async (c) => {
+  const userId = c.get("userId")!;
+  const { id } = c.req.param();
+  const exists = await c.env.DB.prepare("SELECT id FROM mileage_entries WHERE id = ? AND user_id = ?").bind(id, userId).first();
+  if (!exists) return c.json({ error: "Not found" }, 404);
+  const req = await c.req.json<Record<string, unknown>>();
+  const now = new Date().toISOString();
+  await c.env.DB.prepare(
+    `UPDATE mileage_entries SET date = ?, from_location = ?, to_location = ?, distance_km = ?, purpose = ?, notes = ?, updated_at = ?
+     WHERE id = ? AND user_id = ?`,
+  ).bind(req.date, req.from_location ?? null, req.to_location ?? null, Number(req.distance_km), req.purpose, req.notes ?? null, now, id, userId).run();
+  const row = await c.env.DB.prepare("SELECT * FROM mileage_entries WHERE id = ?").bind(id).first();
+  return c.json(row);
+});
+
+api.delete("/api/mileage/:id", async (c) => {
+  const userId = c.get("userId")!;
+  const { id } = c.req.param();
+  await c.env.DB.prepare("DELETE FROM mileage_entries WHERE id = ? AND user_id = ?").bind(id, userId).run();
+  return c.body(null, 204);
+});
+
 /** D1-fouten (o.a. ontbrekende tabellen) anders als kale "Internal Server Error" zonder JSON. */
 api.onError((err, c) => {
   console.error(err);

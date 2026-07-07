@@ -3,9 +3,11 @@ import type {
   Company,
   CompanyProduct,
   DailyNote,
+  Expense,
   Invoice,
   InvoiceLine,
   Lead,
+  MileageEntry,
   Quote,
   QuoteLine,
   Service,
@@ -154,6 +156,7 @@ export const api = {
       status?: string;
       notes?: string | null;
       invoice_type?: "business" | "private";
+      payment_method?: "overboeking" | "contant";
       subtotal?: number;
       btw_percentage?: number;
       btw_amount?: number;
@@ -202,4 +205,50 @@ export const api = {
   createLead: (body: Partial<Lead> & { company_name: string }) => req<Lead>("POST", "/leads", body),
   updateLead: (id: string, body: Partial<Lead>) => req<Lead>("PATCH", `/leads/${id}`, body),
   deleteLead: (id: string) => req<void>("DELETE", `/leads/${id}`),
+
+  getExpenses: (q?: { from?: string; to?: string; category?: string }) => {
+    const p = new URLSearchParams();
+    if (q?.from) p.set("from", q.from);
+    if (q?.to) p.set("to", q.to);
+    if (q?.category) p.set("category", q.category);
+    const qs = p.toString();
+    return req<Expense[]>("GET", `/expenses${qs ? `?${qs}` : ""}`);
+  },
+  createExpense: (body: Record<string, unknown>) => req<Expense>("POST", "/expenses", body),
+  updateExpense: (id: string, body: Record<string, unknown>) => req<Expense>("PATCH", `/expenses/${id}`, body),
+  deleteExpense: (id: string) => req<void>("DELETE", `/expenses/${id}`),
+
+  getTaxReport: (from: string, to: string) => {
+    const p = new URLSearchParams({ from, to });
+    return req<{
+      verkoop_omzet: number;
+      verkoop_btw: number;
+      inkoop_excl: number;
+      inkoop_btw: number;
+      saldo_btw: number;
+    }>("GET", `/reports/btw?${p}`);
+  },
+
+  getProfitReport: (year: number) =>
+    req<{
+      omzet: number;
+      inkoop_kosten: number;
+      abonnement_kosten: number;
+      km_kosten: number;
+      totaal_kosten: number;
+      winst: number;
+    }>("GET", `/reports/profit?year=${year}`),
+
+  createCreditNote: (invoiceId: string) => req<Invoice>("POST", `/invoices/${invoiceId}/credit-note`),
+
+  getMileageEntries: (q?: { from?: string; to?: string }) => {
+    const p = new URLSearchParams();
+    if (q?.from) p.set("from", q.from);
+    if (q?.to) p.set("to", q.to);
+    const qs = p.toString();
+    return req<MileageEntry[]>("GET", `/mileage${qs ? `?${qs}` : ""}`);
+  },
+  createMileageEntry: (body: Record<string, unknown>) => req<MileageEntry>("POST", "/mileage", body),
+  updateMileageEntry: (id: string, body: Record<string, unknown>) => req<MileageEntry>("PATCH", `/mileage/${id}`, body),
+  deleteMileageEntry: (id: string) => req<void>("DELETE", `/mileage/${id}`),
 };

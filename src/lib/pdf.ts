@@ -81,13 +81,14 @@ export async function generateInvoicePDF(
   ownInfo.forEach((line, i) => doc.text(line as string, 20, yOwnStart + i * 4.5));
 
   // Invoice title
+  const isCreditNote = Boolean(invoice.is_credit_note);
   doc.setFontSize(24);
   doc.setFont("helvetica", "bold");
-  doc.text("FACTUUR", pageWidth - 20, 30, { align: "right" });
+  doc.text(isCreditNote ? "CREDITNOTA" : "FACTUUR", pageWidth - 20, 30, { align: "right" });
 
   doc.setFontSize(10);
   doc.setFont("helvetica", "normal");
-  doc.text(`Factuurnummer: ${invoice.invoice_number}`, pageWidth - 20, 40, { align: "right" });
+  doc.text(`${isCreditNote ? "Creditnotanummer" : "Factuurnummer"}: ${invoice.invoice_number}`, pageWidth - 20, 40, { align: "right" });
   doc.text(`Datum: ${new Date(invoice.invoice_date).toLocaleDateString("nl-NL")}`, pageWidth - 20, 46, { align: "right" });
   if (invoice.due_date) {
     doc.text(`Vervaldatum: ${new Date(invoice.due_date).toLocaleDateString("nl-NL")}`, pageWidth - 20, 52, { align: "right" });
@@ -104,7 +105,7 @@ export async function generateInvoicePDF(
   const clientY = yOwnStart + ownInfo.length * 4.5 + 15;
   doc.setFontSize(10);
   doc.setFont("helvetica", "bold");
-  doc.text("Factuur aan:", 20, clientY);
+  doc.text(isCreditNote ? "Creditnota aan:" : "Factuur aan:", 20, clientY);
   doc.setFont("helvetica", "normal");
   const clientInfo = [
     company?.name,

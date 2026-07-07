@@ -36,3 +36,39 @@ binding = "AI"
 
 [triggers]
 crons = ["0 8 * * *", "23 8 * * *", "23 9 * * *"]
+
+# ---------------------------------------------------------------------------
+# DEV-omgeving: aparte worker op dev-portaal.gibby.it met een EIGEN database.
+# Serveert UI + API vanaf hetzelfde domein (VITE_API_ORIGIN blijft dus leeg).
+# Deploy:        npm run deploy:dev
+# Dev-DB vullen: npm run db:pull:dev   (kopie van productie)
+# Bewust GEEN [triggers]/crons en GEEN Telegram → dev stuurt nooit echte meldingen.
+# ---------------------------------------------------------------------------
+[env.dev]
+name = "client-flow-dev"
+
+[[env.dev.routes]]
+pattern = "dev-portaal.gibby.it"
+zone_name = "gibby.it"
+custom_domain = true
+
+[env.dev.vars]
+# Aparte JWT-secret: dev-sessies werken niet op productie en andersom.
+JWT_SECRET = "REPLACE_ME"
+# Leeg: dev stuurt bewust GEEN Telegram-meldingen (worker guardt op lege waarde).
+TELEGRAM_BOT_TOKEN = ""
+TELEGRAM_CHAT_ID = ""
+
+[[env.dev.d1_databases]]
+binding = "DB"
+database_name = "client-flow-dev"
+database_id = "0f18a32a-7e53-4fb7-b33f-978369336326"
+migrations_dir = "migrations"
+
+[env.dev.assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+
+[env.dev.ai]
+binding = "AI"

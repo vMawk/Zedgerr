@@ -54,6 +54,21 @@ export type Invoice = {
   notes: string | null;
   invoice_type: "business" | "private";
   payment_method: "overboeking" | "contant";
+  is_credit_note: boolean;
+  credit_note_for_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type MileageEntry = {
+  id: string;
+  user_id: string;
+  date: string;
+  from_location: string | null;
+  to_location: string | null;
+  distance_km: number;
+  purpose: string;
+  notes: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -189,6 +204,22 @@ export type LeadStatus =
   | "follow_up"
   | "converted"
   | "rejected";
+
+export type Expense = {
+  id: string;
+  user_id: string;
+  date: string;
+  supplier: string | null;
+  description: string;
+  category: string;
+  amount_excl_vat: number;
+  vat_percentage: number;
+  vat_amount: number;
+  amount_incl_vat: number;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
 
 export type Lead = {
   id: string;
