@@ -1848,6 +1848,12 @@ api.post("/api/expenses", async (c) => {
     )
     .bind(id, userId, req.date, req.supplier ?? null, req.description, req.category ?? "overig", exclVat, vatPct, vatAmt, inclVat, req.notes ?? null, now, now)
     .run();
+  const bankDesc = req.supplier ? `${req.supplier} - ${req.description}` : req.description;
+  const bankId = crypto.randomUUID();
+  await c.env.DB.prepare(
+    `INSERT INTO bank_transactions (id, user_id, date, description, amount, type, notes, expense_id, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).bind(bankId, userId, req.date, bankDesc, -inclVat, "uitgave", null, id, now).run();
   const row = await c.env.DB.prepare("SELECT * FROM expenses WHERE id = ?").bind(id).first();
   return c.json(row);
 });
@@ -1870,6 +1876,10 @@ api.patch("/api/expenses/:id", async (c) => {
     )
     .bind(req.date, req.supplier ?? null, req.description, req.category ?? "overig", exclVat, vatPct, vatAmt, inclVat, req.notes ?? null, now, id, userId)
     .run();
+  const bankDesc = req.supplier ? `${req.supplier} - ${req.description}` : req.description;
+  await c.env.DB.prepare(
+    `UPDATE bank_transactions SET date = ?, description = ?, amount = ?, type = ? WHERE expense_id = ? AND user_id = ?`,
+  ).bind(req.date, bankDesc, -inclVat, "uitgave", id, userId).run();
   const row = await c.env.DB.prepare("SELECT * FROM expenses WHERE id = ?").bind(id).first();
   return c.json(row);
 });
@@ -1877,6 +1887,7 @@ api.patch("/api/expenses/:id", async (c) => {
 api.delete("/api/expenses/:id", async (c) => {
   const userId = c.get("userId")!;
   const { id } = c.req.param();
+  await c.env.DB.prepare("DELETE FROM bank_transactions WHERE expense_id = ? AND user_id = ?").bind(id, userId).run();
   await c.env.DB.prepare("DELETE FROM expenses WHERE id = ? AND user_id = ?").bind(id, userId).run();
   return c.body(null, 204);
 });
