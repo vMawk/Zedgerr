@@ -1,0 +1,220 @@
+@import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Zedgerr brand — light mode
+       Primary Green  #004030  hsl(162 100% 13%)
+       Neon Green     #39FF14  hsl(109 100% 54%)
+       Accent Purple  #E6E6FA  hsl(240 67% 94%)
+       Surface Light  #FAFAFA
+       Text Dark      #121212  hsl(0 0% 7%)
+    */
+    --background: 0 0% 98%;
+    --foreground: 0 0% 7%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 7%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 7%;
+
+    --primary: 162 100% 13%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 162 30% 95%;
+    --secondary-foreground: 162 100% 13%;
+
+    --muted: 0 0% 95%;
+    --muted-foreground: 0 0% 45%;
+
+    --accent: 162 30% 93%;
+    --accent-foreground: 162 100% 13%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 0 0% 90%;
+    --input: 0 0% 90%;
+    --ring: 162 100% 13%;
+
+    --radius: 0.5rem;
+
+    /* Nav tokens */
+    --nav-bg: 0 0% 100%;
+    --nav-border: 0 0% 91%;
+    --nav-fg: 0 0% 40%;
+    --nav-fg-active: 162 100% 13%;
+    --nav-indicator: 109 100% 38%;
+
+    /* Semantic tokens */
+    --success: 162 100% 13%;
+    --success-foreground: 0 0% 100%;
+    --warning: 39 90% 65%;
+    --warning-foreground: 0 0% 7%;
+    --cost: 0 72% 51%;
+    --cost-foreground: 0 0% 100%;
+
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  }
+
+  .dark {
+    /* Dark mode: deep forest green surfaces, neon green accent */
+    --background: 162 100% 7%;
+    --foreground: 0 0% 94%;
+
+    --card: 162 80% 10%;
+    --card-foreground: 0 0% 94%;
+
+    --popover: 162 80% 10%;
+    --popover-foreground: 0 0% 94%;
+
+    --primary: 109 100% 54%;
+    --primary-foreground: 162 100% 7%;
+
+    --secondary: 162 50% 16%;
+    --secondary-foreground: 0 0% 90%;
+
+    --muted: 162 50% 14%;
+    --muted-foreground: 162 20% 55%;
+
+    --accent: 162 50% 18%;
+    --accent-foreground: 109 100% 65%;
+
+    --destructive: 0 63% 45%;
+    --destructive-foreground: 0 0% 94%;
+
+    --border: 162 50% 18%;
+    --input: 162 50% 18%;
+    --ring: 109 100% 54%;
+
+    --nav-bg: 162 80% 10%;
+    --nav-border: 162 50% 18%;
+    --nav-fg: 162 20% 55%;
+    --nav-fg-active: 0 0% 94%;
+    --nav-indicator: 109 100% 54%;
+
+    --success: 109 100% 54%;
+    --success-foreground: 162 100% 7%;
+    --warning: 39 90% 65%;
+    --warning-foreground: 0 0% 7%;
+    --cost: 0 63% 55%;
+    --cost-foreground: 0 0% 94%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+}
+
+/* Animation utilities */
+@layer utilities {
+  /* Hover lift for cards */
+  .card-lift {
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+  }
+  .card-lift:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px -6px hsl(var(--primary) / 0.15);
+  }
+
+  /* Neon glow pulse on primary buttons */
+  .btn-glow {
+    position: relative;
+    overflow: hidden;
+  }
+  .btn-glow::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent 0%, hsl(109 100% 54% / 0.25) 50%, transparent 100%);
+    transform: translateX(-100%);
+    transition: transform 0.5s ease;
+  }
+  .btn-glow:hover::after {
+    transform: translateX(100%);
+  }
+
+  /* Shimmer skeleton */
+  .skeleton {
+    background: linear-gradient(
+      90deg,
+      hsl(var(--muted)) 25%,
+      hsl(var(--muted) / 0.5) 50%,
+      hsl(var(--muted)) 75%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.6s ease-in-out infinite;
+    border-radius: calc(var(--radius) - 2px);
+  }
+
+  /* Number count-up fade */
+  .count-up {
+    animation: count-up-in 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+@keyframes count-up-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Neon nav indicator */
+@keyframes indicator-slide {
+  from { opacity: 0; transform: scaleX(0.4); }
+  to   { opacity: 1; transform: scaleX(1); }
+}
+
+/* Spin-in for icons in empty states */
+@keyframes pop-in {
+  0%   { opacity: 0; transform: scale(0.6) rotate(-12deg); }
+  70%  { transform: scale(1.08) rotate(3deg); }
+  100% { opacity: 1; transform: scale(1) rotate(0deg); }
+}
+.pop-in {
+  animation: pop-in 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* Pulse ring for live/active indicators */
+@keyframes pulse-ring {
+  0%   { transform: scale(1);    opacity: 0.6; }
+  100% { transform: scale(1.8);  opacity: 0; }
+}
+.pulse-ring::before {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  background: hsl(109 100% 54% / 0.5);
+  animation: pulse-ring 1.5s ease-out infinite;
+}
+
+/* Floating entrance for modals/dialogs */
+@keyframes float-up {
+  from { opacity: 0; transform: translateY(20px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0)    scale(1); }
+}
+.float-up {
+  animation: float-up 0.28s cubic-bezier(0.25, 0.46, 0.45, 0.94) both;
+}

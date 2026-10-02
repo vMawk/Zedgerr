@@ -1,0 +1,13 @@
+{
+  "name": "Zedgerr",
+  "short_name": "Zedgerr",
+  "description": "Invoicing, time tracking and bookkeeping for freelancers and small businesses.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#fafafa",
+  "theme_color": "#004030",
+  "icons": [
+    { "src": "/zedgerr-icon.png", "sizes": "500x500", "type": "image/png", "purpose": "any" }
+  ]
+}
