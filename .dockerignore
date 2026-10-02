@@ -1,0 +1,10 @@
+node_modules
+dist
+dist-server
+.wrangler
+.git
+data
+*.mp4
+*.sql
+backup-*.sql
+.db-dumps

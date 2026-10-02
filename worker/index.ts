@@ -2,9 +2,9 @@
 
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { hashPassword, verifyPassword } from "./auth-crypto";
-import { signPortalToken, signUserToken, verifyPortalToken, verifyUserToken } from "./jwt";
-import { seedInvoice2026IfNeeded } from "./seed-d1";
+import { hashPassword, verifyPassword } from "./auth-crypto.js";
+import { signPortalToken, signUserToken, verifyPortalToken, verifyUserToken } from "./jwt.js";
+import { seedInvoice2026IfNeeded } from "./seed-d1.js";
 
 export type Env = {
   DB: D1Database;
@@ -2293,6 +2293,9 @@ api.post("/api/telegram/test-upcoming-payments", async (c) => {
   await sendTelegramMessage(c.env, buildUpcomingPaymentsMessage(results));
   return c.json({ ok: true, count: results.length });
 });
+
+// Exported for Node.js server (server/index.ts uses this directly with adapter bindings)
+export { api };
 
 // --- Deploy: static SPA + API ---
 export default {

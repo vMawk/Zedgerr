@@ -1,0 +1,30 @@
+services:
+  app:
+    build: .
+    ports:
+      - "${PORT:-3000}:3000"
+    volumes:
+      - app_data:/app/data
+    environment:
+      # REQUIRED — change before going to production
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      # Set to "true" to allow more than one user to register
+      ALLOW_REGISTRATION: ${ALLOW_REGISTRATION:-false}
+      # Optional — AI grammar improvement (OpenAI-compatible endpoint)
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-}
+      # Optional — Telegram notifications
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/api/auth/registration-status').then(r=>r.ok?process.exit(0):process.exit(1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  app_data:
+    driver: local

@@ -9,6 +9,10 @@ lerna-debug.log*
 
 node_modules
 dist
+dist-server
+
+# Video reference file (large, not source code)
+*.mp4
 
 # Gebruik package-lock.json voor CI (Cloudflare Pages); oude bun.lockb veroorzaakt frozen-lock failures.
 bun.lockb

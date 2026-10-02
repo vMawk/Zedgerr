@@ -27,10 +27,11 @@ import { generateInvoicePDF } from "@/lib/pdf";
 import { Checkbox } from "@/components/ui/checkbox";
 
 const statusColors: Record<string, string> = {
-  concept: "bg-muted text-muted-foreground",
-  verzonden: "bg-primary/10 text-primary",
-  betaald: "bg-success/10 text-success",
+  concept: "bg-[hsl(220_13%_95%)] text-[hsl(220_13%_40%)]",
+  verzonden: "bg-[hsl(38_92%_95%)] text-[hsl(38_60%_35%)]",
+  betaald: "bg-success/12 text-success",
   vervallen: "bg-destructive/10 text-destructive",
+  gesplitst: "bg-[hsl(250_80%_95%)] text-[hsl(250_50%_45%)]",
 };
 
 const emptyProductForm = {
@@ -517,7 +518,7 @@ export default function Invoices() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Facturen</h1>
+        <h1 className="text-xl font-semibold">Facturen</h1>
         <Dialog
           open={open}
           onOpenChange={(v) => {
