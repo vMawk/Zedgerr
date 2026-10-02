@@ -26,12 +26,12 @@ const TYPE_LABELS: Record<TxType, string> = {
 };
 
 const TYPE_COLORS: Record<TxType, string> = {
-  inkomst: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
-  uitgave: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
-  prive_storting: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
-  prive_onttrekking: "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400",
-  beginstand: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300",
-  overig: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300",
+  inkomst: "bg-success/10 text-success",
+  uitgave: "bg-destructive/10 text-destructive",
+  prive_storting: "bg-[hsl(213_90%_95%)] text-[hsl(213_60%_40%)]",
+  prive_onttrekking: "bg-[hsl(38_92%_95%)] text-[hsl(38_60%_35%)]",
+  beginstand: "bg-[hsl(220_13%_95%)] text-[hsl(220_13%_40%)]",
+  overig: "bg-[hsl(220_13%_95%)] text-[hsl(220_13%_40%)]",
 };
 
 const emptyForm = {
@@ -154,7 +154,7 @@ export default function Bankrekening() {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Bankrekening</h1>
+        <h1 className="text-xl font-semibold">Bankrekening</h1>
         <div className="flex gap-2">
           <Button variant="outline" onClick={() => openNew("prive_storting")} title="Privéstorting">
             <ArrowDownToLine className="mr-2 h-4 w-4" />

@@ -190,7 +190,7 @@ export default function Settings() {
 
   return (
     <div className="space-y-6 max-w-2xl">
-      <h1 className="text-2xl font-semibold">Instellingen</h1>
+      <h1 className="text-xl font-semibold">Instellingen</h1>
       <Card>
         <CardHeader>
           <CardTitle>Bedrijfsgegevens</CardTitle>

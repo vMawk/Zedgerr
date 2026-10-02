@@ -127,7 +127,7 @@ export default function CompanyDetail() {
         <Link to="/bedrijven">
           <Button variant="ghost" size="sm"><ArrowLeft className="h-4 w-4 mr-1" />Bedrijven</Button>
         </Link>
-        <h1 className="text-2xl font-semibold">{displayName}</h1>
+        <h1 className="text-xl font-semibold">{displayName}</h1>
       </div>
 
       {company && (

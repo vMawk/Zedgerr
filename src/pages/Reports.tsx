@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
 import type { Company } from "@/lib/db-types";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -56,7 +56,7 @@ export default function Reports() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold">Overzichten</h1>
+      <h1 className="text-xl font-semibold">Overzichten</h1>
 
       <div className="flex flex-wrap gap-4">
         <div className="grid gap-2">
@@ -79,23 +79,32 @@ export default function Reports() {
         </div>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Totaal uren</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{totals.hours.toFixed(1)}</div>
+          <CardContent className="pt-5 pb-5">
+            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Totaal uren</p>
+            <p className="text-3xl font-bold tabular-nums">{totals.hours.toFixed(1)}</p>
+            <p className="text-xs text-muted-foreground mt-1">in geselecteerde periode</p>
           </CardContent>
         </Card>
         <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Totaal omzet</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">€{totals.revenue.toLocaleString("nl-NL", { minimumFractionDigits: 2 })}</div>
+          <CardContent className="pt-5 pb-5">
+            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Totaal omzet</p>
+            <p className="text-3xl font-bold tabular-nums text-[hsl(var(--success))]">€{totals.revenue.toLocaleString("nl-NL", { minimumFractionDigits: 2 })}</p>
+            <p className="text-xs text-muted-foreground mt-1">op basis van uurtarief</p>
           </CardContent>
         </Card>
+        {summaries.length > 0 && (
+          <Card>
+            <CardContent className="pt-5 pb-5">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Gem. uurtarief</p>
+              <p className="text-3xl font-bold tabular-nums">
+                €{totals.hours > 0 ? (totals.revenue / totals.hours).toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "0,00"}
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">gewogen gemiddelde</p>
+            </CardContent>
+          </Card>
+        )}
       </div>
 
       {summaries.length > 0 && (

@@ -446,7 +446,7 @@ function TaxEstimateTab() {
 export default function Tax() {
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold">Belasting</h1>
+      <h1 className="text-xl font-semibold">Belasting</h1>
       <Tabs defaultValue="btw">
         <TabsList>
           <TabsTrigger value="btw">BTW-aangifte</TabsTrigger>
