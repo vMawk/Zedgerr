@@ -3265,8 +3265,11 @@ api.get("/api/org/invite/info", async (c) => {
   const { token } = c.req.query();
   if (!token) return c.json({ error: "Token is required" }, 400);
   const invite = await c.env.DB
-    .prepare(`SELECT i.email, i.role, i.expires_at, o.name as org_name
-              FROM org_invites i JOIN organizations o ON o.id = i.org_id
+    .prepare(`SELECT i.email, i.role, i.expires_at,
+                COALESCE(bs.company_name, o.name) as org_name
+              FROM org_invites i
+              JOIN organizations o ON o.id = i.org_id
+              LEFT JOIN business_settings bs ON bs.org_id = o.id
               WHERE i.token = ? AND i.accepted_at IS NULL AND i.expires_at > datetime('now')`)
     .bind(token)
     .first<{ email: string; role: string; expires_at: string; org_name: string }>();

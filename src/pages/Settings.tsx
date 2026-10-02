@@ -17,7 +17,7 @@ import { ThemePicker } from "@/components/ThemeToggle";
 import { TwoFactorCard } from "@/components/settings/TwoFactorCard";
 import { LogoUpload } from "@/components/settings/LogoUpload";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Bell, Building2, Database, Package, Palette, Percent, ShieldCheck, Users } from "lucide-react";
+import { Bell, Building2, Database, Lock, Package, Palette, Percent, Server, ShieldCheck, Users } from "lucide-react";
 import { SORTED_PRESETS, OTHER_PRESET, presetFor, rateOptions, bankAccountLabel } from "@/lib/tax-presets";
 import { SUPPORTED_CURRENCIES, currencySymbol } from "@/lib/tax";
 
@@ -862,6 +862,34 @@ export default function Settings() {
           </Card>
         </TabsContent>
         <TabsContent value="data" className="space-y-6 max-w-3xl mt-0">
+          <Card>
+            <CardHeader>
+              <CardTitle>Privacy &amp; data ownership</CardTitle>
+              <CardDescription>
+                Your data never leaves your own server. You are in full control.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div className="flex flex-col gap-1.5 rounded-lg border p-4">
+                  <Server className="h-5 w-5 text-primary" />
+                  <div className="font-medium text-sm">Self-hosted</div>
+                  <p className="text-xs text-muted-foreground">All data stays on your own server. Nobody else has access — not even us.</p>
+                </div>
+                <div className="flex flex-col gap-1.5 rounded-lg border p-4">
+                  <Lock className="h-5 w-5 text-primary" />
+                  <div className="font-medium text-sm">Encrypted backups</div>
+                  <p className="text-xs text-muted-foreground">Backups are encrypted with AES-256-GCM and a password only you know.</p>
+                </div>
+                <div className="flex flex-col gap-1.5 rounded-lg border p-4">
+                  <ShieldCheck className="h-5 w-5 text-primary" />
+                  <div className="font-medium text-sm">Secure in transit</div>
+                  <p className="text-xs text-muted-foreground">Run behind HTTPS and enable TRUST_PROXY to enforce TLS for all connections.</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader>
               <CardTitle>Backup</CardTitle>
