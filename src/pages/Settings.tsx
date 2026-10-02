@@ -60,8 +60,10 @@ export default function Settings() {
   const [svcAmount, setSvcAmount] = useState("");
   const [passwordForm, setPasswordForm] = useState({ current: "", next: "", confirm: "" });
   const [changingPassword, setChangingPassword] = useState(false);
-  const [sendingTelegramTest, setSendingTelegramTest] = useState(false);
-  const [sendingUpcomingTelegramTest, setSendingUpcomingTelegramTest] = useState(false);
+  const [smtp, setSmtp] = useState({ host: "", port: 587, secure: 0, username: "", password: "", from_name: "", from_email: "", base_url: "" });
+  const [smtpLoaded, setSmtpLoaded] = useState(false);
+  const [savingSmtp, setSavingSmtp] = useState(false);
+  const [testingSmtp, setTestingSmtp] = useState(false);
 
   // Team management
   const queryClient = useQueryClient();
@@ -83,11 +85,16 @@ export default function Settings() {
     if (!inviteEmail.trim()) return;
     setInviting(true);
     try {
-      const result = await apiRequest<{ invite_token: string; email: string }>("/api/org/invite", {
+      const result = await apiRequest<{ invite_token: string; email: string; email_sent?: boolean }>("/api/org/invite", {
         method: "POST",
         body: JSON.stringify({ email: inviteEmail.trim(), role: inviteRole }),
       });
-      toast({ title: `Invite sent to ${result.email}`, description: `Token: ${result.invite_token.slice(0, 12)}…` });
+      toast({
+        title: `Invite created for ${result.email}`,
+        description: result.email_sent
+          ? "An email with the invite link has been sent."
+          : `Share this link: ${window.location.origin}/invite?token=${result.invite_token}`,
+      });
       setInviteEmail("");
       queryClient.invalidateQueries({ queryKey: ["org"] });
     } catch (err: unknown) {
@@ -265,39 +272,37 @@ export default function Settings() {
     }
   };
 
-  const handleSendTelegramTest = async () => {
-    setSendingTelegramTest(true);
+  // Load SMTP settings when notifications tab is opened
+  useEffect(() => {
+    if (tab === "notifications" && !smtpLoaded && user) {
+      api.getSmtpSettings().then((data) => {
+        setSmtp({ host: data.host, port: data.port, secure: data.secure, username: data.username, password: "", from_name: data.from_name, from_email: data.from_email, base_url: data.base_url });
+        setSmtpLoaded(true);
+      }).catch(() => setSmtpLoaded(true));
+    }
+  }, [tab, smtpLoaded, user]);
+
+  const handleSaveSmtp = async () => {
+    setSavingSmtp(true);
     try {
-      await api.sendTelegramTest();
-      toast({ title: "Telegram test sent" });
-    } catch (error: unknown) {
-      toast({
-        title: "Telegram test failed",
-        description: error instanceof Error ? error.message : String(error),
-        variant: "destructive",
-      });
+      await api.saveSmtpSettings(smtp);
+      toast({ title: "SMTP settings saved" });
+    } catch (err: unknown) {
+      toast({ title: "Failed to save", description: err instanceof Error ? err.message : String(err), variant: "destructive" });
     } finally {
-      setSendingTelegramTest(false);
+      setSavingSmtp(false);
     }
   };
 
-  const handleSendUpcomingTelegramTest = async () => {
-    setSendingUpcomingTelegramTest(true);
+  const handleTestSmtp = async () => {
+    setTestingSmtp(true);
     try {
-      const res = await api.sendUpcomingPaymentsTelegramTest();
-      if (res.count > 0) {
-        toast({ title: "Upcoming payments test sent", description: `${res.count} payment(s) included.` });
-      } else {
-        toast({ title: "Upcoming payments test sent", description: "No payments due in the next 2 days." });
-      }
-    } catch (error: unknown) {
-      toast({
-        title: "Upcoming payments test failed",
-        description: error instanceof Error ? error.message : String(error),
-        variant: "destructive",
-      });
+      await api.testSmtp();
+      toast({ title: "Test email sent", description: "Check your inbox." });
+    } catch (err: unknown) {
+      toast({ title: "Test failed", description: err instanceof Error ? err.message : String(err), variant: "destructive" });
     } finally {
-      setSendingUpcomingTelegramTest(false);
+      setTestingSmtp(false);
     }
   };
 
@@ -731,22 +736,54 @@ export default function Settings() {
       </Card>
         </TabsContent>
         <TabsContent value="notifications" className="space-y-6 max-w-3xl mt-0">
-      <Card>
-        <CardHeader>
-          <CardTitle>Telegram</CardTitle>
-          <CardDescription>Send a test notification to verify your Telegram integration</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-wrap gap-2">
-            <Button onClick={handleSendTelegramTest} disabled={sendingTelegramTest}>
-              {sendingTelegramTest ? "Sending…" : "Test Telegram message"}
-            </Button>
-            <Button variant="outline" onClick={handleSendUpcomingTelegramTest} disabled={sendingUpcomingTelegramTest}>
-              {sendingUpcomingTelegramTest ? "Sending…" : "Test upcoming payments"}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle>Email (SMTP)</CardTitle>
+              <CardDescription>
+                Configure an outgoing mail server so Zedgerr can send team invitations. Leave blank to share invite links manually.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="grid gap-1.5">
+                  <Label>SMTP host</Label>
+                  <Input placeholder="smtp.example.com" value={smtp.host} onChange={(e) => setSmtp((s) => ({ ...s, host: e.target.value }))} />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label>Port</Label>
+                  <Input type="number" placeholder="587" value={smtp.port} onChange={(e) => setSmtp((s) => ({ ...s, port: Number(e.target.value) }))} />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label>Username</Label>
+                  <Input placeholder="you@example.com" value={smtp.username} onChange={(e) => setSmtp((s) => ({ ...s, username: e.target.value }))} />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label>Password</Label>
+                  <Input type="password" placeholder="Leave blank to keep existing" value={smtp.password} onChange={(e) => setSmtp((s) => ({ ...s, password: e.target.value }))} />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label>From name</Label>
+                  <Input placeholder="Acme Inc" value={smtp.from_name} onChange={(e) => setSmtp((s) => ({ ...s, from_name: e.target.value }))} />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label>From email</Label>
+                  <Input type="email" placeholder="noreply@example.com" value={smtp.from_email} onChange={(e) => setSmtp((s) => ({ ...s, from_email: e.target.value }))} />
+                </div>
+                <div className="grid gap-1.5 sm:col-span-2">
+                  <Label>App URL <span className="text-muted-foreground font-normal text-xs">(used in invite links)</span></Label>
+                  <Input placeholder="https://invoices.example.com" value={smtp.base_url} onChange={(e) => setSmtp((s) => ({ ...s, base_url: e.target.value }))} />
+                </div>
+                <div className="flex items-center gap-2 sm:col-span-2">
+                  <input type="checkbox" id="smtp-tls" checked={smtp.secure === 1} onChange={(e) => setSmtp((s) => ({ ...s, secure: e.target.checked ? 1 : 0 }))} className="h-4 w-4 rounded border-input accent-primary" />
+                  <Label htmlFor="smtp-tls" className="cursor-pointer font-normal">Use TLS (port 465)</Label>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2 pt-2">
+                <Button onClick={handleSaveSmtp} disabled={savingSmtp}>{savingSmtp ? "Saving…" : "Save"}</Button>
+                <Button variant="outline" onClick={handleTestSmtp} disabled={testingSmtp || !smtp.host}>{testingSmtp ? "Sending…" : "Send test email"}</Button>
+              </div>
+            </CardContent>
+          </Card>
         </TabsContent>
         <TabsContent value="appearance" className="space-y-6 max-w-3xl mt-0">
       <Card>

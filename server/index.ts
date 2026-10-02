@@ -61,8 +61,6 @@ const baseEnv: AppEnv = {
   JWT_SECRET,
   ALLOW_REGISTRATION: process.env.ALLOW_REGISTRATION,
   CORS_ORIGIN: process.env.CORS_ORIGIN,
-  TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
-  TELEGRAM_CHAT_ID: process.env.TELEGRAM_CHAT_ID,
 };
 
 const { api } = (await import("../api/index.js")) as {

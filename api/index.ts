@@ -3205,7 +3205,37 @@ api.post("/api/org/invite", async (c) => {
     .run();
 
   const org = await c.env.DB.prepare("SELECT name FROM organizations WHERE id = ?").bind(orgId).first<{ name: string }>();
-  return c.json({ invite_token: token, email, role, expires_at: expiresAt, org_name: org?.name });
+  // Send invite email if SMTP is configured
+  const smtp = await c.env.DB
+    .prepare("SELECT * FROM smtp_settings WHERE user_id = ? LIMIT 1")
+    .bind(orgId)
+    .first<{ host: string; port: number; secure: number; username: string; password: string; from_name: string; from_email: string; base_url: string }>();
+
+  let emailSent = false;
+  if (smtp?.host && smtp?.from_email && smtp?.base_url) {
+    try {
+      const { createTransport } = await import("nodemailer");
+      const transport = createTransport({
+        host: smtp.host,
+        port: smtp.port,
+        secure: smtp.secure === 1,
+        auth: smtp.username ? { user: smtp.username, pass: smtp.password } : undefined,
+      });
+      const inviteUrl = `${smtp.base_url.replace(/\/$/, "")}/invite?token=${token}`;
+      const orgName = org?.name ?? "Zedgerr";
+      await transport.sendMail({
+        from: smtp.from_name ? `"${smtp.from_name}" <${smtp.from_email}>` : smtp.from_email,
+        to: email,
+        subject: `You've been invited to ${orgName}`,
+        html: `<p>Hi,</p><p>You've been invited to join <strong>${orgName}</strong> as a ${role}.</p><p><a href="${inviteUrl}">Accept invitation</a></p><p>This link expires on ${new Date(expiresAt).toDateString()}.</p><p>If you didn't expect this, you can ignore this email.</p>`,
+      });
+      emailSent = true;
+    } catch {
+      // Email failed — invite token is still valid, caller can share it manually
+    }
+  }
+
+  return c.json({ invite_token: token, email, role, expires_at: expiresAt, org_name: org?.name, email_sent: emailSent });
 });
 
 // Accept invite (new or existing user)
@@ -3363,17 +3393,73 @@ api.onError((err, c) => {
       503,
     );
   }
-  return c.json({ error: "Serverfout" }, 500);
+  return c.json({ error: "Internal server error" }, 500);
 });
 
-async function sendTelegramMessage(env: Env, text: string): Promise<void> {
-  if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID) return;
-  await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: env.TELEGRAM_CHAT_ID, text, parse_mode: "HTML" }),
-  });
-}
+// ── SMTP settings ─────────────────────────────────────────────────────────────
+
+api.get("/api/smtp-settings", async (c) => {
+  const userId = c.get("userId")!;
+  const row = await c.env.DB
+    .prepare("SELECT host, port, secure, username, from_name, from_email, base_url FROM smtp_settings WHERE user_id = ? LIMIT 1")
+    .bind(userId)
+    .first<{ host: string; port: number; secure: number; username: string; from_name: string; from_email: string; base_url: string }>();
+  return c.json(row ?? { host: "", port: 587, secure: 0, username: "", from_name: "", from_email: "", base_url: "" });
+});
+
+api.put("/api/smtp-settings", async (c) => {
+  const userId = c.get("userId")!;
+  const body = await c.req.json<{ host?: string; port?: number; secure?: number; username?: string; password?: string; from_name?: string; from_email?: string; base_url?: string }>();
+
+  const existing = await c.env.DB.prepare("SELECT id FROM smtp_settings WHERE user_id = ?").bind(userId).first<{ id: string }>();
+  if (existing) {
+    // Update, but only overwrite password if a non-empty value is provided
+    const setPassword = body.password !== undefined && body.password !== "" ? ", password = ?" : "";
+    const params: unknown[] = [
+      body.host ?? "", body.port ?? 587, body.secure ?? 0, body.username ?? "",
+      body.from_name ?? "", body.from_email ?? "", body.base_url ?? "",
+    ];
+    if (setPassword) params.push(body.password);
+    params.push(userId);
+    await c.env.DB
+      .prepare(`UPDATE smtp_settings SET host=?, port=?, secure=?, username=?, from_name=?, from_email=?, base_url=?${setPassword}, updated_at=datetime('now') WHERE user_id=?`)
+      .bind(...params)
+      .run();
+  } else {
+    await c.env.DB
+      .prepare("INSERT INTO smtp_settings (id, user_id, host, port, secure, username, password, from_name, from_email, base_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+      .bind(crypto.randomUUID(), userId, body.host ?? "", body.port ?? 587, body.secure ?? 0, body.username ?? "", body.password ?? "", body.from_name ?? "", body.from_email ?? "", body.base_url ?? "")
+      .run();
+  }
+  return c.json({ ok: true });
+});
+
+api.post("/api/smtp-settings/test", async (c) => {
+  const userId = c.get("userId")!;
+  const email  = c.get("email") ?? "";
+  const smtp = await c.env.DB
+    .prepare("SELECT * FROM smtp_settings WHERE user_id = ? LIMIT 1")
+    .bind(userId)
+    .first<{ host: string; port: number; secure: number; username: string; password: string; from_name: string; from_email: string }>();
+  if (!smtp?.host || !smtp?.from_email) return c.json({ error: "SMTP is not configured" }, 400);
+
+  try {
+    const { createTransport } = await import("nodemailer");
+    const transport = createTransport({
+      host: smtp.host, port: smtp.port, secure: smtp.secure === 1,
+      auth: smtp.username ? { user: smtp.username, pass: smtp.password } : undefined,
+    });
+    await transport.sendMail({
+      from: smtp.from_name ? `"${smtp.from_name}" <${smtp.from_email}>` : smtp.from_email,
+      to: email,
+      subject: "Zedgerr SMTP test",
+      html: "<p>Your SMTP configuration is working. Team invites will be sent via this address.</p>",
+    });
+    return c.json({ ok: true });
+  } catch (err) {
+    return c.json({ error: String(err) }, 500);
+  }
+});
 
 type UpcomingPaymentRow = {
   name: string;
@@ -3417,49 +3503,8 @@ function buildUpcomingPaymentsMessage(results: UpcomingPaymentRow[]): string {
 
 async function checkUpcomingPayments(env: Env): Promise<number> {
   const results = await getUpcomingPayments(env);
-  if (results.length === 0) return 0;
-  await sendTelegramMessage(env, buildUpcomingPaymentsMessage(results));
   return results.length;
 }
-
-api.post("/api/telegram/test", async (c) => {
-  if (!c.env.TELEGRAM_BOT_TOKEN || !c.env.TELEGRAM_CHAT_ID) {
-    return c.json(
-      { error: "Telegram is not configured. Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID." },
-      400,
-    );
-  }
-  const email = c.get("email") ?? "unknown";
-  const now = new Date().toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" });
-  const text =
-    `🧪 <b>Telegram test message</b>\n` +
-    `Sent from the app settings.\n` +
-    `User: <code>${email}</code>\n` +
-    `Time: ${now}`;
-  await sendTelegramMessage(c.env, text);
-  return c.json({ ok: true });
-});
-
-api.post("/api/telegram/test-upcoming-payments", async (c) => {
-  if (!c.env.TELEGRAM_BOT_TOKEN || !c.env.TELEGRAM_CHAT_ID) {
-    return c.json(
-      { error: "Telegram is not configured. Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID." },
-      400,
-    );
-  }
-
-  const results = await getUpcomingPayments(c.env);
-  if (results.length === 0) {
-    await sendTelegramMessage(
-      c.env,
-      "💰 <b>Upcoming payments</b>\n\nNo payments due in the next 2 days.",
-    );
-    return c.json({ ok: true, count: 0 });
-  }
-
-  await sendTelegramMessage(c.env, buildUpcomingPaymentsMessage(results));
-  return c.json({ ok: true, count: results.length });
-});
 
 export { api };
 

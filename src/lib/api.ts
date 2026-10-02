@@ -179,9 +179,10 @@ export const api = {
     const r = await fetch(apiUrl("/api/business-settings/logo"), { headers: token ? { Authorization: `Bearer ${token}` } : {} });
     return r.ok ? r.blob() : null;
   },
-  sendTelegramTest: () => req<{ ok: boolean }>("POST", "/telegram/test"),
-  sendUpcomingPaymentsTelegramTest: () =>
-    req<{ ok: boolean; count: number }>("POST", "/telegram/test-upcoming-payments"),
+  getSmtpSettings: () => req<{ host: string; port: number; secure: number; username: string; from_name: string; from_email: string; base_url: string }>("GET", "/smtp-settings"),
+  saveSmtpSettings: (body: { host: string; port: number; secure: number; username: string; password: string; from_name: string; from_email: string; base_url: string }) =>
+    req<{ ok: boolean }>("PUT", "/smtp-settings", body),
+  testSmtp: () => req<{ ok: boolean }>("POST", "/smtp-settings/test"),
 
   getInvoices: () => req<(Invoice & { companies: { name: string | null; contact_person: string | null } | null })[]>("GET", "/invoices"),
   invoicesExistForMonth: (month: string) => req<{ exists: boolean }>("GET", `/invoices/exists?month=${encodeURIComponent(month)}`),

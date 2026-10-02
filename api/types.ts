@@ -37,6 +37,4 @@ export interface AppEnv {
   ALLOW_REGISTRATION?: string;
   CORS_ORIGIN?: string;
   CLIENT_IP?: string;
-  TELEGRAM_BOT_TOKEN?: string;
-  TELEGRAM_CHAT_ID?: string;
 }

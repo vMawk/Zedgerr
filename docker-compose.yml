@@ -14,5 +14,3 @@ services:
       # Optional settings: see the README for the full list.
       # ALLOW_REGISTRATION: "false"
       # OPENAI_API_KEY: ""
-      # TELEGRAM_BOT_TOKEN: ""
-      # TELEGRAM_CHAT_ID: ""

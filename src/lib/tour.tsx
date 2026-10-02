@@ -51,7 +51,7 @@ const STEPS: TourStep[] = [
   },
   {
     target: "nav-settings", route: "/settings", title: "Settings",
-    body: "Business details, country and tax settings, currency, mileage rate, services and team members. You can restart this tour from your profile menu.",
+    body: "Business details, tax, team members and email setup. Configure SMTP under Notifications so invite emails go out automatically. Restart this tour any time from your profile menu.",
   },
   {
     title: "You're all set",
