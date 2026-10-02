@@ -2,6 +2,7 @@ import { LayoutDashboard, Building2, Clock, FileText, FileCheck, BarChart3, Sett
 import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
+import { ZedgerrLogo } from "./ZedgerrLogo";
 import {
   Sidebar,
   SidebarContent,
@@ -39,8 +40,6 @@ const settingsItems = [
   { title: "Client Portal", url: "/portal", icon: MonitorSmartphone },
 ];
 
-const LOGO_SRC = "/zedgerr-logo.png";
-
 export function AppSidebar() {
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
@@ -52,14 +51,7 @@ export function AppSidebar() {
         <SidebarGroup>
           <SidebarGroupLabel className="px-3 py-3">
             <div className={cn("flex items-center", collapsed ? "justify-center" : "justify-start")}>
-              <img
-                src={LOGO_SRC}
-                alt="Zedgerr"
-                className={cn(
-                  "h-auto w-auto max-w-full object-contain object-left",
-                  collapsed ? "h-7 max-w-[1.75rem]" : "h-9",
-                )}
-              />
+              <ZedgerrLogo collapsed={collapsed} size={collapsed ? "sm" : "md"} />
             </div>
           </SidebarGroupLabel>
           <SidebarGroupContent>
