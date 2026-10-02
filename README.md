@@ -196,8 +196,19 @@ React 18, TypeScript, Vite, Tailwind CSS, shadcn/ui, Framer Motion, TanStack Que
 
 ## Contributing
 
-Issues and pull requests are welcome. For larger changes, please open an issue first to discuss the approach. New country presets are a great first contribution: see `src/lib/tax-presets.ts`.
+Issues and pull requests are welcome. For larger changes, open an issue first to discuss the approach. New country presets are a great first contribution — see `src/lib/tax-presets.ts`.
+
+👉 **[github.com/vMawk/Zedgerr](https://github.com/vMawk/Zedgerr)**
+
+## Support the project
+
+Zedgerr is built with love and maintained in our spare time. If it saves you time and money, consider supporting us so we can keep improving it:
+
+- ⭐ Star the repo — it helps more people find Zedgerr
+- 🐛 Report bugs or suggest features via [GitHub Issues](https://github.com/vMawk/Zedgerr/issues)
+- 💛 Sponsor the project on [GitHub Sponsors](https://github.com/sponsors/vMawk)
+- 🔀 Open a pull request — all contributions are welcome
 
 ## License
 
-[MIT](LICENSE) © Mark van Viegen
+[FSL-1.1-ALv2](LICENSE) © Mark van Viegen
