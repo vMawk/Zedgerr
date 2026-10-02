@@ -1,16 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
-import { Building2, Clock, Euro, FileText, Landmark, Loader2, Receipt, Send } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { NavLink } from "@/components/NavLink";
+import { Link } from "react-router-dom";
+import {
+  Building2, Clock, Euro, FileText, Landmark, Loader2, Receipt,
+  TrendingUp, TrendingDown, AlertCircle, ChevronRight,
+} from "lucide-react";
 import type { Company, Invoice, TimeEntry } from "@/lib/db-types";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { ChartContainer, ChartLegend, ChartLegendContent, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart";
-import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, XAxis, YAxis } from "recharts";
+import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart";
+import {
+  Area, AreaChart, Bar, BarChart, CartesianGrid, XAxis, YAxis,
+} from "recharts";
+import { cn } from "@/lib/utils";
 
 type PeriodPreset = "30d" | "90d" | "ytd" | "12m";
 type InvoiceWithCompany = Invoice & { companies: { name: string | null } | null };
@@ -20,47 +22,94 @@ type TimeEntryWithCompany = TimeEntry & { companies: Company | null };
 const STATUS_COLORS: Record<string, string> = {
   concept: "#3b82f6",
   verzonden: "#f59e0b",
-  betaald: "#10b981",
+  betaald: "#16a34a",
   vervallen: "#ef4444",
-  /** Originele factuur na splitsen — niet als ‘vervallen’ tellen in dit overzicht */
   gesplitst: "#6366f1",
 };
+const STATUS_LABELS: Record<string, string> = {
+  concept: "Concept",
+  verzonden: "Verzonden",
+  betaald: "Betaald",
+  vervallen: "Vervallen",
+  gesplitst: "Gesplitst",
+};
 
-/** Zelfde logica als facturenlijst: gesplitste hoofdfactuur niet als vervallen tonen. */
 function invoiceStatusForDashboard(inv: Invoice): string {
-  if (inv.status === "vervallen" && (inv.notes ?? "").toLowerCase().includes("gesplitst")) {
-    return "gesplitst";
-  }
+  if (inv.status === "vervallen" && (inv.notes ?? "").toLowerCase().includes("gesplitst")) return "gesplitst";
   return inv.status;
 }
-const periodLabels: Record<PeriodPreset, string> = { "30d": "Laatste 30 dagen", "90d": "Laatste 90 dagen", ytd: "Jaar tot nu", "12m": "Laatste 12 maanden" };
 
-function monthKeyFromDate(dateIso: string): string {
+const periodLabels: Record<PeriodPreset, string> = {
+  "30d": "Laatste 30 dagen",
+  "90d": "Laatste 90 dagen",
+  ytd: "Dit jaar",
+  "12m": "Laatste 12 maanden",
+};
+
+function monthKeyFromDate(dateIso: string) {
   const d = new Date(`${dateIso}T00:00:00`);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
-function monthLabel(key: string): string {
+function monthLabel(key: string) {
   const [year, month] = key.split("-");
   const d = new Date(Number(year), Number(month) - 1, 1);
-  return d.toLocaleDateString("nl-NL", { month: "short", year: "2-digit" });
+  return d.toLocaleDateString("nl-NL", { month: "short" });
 }
-function numberMoney(value: number): string {
+function fmt(value: number) {
+  if (value >= 1000) return `€${(value / 1000).toFixed(1)}k`;
+  return `€${value.toLocaleString("nl-NL", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+}
+function fmtFull(value: number) {
   return `€${value.toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
-function getPeriodRange(period: PeriodPreset): { from: string; to: string } {
+function getPeriodRange(period: PeriodPreset) {
   const now = new Date();
   const to = now.toISOString().split("T")[0];
   const fromDate = new Date(now);
   if (period === "30d") fromDate.setDate(fromDate.getDate() - 30);
-  if (period === "90d") fromDate.setDate(fromDate.getDate() - 90);
-  if (period === "12m") fromDate.setMonth(fromDate.getMonth() - 12);
-  if (period === "ytd") fromDate.setMonth(0, 1);
+  else if (period === "90d") fromDate.setDate(fromDate.getDate() - 90);
+  else if (period === "12m") fromDate.setMonth(fromDate.getMonth() - 12);
+  else fromDate.setMonth(0, 1);
   return { from: fromDate.toISOString().split("T")[0], to };
 }
 
+// Compact KPI card in Sypher style
+function KpiCard({
+  label, value, sub, icon: Icon, trend, positive,
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+  icon: React.ElementType;
+  trend?: number | null;
+  positive?: boolean;
+}) {
+  const trendUp = trend !== undefined && trend !== null && trend > 0;
+  const trendDown = trend !== undefined && trend !== null && trend < 0;
+  return (
+    <div className="bg-card border border-border rounded-lg p-4 flex flex-col gap-2">
+      <div className="flex items-center justify-between">
+        <span className="text-[11px] font-semibold tracking-wider text-muted-foreground uppercase">{label}</span>
+        <Icon className="h-3.5 w-3.5 text-muted-foreground" />
+      </div>
+      <div className="flex items-end gap-2">
+        <span className="text-2xl font-bold tabular-nums leading-none">{value}</span>
+        {trend !== null && trend !== undefined && (
+          <span className={cn("flex items-center gap-0.5 text-xs font-medium mb-0.5", trendUp ? (positive !== false ? "text-success" : "text-cost") : trendDown ? (positive !== false ? "text-cost" : "text-success") : "text-muted-foreground")}>
+            {trendUp ? <TrendingUp className="h-3 w-3" /> : trendDown ? <TrendingDown className="h-3 w-3" /> : null}
+            {Math.abs(trend).toFixed(1)}%
+          </span>
+        )}
+      </div>
+      {sub && <p className="text-xs text-muted-foreground">{sub}</p>}
+    </div>
+  );
+}
+
+type InvoiceTab = "all" | "betaald" | "verzonden" | "concept";
+
 export default function Dashboard() {
   const { user } = useAuth();
-  const [stats, setStats] = useState({ companies: 0, hoursThisMonth: 0, openInvoices: 0, revenue: 0 });
   const [companies, setCompanies] = useState<Company[]>([]);
   const [invoices, setInvoices] = useState<InvoiceWithCompany[]>([]);
   const [reportRows, setReportRows] = useState<ReportEntry[]>([]);
@@ -68,12 +117,10 @@ export default function Dashboard() {
   const [period, setPeriod] = useState<PeriodPreset>("12m");
   const [companyFilter, setCompanyFilter] = useState("all");
   const [loading, setLoading] = useState(true);
-  const [needsMonthInvoice, setNeedsMonthInvoice] = useState(false);
-  const [toSendCount, setToSendCount] = useState(0);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [customerTableSort, setCustomerTableSort] = useState<"revenue" | "hours">("revenue");
   const [btwQuarter, setBtwQuarter] = useState<{ verkoop_btw: number; inkoop_btw: number; saldo_btw: number } | null>(null);
   const [bankSaldo, setBankSaldo] = useState<number | null>(null);
+  const [invoiceTab, setInvoiceTab] = useState<InvoiceTab>("all");
 
   useEffect(() => {
     if (!user) return;
@@ -81,14 +128,12 @@ export default function Dashboard() {
     setLoading(true);
     setLoadError(null);
     Promise.all([
-      api.getDashboardStats(),
       api.getCompanies(),
       api.getInvoices(),
       api.getReportTimeEntries(from, to, companyFilter),
       api.getTimeEntries(companyFilter === "all" ? undefined : { company_id: companyFilter }),
     ])
-      .then(([statsRes, companiesRes, invoicesRes, reportRes, timeEntriesRes]) => {
-        setStats(statsRes);
+      .then(([companiesRes, invoicesRes, reportRes, timeEntriesRes]) => {
         setCompanies(companiesRes);
         setInvoices(invoicesRes);
         setReportRows(reportRes);
@@ -103,9 +148,9 @@ export default function Dashboard() {
     const now = new Date();
     const q = Math.ceil((now.getMonth() + 1) / 3);
     const qStarts = ["01-01", "04-01", "07-01", "10-01"];
-    const qEnds   = ["03-31", "06-30", "09-30", "12-31"];
+    const qEnds = ["03-31", "06-30", "09-30", "12-31"];
     const qFrom = `${now.getFullYear()}-${qStarts[q - 1]}`;
-    const qTo   = `${now.getFullYear()}-${qEnds[q - 1]}`;
+    const qTo = `${now.getFullYear()}-${qEnds[q - 1]}`;
     api.getTaxReport(qFrom, qTo).then(setBtwQuarter).catch(() => {});
   }, [user]);
 
@@ -114,39 +159,34 @@ export default function Dashboard() {
     api.getBankBalance().then((r) => setBankSaldo(r.saldo)).catch(() => {});
   }, [user]);
 
-  useEffect(() => {
-    if (!user) return;
-    const now = new Date();
-    if (now.getDate() < 25) {
-      setNeedsMonthInvoice(false);
-      setToSendCount(0);
-      return;
-    }
-    const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-    Promise.all([api.invoicesExistForMonth(month), api.invoicesToSend(month)])
-      .then(([existsRes, toSendRes]) => {
-        setNeedsMonthInvoice(!existsRes.exists);
-        setToSendCount(toSendRes.count);
-      })
-      .catch(() => {
-        setNeedsMonthInvoice(false);
-        setToSendCount(0);
-      });
-  }, [user]);
+  const filteredInvoices = useMemo(
+    () => (companyFilter === "all" ? invoices : invoices.filter((inv) => inv.company_id === companyFilter)),
+    [companyFilter, invoices],
+  );
 
-  const filteredInvoices = useMemo(() => (companyFilter === "all" ? invoices : invoices.filter((inv) => inv.company_id === companyFilter)), [companyFilter, invoices]);
+  const kpis = useMemo(() => {
+    const paid = filteredInvoices.filter((i) => i.status === "betaald");
+    const open = filteredInvoices.filter((i) => i.status === "concept" || i.status === "verzonden");
+    const paidAmount = paid.reduce((s, i) => s + Math.max(0, Number(i.total) - Number(i.advance_payment ?? 0)), 0);
+    const openAmount = open.reduce((s, i) => s + Math.max(0, Number(i.total) - Number(i.advance_payment ?? 0)), 0);
+    const hours = reportRows.reduce((s, r) => s + Number(r.hours), 0);
+    const total = paidAmount + openAmount;
+    return { paidAmount, openAmount, openCount: open.length, paidCount: paid.length, hours, total };
+  }, [filteredInvoices, reportRows]);
 
   const revenueByMonth = useMemo(() => {
-    const grouped = new Map<string, { month: string; paid: number; open: number }>();
+    const grouped = new Map<string, { month: string; betaald: number; open: number }>();
     for (const inv of filteredInvoices) {
       const key = monthKeyFromDate(inv.invoice_date);
-      if (!grouped.has(key)) grouped.set(key, { month: key, paid: 0, open: 0 });
+      if (!grouped.has(key)) grouped.set(key, { month: key, betaald: 0, open: 0 });
       const row = grouped.get(key)!;
-      const netAmount = Math.max(0, Number(inv.total) - Number(inv.advance_payment ?? 0));
-      if (inv.status === "betaald") row.paid += netAmount;
-      if (inv.status === "concept" || inv.status === "verzonden") row.open += netAmount;
+      const net = Math.max(0, Number(inv.total) - Number(inv.advance_payment ?? 0));
+      if (inv.status === "betaald") row.betaald += net;
+      if (inv.status === "concept" || inv.status === "verzonden") row.open += net;
     }
-    return [...grouped.values()].sort((a, b) => a.month.localeCompare(b.month)).map((r) => ({ ...r, label: monthLabel(r.month), paid: Number(r.paid.toFixed(2)), open: Number(r.open.toFixed(2)) }));
+    return [...grouped.values()]
+      .sort((a, b) => a.month.localeCompare(b.month))
+      .map((r) => ({ ...r, label: monthLabel(r.month), betaald: +r.betaald.toFixed(2), open: +r.open.toFixed(2) }));
   }, [filteredInvoices]);
 
   const hoursByMonth = useMemo(() => {
@@ -157,313 +197,334 @@ export default function Dashboard() {
       const key = monthKeyFromDate(row.date);
       grouped.set(key, (grouped.get(key) ?? 0) + Number(row.hours));
     }
-    return [...grouped.entries()].map(([month, hours]) => ({ month, label: monthLabel(month), hours: Number(hours.toFixed(1)) }));
+    return [...grouped.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([month, hours]) => ({ label: monthLabel(month), hours: +hours.toFixed(1) }));
   }, [period, timeEntries]);
 
-  const statusDistribution = useMemo(() => {
-    const grouped = new Map<string, number>();
-    for (const inv of filteredInvoices) {
-      const key = invoiceStatusForDashboard(inv);
-      grouped.set(key, (grouped.get(key) ?? 0) + 1);
-    }
-    return [...grouped.entries()].map(([status, count]) => ({ status, count, fill: STATUS_COLORS[status] ?? "#94a3b8" }));
+  // Invoice table filtered by tab
+  const invoiceTableRows = useMemo(() => {
+    const recent = [...filteredInvoices].sort((a, b) => b.invoice_date.localeCompare(a.invoice_date)).slice(0, 50);
+    if (invoiceTab === "all") return recent;
+    return recent.filter((i) => invoiceStatusForDashboard(i) === invoiceTab);
+  }, [filteredInvoices, invoiceTab]);
+
+  const invoiceCounts = useMemo(() => {
+    return {
+      all: filteredInvoices.length,
+      betaald: filteredInvoices.filter((i) => i.status === "betaald").length,
+      verzonden: filteredInvoices.filter((i) => i.status === "verzonden").length,
+      concept: filteredInvoices.filter((i) => i.status === "concept").length,
+    };
   }, [filteredInvoices]);
 
-  const customersHoursRevenue = useMemo(() => {
-    const grouped = new Map<string, { customer: string; hours: number; revenue: number }>();
+  // Customer summary
+  const customerSummary = useMemo(() => {
+    const grouped = new Map<string, { name: string; hours: number; revenue: number }>();
     for (const row of reportRows) {
-      const customer = row.company_name ?? "Onbekend";
-      if (!grouped.has(customer)) grouped.set(customer, { customer, hours: 0, revenue: 0 });
-      const agg = grouped.get(customer)!;
-      const hours = Number(row.hours);
+      const name = row.company_name ?? "Onbekend";
+      if (!grouped.has(name)) grouped.set(name, { name, hours: 0, revenue: 0 });
+      const agg = grouped.get(name)!;
+      const h = Number(row.hours);
       const rate = Number(row.hourly_rate ?? row.default_hourly_rate ?? 0);
-      agg.hours += hours;
-      agg.revenue += hours * rate;
+      agg.hours += h;
+      agg.revenue += h * rate;
     }
-    return [...grouped.values()].map((r) => ({
-      ...r,
-      hours: Number(r.hours.toFixed(1)),
-      revenue: Number(r.revenue.toFixed(2)),
-    }));
+    return [...grouped.values()].sort((a, b) => b.revenue - a.revenue).slice(0, 6);
   }, [reportRows]);
 
-  const topCustomers = useMemo(
-    () => [...customersHoursRevenue].sort((a, b) => b.revenue - a.revenue).slice(0, 5),
-    [customersHoursRevenue],
-  );
-
-  const customersTableSorted = useMemo(() => {
-    const arr = [...customersHoursRevenue];
-    arr.sort((a, b) => (customerTableSort === "revenue" ? b.revenue - a.revenue : b.hours - a.hours));
-    return arr;
-  }, [customersHoursRevenue, customerTableSort]);
-
-  const kpis = useMemo(() => {
-    const openAmount = filteredInvoices.filter((inv) => inv.status === "concept" || inv.status === "verzonden").reduce((sum, inv) => sum + Math.max(0, Number(inv.total) - Number(inv.advance_payment ?? 0)), 0);
-    const paidRevenue = filteredInvoices.filter((inv) => inv.status === "betaald").reduce((sum, inv) => sum + Math.max(0, Number(inv.total) - Number(inv.advance_payment ?? 0)), 0);
-    const hours = reportRows.reduce((sum, r) => sum + Number(r.hours), 0);
-    return {
-      clientsCount: companyFilter === "all" ? companies.length : filteredInvoices.reduce((acc, inv) => acc.add(inv.company_id), new Set<string>()).size,
-      openAmount,
-      paidRevenue,
-      hours,
-      openInvoicesCount: filteredInvoices.filter((inv) => inv.status === "concept" || inv.status === "verzonden").length,
-    };
-  }, [companies.length, companyFilter, filteredInvoices, reportRows]);
-
-  const revenueChartConfig: ChartConfig = { paid: { label: "Betaald", color: "#10b981" }, open: { label: "Openstaand", color: "#f59e0b" } };
-  const hoursChartConfig: ChartConfig = { hours: { label: "Uren", color: "#3b82f6" } };
-  const statusChartConfig: ChartConfig = {
-    concept: { label: "Concept", color: STATUS_COLORS.concept },
-    verzonden: { label: "Verzonden", color: STATUS_COLORS.verzonden },
-    betaald: { label: "Betaald", color: STATUS_COLORS.betaald },
-    vervallen: { label: "Vervallen", color: STATUS_COLORS.vervallen },
-    gesplitst: { label: "Gesplitst", color: STATUS_COLORS.gesplitst },
+  const revenueChartConfig: ChartConfig = {
+    betaald: { label: "Betaald", color: "hsl(142 71% 38%)" },
+    open: { label: "Openstaand", color: "hsl(38 92% 50%)" },
   };
-  const topCustomersConfig: ChartConfig = { revenue: { label: "Omzet", color: "#8b5cf6" } };
+  const hoursChartConfig: ChartConfig = {
+    hours: { label: "Uren", color: "hsl(220 13% 55%)" },
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-24 text-muted-foreground gap-2">
+        <Loader2 className="h-5 w-5 animate-spin" />
+        <span className="text-sm">Laden…</span>
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
+      {/* Header */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="text-2xl font-semibold">Dashboard</h1>
+        <div>
+          <h1 className="text-xl font-semibold">Dashboard</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">{periodLabels[period]}</p>
+        </div>
         <div className="flex flex-wrap gap-2">
           <Select value={period} onValueChange={(v) => setPeriod(v as PeriodPreset)}>
-            <SelectTrigger className="w-[180px]"><SelectValue /></SelectTrigger>
+            <SelectTrigger className="h-8 text-sm w-[160px]"><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="30d">{periodLabels["30d"]}</SelectItem>
-              <SelectItem value="90d">{periodLabels["90d"]}</SelectItem>
-              <SelectItem value="ytd">{periodLabels.ytd}</SelectItem>
-              <SelectItem value="12m">{periodLabels["12m"]}</SelectItem>
+              {(Object.keys(periodLabels) as PeriodPreset[]).map((p) => (
+                <SelectItem key={p} value={p}>{periodLabels[p]}</SelectItem>
+              ))}
             </SelectContent>
           </Select>
           <Select value={companyFilter} onValueChange={setCompanyFilter}>
-            <SelectTrigger className="w-[220px]"><SelectValue /></SelectTrigger>
+            <SelectTrigger className="h-8 text-sm w-[180px]"><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">Alle bedrijven</SelectItem>
-              {companies.map((company) => <SelectItem key={company.id} value={company.id}>{company.name || company.contact_person || "Klant"}</SelectItem>)}
+              <SelectItem value="all">Alle klanten</SelectItem>
+              {companies.map((c) => (
+                <SelectItem key={c.id} value={c.id}>{c.name || c.contact_person || "Klant"}</SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>
       </div>
 
       {loadError && (
-        <Alert>
-          <AlertTitle>Dashboard kon niet volledig laden</AlertTitle>
-          <AlertDescription>{loadError}</AlertDescription>
-        </Alert>
+        <div className="flex items-center gap-2 rounded-lg border border-destructive/40 bg-destructive/8 px-4 py-3 text-sm text-destructive">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          {loadError}
+        </div>
       )}
 
-      {toSendCount > 0 && (
-        <Alert>
-          <AlertTitle>Facturen klaar om te versturen</AlertTitle>
-          <AlertDescription className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <p>Je hebt <span className="font-medium text-foreground">{toSendCount}</span> conceptfactuur{toSendCount === 1 ? "" : "en"} voor deze maand.</p>
-            <Button asChild size="sm" className="w-fit"><NavLink to="/facturen">Naar facturen</NavLink></Button>
-          </AlertDescription>
-        </Alert>
-      )}
-      {needsMonthInvoice && (
-        <Alert>
-          <AlertTitle>Einde van de maand nadert</AlertTitle>
-          <AlertDescription className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <p>Je hebt nog geen factuur voor deze maand aangemaakt.</p>
-            <Button asChild size="sm" className="w-fit"><NavLink to="/facturen">Factuur aanmaken</NavLink></Button>
-          </AlertDescription>
-        </Alert>
-      )}
+      {/* KPI row */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        <KpiCard
+          label="Omzet ontvangen"
+          value={fmt(kpis.paidAmount)}
+          sub={`${kpis.paidCount} facturen`}
+          icon={Euro}
+          positive
+        />
+        <KpiCard
+          label="Openstaand"
+          value={fmt(kpis.openAmount)}
+          sub={`${kpis.openCount} facturen`}
+          icon={FileText}
+          positive={false}
+        />
+        <KpiCard
+          label="Banksaldo"
+          value={bankSaldo !== null ? (bankSaldo < 0 ? `−${fmt(Math.abs(bankSaldo))}` : fmt(bankSaldo)) : "—"}
+          icon={Landmark}
+          positive={bankSaldo === null || bankSaldo >= 0}
+        />
+        <KpiCard
+          label="Uren periode"
+          value={kpis.hours.toFixed(1)}
+          icon={Clock}
+        />
+        <KpiCard
+          label="Klanten"
+          value={String(companies.length)}
+          icon={Building2}
+        />
+        <KpiCard
+          label={`BTW Q${Math.ceil((new Date().getMonth() + 1) / 3)}`}
+          value={btwQuarter !== null ? fmt(Math.max(0, btwQuarter.saldo_btw)) : "—"}
+          sub={btwQuarter?.inkoop_btw ? `−${fmt(btwQuarter.inkoop_btw)} aftrek` : "Huidig kwartaal"}
+          icon={Receipt}
+          positive={false}
+        />
+      </div>
 
-      {loading ? (
-        <Card>
-          <CardContent className="py-10 flex items-center gap-3 text-muted-foreground">
-            <Loader2 className="h-5 w-5 animate-spin" />
-            Dashboard laden...
-          </CardContent>
-        </Card>
-      ) : (
-        <>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7">
-            <Card className={`xl:col-span-1 ${bankSaldo !== null && bankSaldo < 0 ? "border-red-400/50" : bankSaldo !== null && bankSaldo >= 0 ? "border-green-400/40" : ""}`}>
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">
-                  <NavLink to="/bankrekening" className="hover:underline">Banksaldo</NavLink>
-                </CardTitle>
-                <Landmark className={`h-4 w-4 ${bankSaldo !== null && bankSaldo < 0 ? "text-red-500" : "text-muted-foreground"}`} />
-              </CardHeader>
-              <CardContent>
-                <div className={`text-2xl font-bold tabular-nums ${bankSaldo !== null && bankSaldo < 0 ? "text-red-500" : bankSaldo !== null && bankSaldo > 0 ? "text-green-600 dark:text-green-400" : ""}`}>
-                  {bankSaldo !== null ? `${bankSaldo < 0 ? "−" : ""}€${Math.abs(bankSaldo).toLocaleString("nl-NL", { minimumFractionDigits: 2 })}` : "—"}
-                </div>
-              </CardContent>
-            </Card>
-            <Card><CardHeader className="flex flex-row items-center justify-between pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Klanten in beeld</CardTitle><Building2 className="h-4 w-4 text-muted-foreground" /></CardHeader><CardContent><div className="text-2xl font-bold">{kpis.clientsCount}</div></CardContent></Card>
-            <Card><CardHeader className="flex flex-row items-center justify-between pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Uren in periode</CardTitle><Clock className="h-4 w-4 text-muted-foreground" /></CardHeader><CardContent><div className="text-2xl font-bold">{kpis.hours.toFixed(1)}</div></CardContent></Card>
-            <Card><CardHeader className="flex flex-row items-center justify-between pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Openstaande facturen</CardTitle><FileText className="h-4 w-4 text-muted-foreground" /></CardHeader><CardContent><div className="text-2xl font-bold">{kpis.openInvoicesCount}</div><p className="text-xs text-muted-foreground mt-1">{numberMoney(kpis.openAmount)}</p></CardContent></Card>
-            <Card><CardHeader className="flex flex-row items-center justify-between pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Omzet ontvangen</CardTitle><Euro className="h-4 w-4 text-muted-foreground" /></CardHeader><CardContent><div className="text-2xl font-bold">{numberMoney(kpis.paidRevenue)}</div></CardContent></Card>
-            <Card><CardHeader className="flex flex-row items-center justify-between pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Klaar om te sturen</CardTitle><Send className="h-4 w-4 text-muted-foreground" /></CardHeader><CardContent><div className="text-2xl font-bold">{toSendCount}</div></CardContent></Card>
-            <Card className={btwQuarter && btwQuarter.saldo_btw > 0 ? "border-amber-400/50 bg-amber-50/30 dark:bg-amber-950/20" : ""}>
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">
-                  BTW reserveren Q{Math.ceil((new Date().getMonth() + 1) / 3)}
-                </CardTitle>
-                <Receipt className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className={`text-2xl font-bold tabular-nums ${btwQuarter && btwQuarter.saldo_btw > 0 ? "text-amber-700 dark:text-amber-400" : ""}`}>
-                  {btwQuarter !== null ? numberMoney(Math.max(0, btwQuarter.saldo_btw)) : "—"}
-                </div>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {btwQuarter
-                    ? btwQuarter.inkoop_btw > 0
-                      ? `Excl. €${btwQuarter.inkoop_btw.toFixed(2)} aftrek`
-                      : "Huidig kwartaal"
-                    : "Laden…"}
-                </p>
-              </CardContent>
-            </Card>
-          </div>
+      {/* Main two-column layout */}
+      <div className="grid gap-4 xl:grid-cols-[1fr_380px]">
 
-          <div className="grid gap-4 xl:grid-cols-2">
-            <Card>
-              <CardHeader><CardTitle className="text-base">Omzettrend (betaald/open)</CardTitle></CardHeader>
-              <CardContent>
-                {revenueByMonth.length === 0 ? <p className="text-sm text-muted-foreground">Geen factuurdata voor deze filters.</p> : (
-                  <ChartContainer config={revenueChartConfig} className="h-72 w-full">
-                    <BarChart data={revenueByMonth}>
-                      <CartesianGrid vertical={false} />
-                      <XAxis dataKey="label" tickLine={false} axisLine={false} />
-                      <YAxis tickLine={false} axisLine={false} width={80} tickFormatter={(v) => `€${Number(v).toFixed(0)}`} />
-                      <ChartTooltip content={<ChartTooltipContent />} />
-                      <ChartLegend content={<ChartLegendContent />} />
-                      <Bar dataKey="paid" fill="var(--color-paid)" radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="open" fill="var(--color-open)" radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ChartContainer>
-                )}
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader><CardTitle className="text-base">Urentrend</CardTitle></CardHeader>
-              <CardContent>
-                {hoursByMonth.length === 0 ? <p className="text-sm text-muted-foreground">Geen urendata voor deze filters.</p> : (
-                  <ChartContainer config={hoursChartConfig} className="h-72 w-full">
-                    <LineChart data={hoursByMonth}>
-                      <CartesianGrid vertical={false} />
-                      <XAxis dataKey="label" tickLine={false} axisLine={false} />
-                      <YAxis tickLine={false} axisLine={false} width={48} />
-                      <ChartTooltip content={<ChartTooltipContent />} />
-                      <Line dataKey="hours" stroke="var(--color-hours)" strokeWidth={2.5} dot={false} />
-                    </LineChart>
-                  </ChartContainer>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-
-          <div className="grid gap-4 xl:grid-cols-2">
-            <Card>
-              <CardHeader><CardTitle className="text-base">Factuurstatus verdeling</CardTitle></CardHeader>
-              <CardContent>
-                {statusDistribution.length === 0 ? <p className="text-sm text-muted-foreground">Geen statusdata beschikbaar.</p> : (
-                  <ChartContainer config={statusChartConfig} className="h-72 w-full">
-                    <PieChart>
-                      <Pie data={statusDistribution} dataKey="count" nameKey="status" innerRadius={70} outerRadius={100}>
-                        {statusDistribution.map((entry) => <Cell key={entry.status} fill={entry.fill} />)}
-                      </Pie>
-                      <ChartTooltip content={<ChartTooltipContent nameKey="status" />} />
-                      <ChartLegend content={<ChartLegendContent nameKey="status" />} />
-                    </PieChart>
-                  </ChartContainer>
-                )}
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader><CardTitle className="text-base">Top klanten op omzet</CardTitle></CardHeader>
-              <CardContent>
-                {topCustomers.length === 0 ? <p className="text-sm text-muted-foreground">Nog geen klantomzet in deze periode.</p> : (
-                  <ChartContainer config={topCustomersConfig} className="h-72 w-full">
-                    <BarChart data={topCustomers} layout="vertical" margin={{ left: 8, right: 8 }}>
-                      <CartesianGrid horizontal={false} />
-                      <XAxis type="number" tickLine={false} axisLine={false} tickFormatter={(v) => `€${Number(v).toFixed(0)}`} />
-                      <YAxis type="category" dataKey="customer" tickLine={false} axisLine={false} width={120} />
-                      <ChartTooltip content={<ChartTooltipContent formatter={(value) => numberMoney(Number(value))} />} />
-                      <Bar dataKey="revenue" fill="var(--color-revenue)" radius={[0, 6, 6, 0]} />
-                    </BarChart>
-                  </ChartContainer>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-
-          <Card>
-            <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        {/* LEFT column */}
+        <div className="space-y-4 min-w-0">
+          {/* Revenue chart */}
+          <div className="bg-card border border-border rounded-lg p-4">
+            <div className="flex items-center justify-between mb-4">
               <div>
-                <CardTitle className="text-base">Uren en omzet per klant</CardTitle>
-                <p className="text-sm text-muted-foreground font-normal mt-1">
-                  Zelfde periode en filters als hierboven. Omzet = uren × tarief (regeltarief of standaardtarief klant).
-                </p>
+                <h2 className="text-sm font-semibold">Omzet en openstaand</h2>
+                <p className="text-xs text-muted-foreground mt-0.5">Betaald vs. openstaand per maand</p>
               </div>
-              <div className="flex gap-2 shrink-0">
-                <Button
-                  type="button"
-                  variant={customerTableSort === "revenue" ? "secondary" : "outline"}
-                  size="sm"
-                  onClick={() => setCustomerTableSort("revenue")}
-                >
-                  Sorteer op omzet
-                </Button>
-                <Button
-                  type="button"
-                  variant={customerTableSort === "hours" ? "secondary" : "outline"}
-                  size="sm"
-                  onClick={() => setCustomerTableSort("hours")}
-                >
-                  Sorteer op uren
-                </Button>
+              <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-success" />Betaald</span>
+                <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-warning" />Openstaand</span>
               </div>
-            </CardHeader>
-            <CardContent>
-              {customersTableSorted.length === 0 ? (
-                <p className="text-sm text-muted-foreground">Geen uren in deze periode voor de gekozen filters.</p>
+            </div>
+            {revenueByMonth.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-12 text-center">Geen factuurdata voor deze filters.</p>
+            ) : (
+              <ChartContainer config={revenueChartConfig} className="h-56 w-full">
+                <AreaChart data={revenueByMonth} margin={{ top: 4, right: 0, bottom: 0, left: 0 }}>
+                  <defs>
+                    <linearGradient id="gradBetaald" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="hsl(142 71% 38%)" stopOpacity={0.2} />
+                      <stop offset="95%" stopColor="hsl(142 71% 38%)" stopOpacity={0} />
+                    </linearGradient>
+                    <linearGradient id="gradOpen" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="hsl(38 92% 50%)" stopOpacity={0.15} />
+                      <stop offset="95%" stopColor="hsl(38 92% 50%)" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid vertical={false} stroke="hsl(var(--border))" />
+                  <XAxis dataKey="label" tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
+                  <YAxis tickLine={false} axisLine={false} width={60} tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} tickFormatter={fmt} />
+                  <ChartTooltip content={<ChartTooltipContent formatter={(v) => fmtFull(Number(v))} />} />
+                  <Area dataKey="betaald" stroke="hsl(142 71% 38%)" strokeWidth={2} fill="url(#gradBetaald)" dot={false} />
+                  <Area dataKey="open" stroke="hsl(38 92% 50%)" strokeWidth={2} fill="url(#gradOpen)" dot={false} />
+                </AreaChart>
+              </ChartContainer>
+            )}
+          </div>
+
+          {/* Hours chart + Customer table side by side */}
+          <div className="grid gap-4 md:grid-cols-2">
+            {/* Hours chart */}
+            <div className="bg-card border border-border rounded-lg p-4">
+              <h2 className="text-sm font-semibold mb-1">Uren per maand</h2>
+              <p className="text-xs text-muted-foreground mb-4">Gelogde uren in de geselecteerde periode</p>
+              {hoursByMonth.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-8 text-center">Geen urendata.</p>
               ) : (
-                <div className="rounded-md border overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Klant</TableHead>
-                        <TableHead className="text-right">Uren</TableHead>
-                        <TableHead className="text-right">Omzet</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {customersTableSorted.map((row) => (
-                        <TableRow key={row.customer}>
-                          <TableCell className="font-medium">{row.customer}</TableCell>
-                          <TableCell className="text-right">{row.hours.toLocaleString("nl-NL")}</TableCell>
-                          <TableCell className="text-right">{numberMoney(row.revenue)}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                <ChartContainer config={hoursChartConfig} className="h-44 w-full">
+                  <BarChart data={hoursByMonth} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
+                    <CartesianGrid vertical={false} stroke="hsl(var(--border))" />
+                    <XAxis dataKey="label" tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
+                    <YAxis tickLine={false} axisLine={false} width={32} tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
+                    <ChartTooltip content={<ChartTooltipContent />} />
+                    <Bar dataKey="hours" fill="hsl(var(--muted-foreground))" radius={[3, 3, 0, 0]} opacity={0.6} />
+                  </BarChart>
+                </ChartContainer>
+              )}
+            </div>
+
+            {/* Customer revenue */}
+            <div className="bg-card border border-border rounded-lg p-4">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-sm font-semibold">Klanten omzet</h2>
+                <Link to="/overzichten" className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-0.5 transition-colors">
+                  Alles <ChevronRight className="h-3 w-3" />
+                </Link>
+              </div>
+              {customerSummary.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-8 text-center">Geen data.</p>
+              ) : (
+                <div className="space-y-2.5">
+                  {customerSummary.map((c) => {
+                    const maxRev = customerSummary[0].revenue;
+                    const pct = maxRev > 0 ? (c.revenue / maxRev) * 100 : 0;
+                    return (
+                      <div key={c.name}>
+                        <div className="flex items-center justify-between text-xs mb-1">
+                          <span className="font-medium truncate max-w-[140px]">{c.name}</span>
+                          <span className="text-muted-foreground tabular-nums">{fmtFull(c.revenue)}</span>
+                        </div>
+                        <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                          <div className="h-full bg-success rounded-full" style={{ width: `${pct}%` }} />
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
-            </CardContent>
-          </Card>
+            </div>
+          </div>
+        </div>
 
-          <Card>
-            <CardHeader><CardTitle className="text-base">Samenvatting voor {periodLabels[period]}</CardTitle></CardHeader>
-            <CardContent className="grid gap-1 text-sm">
-              <p className="text-muted-foreground">Snel overzicht op basis van de gekozen filters:</p>
-              <p>- Klanten: <span className="font-medium text-foreground">{kpis.clientsCount}</span></p>
-              <p>- Uren: <span className="font-medium text-foreground">{kpis.hours.toFixed(1)}</span></p>
-              <p>- Openstaand: <span className="font-medium text-foreground">{numberMoney(kpis.openAmount)}</span></p>
-              <p>- Ontvangen: <span className="font-medium text-foreground">{numberMoney(kpis.paidRevenue)}</span></p>
-              <p className="text-xs text-muted-foreground mt-2">
-                Basisstatistieken deze maand: {stats.hoursThisMonth.toFixed(1)} uur, {stats.openInvoices} open facturen, {numberMoney(stats.revenue)} betaald.
-              </p>
-            </CardContent>
-          </Card>
-        </>
-      )}
+        {/* RIGHT column — Invoices panel */}
+        <div className="bg-card border border-border rounded-lg flex flex-col min-h-[500px]">
+          <div className="p-4 border-b border-border">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-semibold">Facturen</h2>
+              <Link to="/facturen" className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-0.5 transition-colors">
+                Bekijk alles <ChevronRight className="h-3 w-3" />
+              </Link>
+            </div>
+            {/* Amount summary bar */}
+            <div className="flex items-center gap-4 mb-3">
+              <div>
+                <p className="text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">Betaald</p>
+                <p className="text-lg font-bold tabular-nums text-success">{fmt(kpis.paidAmount)}</p>
+              </div>
+              <div>
+                <p className="text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">Openstaand</p>
+                <p className="text-lg font-bold tabular-nums text-warning">{fmt(kpis.openAmount)}</p>
+              </div>
+            </div>
+            {/* Progress bar */}
+            {kpis.total > 0 && (
+              <div className="h-1.5 bg-muted rounded-full overflow-hidden flex">
+                <div className="h-full bg-success" style={{ width: `${(kpis.paidAmount / kpis.total) * 100}%` }} />
+                <div className="h-full bg-warning" style={{ width: `${(kpis.openAmount / kpis.total) * 100}%` }} />
+              </div>
+            )}
+          </div>
+
+          {/* Tabs */}
+          <div className="flex border-b border-border">
+            {(["all", "betaald", "verzonden", "concept"] as InvoiceTab[]).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setInvoiceTab(tab)}
+                className={cn(
+                  "px-3 py-2.5 text-xs font-medium transition-colors border-b-2 -mb-px whitespace-nowrap",
+                  invoiceTab === tab
+                    ? "border-success text-success"
+                    : "border-transparent text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {tab === "all" ? "Alles" : STATUS_LABELS[tab]}
+                <span className={cn("ml-1.5 rounded-full px-1.5 py-0.5 text-[10px]", invoiceTab === tab ? "bg-success/15" : "bg-muted")}>
+                  {invoiceCounts[tab]}
+                </span>
+              </button>
+            ))}
+          </div>
+
+          {/* Invoice list */}
+          <div className="flex-1 overflow-y-auto">
+            {invoiceTableRows.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-10">Geen facturen.</p>
+            ) : (
+              <table className="w-full text-xs">
+                <thead className="sticky top-0 bg-card z-10">
+                  <tr className="border-b border-border">
+                    <th className="text-left px-4 py-2 font-medium text-muted-foreground">Klant</th>
+                    <th className="text-left px-2 py-2 font-medium text-muted-foreground">Datum</th>
+                    <th className="text-right px-4 py-2 font-medium text-muted-foreground">Bedrag</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {invoiceTableRows.map((inv) => {
+                    const status = invoiceStatusForDashboard(inv);
+                    const color = STATUS_COLORS[status] ?? "#94a3b8";
+                    const net = Math.max(0, Number(inv.total) - Number(inv.advance_payment ?? 0));
+                    const companyName = inv.companies?.name ?? inv.invoice_number;
+                    const initials = (companyName ?? "?").slice(0, 2).toUpperCase();
+                    return (
+                      <tr key={inv.id} className="border-b border-border/50 hover:bg-muted/30 transition-colors">
+                        <td className="px-4 py-2.5">
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <span
+                              className="h-6 w-6 rounded-full flex items-center justify-center text-white text-[9px] font-bold shrink-0"
+                              style={{ backgroundColor: color + "33", color }}
+                            >
+                              {initials}
+                            </span>
+                            <div className="min-w-0">
+                              <p className="font-medium truncate">{companyName || "—"}</p>
+                              <p className="text-muted-foreground">{inv.invoice_number}</p>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-2 py-2.5 text-muted-foreground whitespace-nowrap">
+                          {new Date(inv.invoice_date).toLocaleDateString("nl-NL", { day: "numeric", month: "short" })}
+                        </td>
+                        <td className="px-4 py-2.5 text-right font-medium tabular-nums whitespace-nowrap">
+                          {fmtFull(net)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
