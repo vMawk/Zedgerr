@@ -7,7 +7,8 @@ export type AuthUser = { id: string; email: string };
 interface AuthContextType {
   user: AuthUser | null;
   loading: boolean;
-  signIn: (email: string, password: string) => Promise<void>;
+  /** Resolves with requires2fa when the account needs an authenticator code; call again with the code. */
+  signIn: (email: string, password: string, code?: string) => Promise<{ requires2fa: boolean }>;
   signUp: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
 }
@@ -34,11 +35,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .finally(() => setLoading(false));
   }, []);
 
-  const signIn = useCallback(async (email: string, password: string) => {
+  const signIn = useCallback(async (email: string, password: string, code?: string) => {
     const r = await fetch(apiUrl("/api/auth/login"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: email.trim(), password }),
+      body: JSON.stringify({ email: email.trim(), password, code: code?.trim() || undefined }),
     });
     if (!r.ok) {
       let msg = await r.text();
@@ -48,11 +49,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } catch {
         /* use raw */
       }
-      throw new Error(msg || "Inloggen mislukt");
+      throw new Error(msg || "Sign-in failed");
     }
-    const data = (await r.json()) as { token: string; user: AuthUser };
+    const data = (await r.json()) as { token?: string; user?: AuthUser; requires_2fa?: boolean };
+    if (data.requires_2fa || !data.token || !data.user) return { requires2fa: true };
     setStoredToken(data.token);
     setUser(data.user);
+    return { requires2fa: false };
   }, []);
 
   const signUp = useCallback(async (email: string, password: string) => {
@@ -69,7 +72,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } catch {
         /* use raw */
       }
-      throw new Error(msg || "Registreren mislukt");
+      throw new Error(msg || "Registration failed");
     }
     const data = (await r.json()) as { token: string; user: AuthUser };
     setStoredToken(data.token);
