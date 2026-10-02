@@ -2,6 +2,58 @@ import Database from "better-sqlite3";
 import { readdirSync, readFileSync } from "fs";
 import { join } from "path";
 
+/**
+ * Split a SQL file into individual statements.
+ * Correctly handles CREATE TRIGGER bodies (BEGIN ... END;) which contain semicolons.
+ */
+function splitSqlStatements(sql: string): string[] {
+  const statements: string[] = [];
+  let buf = "";
+  let depth = 0;
+
+  for (const line of sql.split("\n")) {
+    const trimmed = line.trim();
+
+    // Skip blank/comment-only lines when buffer is empty
+    if ((trimmed === "" || trimmed.startsWith("--")) && buf.trim() === "") continue;
+
+    buf += line + "\n";
+
+    const upper = trimmed.toUpperCase();
+
+    // Detect BEGIN — either on its own line or at the end of a CREATE TRIGGER line
+    if (upper === "BEGIN" || upper.endsWith(" BEGIN")) {
+      depth++;
+      continue;
+    }
+
+    if (depth > 0) {
+      // Inside a trigger body — look for END;
+      if (upper === "END;" || upper === "END") {
+        depth--;
+        if (depth === 0) {
+          const stmt = buf.trim();
+          if (stmt) statements.push(stmt);
+          buf = "";
+        }
+      }
+      continue;
+    }
+
+    // Outside trigger body: split on lines ending with ;
+    if (trimmed.endsWith(";") && !trimmed.startsWith("--")) {
+      const stmt = buf.trim();
+      if (stmt) statements.push(stmt);
+      buf = "";
+    }
+  }
+
+  const remaining = buf.trim();
+  if (remaining) statements.push(remaining);
+
+  return statements.filter((s) => s.length > 0 && !s.startsWith("--"));
+}
+
 export function runMigrations(db: Database.Database, migrationsDir: string): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS _cf_migrations (
@@ -25,10 +77,18 @@ export function runMigrations(db: Database.Database, migrationsDir: string): voi
     console.log(`  Applying migration: ${file}`);
 
     try {
-      db.exec(sql);
+      const statements = splitSqlStatements(sql);
+      for (const stmt of statements) {
+        try {
+          db.exec(stmt);
+        } catch (stmtErr) {
+          const msg = stmtErr instanceof Error ? stmtErr.message : String(stmtErr);
+          console.error(`  FAILED statement:\n${stmt}\n  Error: ${msg}`);
+          throw stmtErr;
+        }
+      }
       db.prepare("INSERT INTO _cf_migrations (name) VALUES (?)").run(file);
     } catch (err) {
-      // Migration already applied (e.g. table exists) — mark as done and continue
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes("already exists") || msg.includes("duplicate column")) {
         db.prepare("INSERT OR IGNORE INTO _cf_migrations (name) VALUES (?)").run(file);

@@ -34,6 +34,35 @@ function toMoney(value: unknown, fallback = 0): number {
   return Math.round(n * 100) / 100;
 }
 
+async function logAudit(
+  db: Env["DB"],
+  userId: string,
+  entityType: string,
+  entityId: string,
+  action: "create" | "update" | "delete",
+  oldData: unknown,
+  newData: unknown,
+): Promise<void> {
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  await db
+    .prepare(
+      `INSERT INTO audit_log (id, user_id, entity_type, entity_id, action, old_data, new_data, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(
+      id,
+      userId,
+      entityType,
+      entityId,
+      action,
+      oldData != null ? JSON.stringify(oldData) : null,
+      newData != null ? JSON.stringify(newData) : null,
+      now,
+    )
+    .run();
+}
+
 function parseSubscriptionTags(value: unknown): string[] {
   if (!value) return [];
   const raw = String(value);
@@ -1068,6 +1097,7 @@ api.post("/api/invoices", async (c) => {
       .bind(updatedAdvanceBalance, now, req.company_id, userId),
   ]);
   const row = await c.env.DB.prepare("SELECT * FROM invoices WHERE id = ?").bind(id).first();
+  await logAudit(c.env.DB, userId, "invoice", id, "create", null, row);
   return c.json(row);
 });
 
@@ -1132,6 +1162,7 @@ api.patch("/api/invoices/:id", async (c) => {
     .run();
 
   const row = await c.env.DB.prepare("SELECT * FROM invoices WHERE id = ? AND user_id = ?").bind(id, userId).first();
+  await logAudit(c.env.DB, userId, "invoice", id, "update", existing, row);
   return c.json(row);
 });
 
@@ -1275,6 +1306,7 @@ api.delete("/api/invoices/:id", async (c) => {
     .first<{ id: string; company_id: string; advance_payment: number }>();
   if (!invoice) return c.json({ error: "Not found" }, 404);
   const restoreAdvance = Math.max(0, toMoney(invoice.advance_payment, 0));
+  await logAudit(c.env.DB, userId, "invoice", id, "delete", invoice, null);
   await c.env.DB.batch([
     c.env.DB.prepare("UPDATE time_entries SET invoiced = 0, invoice_id = NULL, updated_at = ? WHERE invoice_id = ? AND user_id = ?").bind(now, id, userId),
     c.env.DB
@@ -1855,13 +1887,14 @@ api.post("/api/expenses", async (c) => {
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).bind(bankId, userId, req.date, bankDesc, -inclVat, "uitgave", null, id, now).run();
   const row = await c.env.DB.prepare("SELECT * FROM expenses WHERE id = ?").bind(id).first();
+  await logAudit(c.env.DB, userId, "expense", id, "create", null, row);
   return c.json(row);
 });
 
 api.patch("/api/expenses/:id", async (c) => {
   const userId = c.get("userId")!;
   const { id } = c.req.param();
-  const existing = await c.env.DB.prepare("SELECT id FROM expenses WHERE id = ? AND user_id = ?").bind(id, userId).first();
+  const existing = await c.env.DB.prepare("SELECT * FROM expenses WHERE id = ? AND user_id = ?").bind(id, userId).first();
   if (!existing) return c.json({ error: "Not found" }, 404);
   const req = await c.req.json<Record<string, unknown>>();
   const now = new Date().toISOString();
@@ -1881,12 +1914,15 @@ api.patch("/api/expenses/:id", async (c) => {
     `UPDATE bank_transactions SET date = ?, description = ?, amount = ?, type = ? WHERE expense_id = ? AND user_id = ?`,
   ).bind(req.date, bankDesc, -inclVat, "uitgave", id, userId).run();
   const row = await c.env.DB.prepare("SELECT * FROM expenses WHERE id = ?").bind(id).first();
+  await logAudit(c.env.DB, userId, "expense", id, "update", existing, row);
   return c.json(row);
 });
 
 api.delete("/api/expenses/:id", async (c) => {
   const userId = c.get("userId")!;
   const { id } = c.req.param();
+  const existing = await c.env.DB.prepare("SELECT * FROM expenses WHERE id = ? AND user_id = ?").bind(id, userId).first();
+  await logAudit(c.env.DB, userId, "expense", id, "delete", existing, null);
   await c.env.DB.prepare("DELETE FROM bank_transactions WHERE expense_id = ? AND user_id = ?").bind(id, userId).run();
   await c.env.DB.prepare("DELETE FROM expenses WHERE id = ? AND user_id = ?").bind(id, userId).run();
   return c.body(null, 204);
@@ -2044,6 +2080,20 @@ api.delete("/api/mileage/:id", async (c) => {
 });
 
 // --- Bankrekening ---
+api.get("/api/audit-log", async (c) => {
+  const userId = c.get("userId")!;
+  const { entity_type, entity_id, limit: limitStr } = c.req.query();
+  const limit = Math.min(parseInt(limitStr ?? "100", 10), 500);
+  let sql = "SELECT * FROM audit_log WHERE user_id = ?";
+  const params: unknown[] = [userId];
+  if (entity_type) { sql += " AND entity_type = ?"; params.push(entity_type); }
+  if (entity_id)   { sql += " AND entity_id = ?";   params.push(entity_id); }
+  sql += " ORDER BY created_at DESC LIMIT ?";
+  params.push(limit);
+  const { results } = await c.env.DB.prepare(sql).bind(...params).all();
+  return c.json(results ?? []);
+});
+
 api.get("/api/bank-transactions", async (c) => {
   const userId = c.get("userId")!;
   const { from, to } = c.req.query();
@@ -2075,25 +2125,29 @@ api.post("/api/bank-transactions", async (c) => {
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   ).bind(id, userId, req.date, req.description, Number(req.amount), req.type ?? "overig", req.notes ?? null, now).run();
   const row = await c.env.DB.prepare("SELECT * FROM bank_transactions WHERE id = ?").bind(id).first();
+  await logAudit(c.env.DB, userId, "bank_transaction", id, "create", null, row);
   return c.json(row);
 });
 
 api.patch("/api/bank-transactions/:id", async (c) => {
   const userId = c.get("userId")!;
   const { id } = c.req.param();
-  const exists = await c.env.DB.prepare("SELECT id FROM bank_transactions WHERE id = ? AND user_id = ?").bind(id, userId).first();
-  if (!exists) return c.json({ error: "Not found" }, 404);
+  const existing = await c.env.DB.prepare("SELECT * FROM bank_transactions WHERE id = ? AND user_id = ?").bind(id, userId).first();
+  if (!existing) return c.json({ error: "Not found" }, 404);
   const req = await c.req.json<Record<string, unknown>>();
   await c.env.DB.prepare(
     `UPDATE bank_transactions SET date = ?, description = ?, amount = ?, type = ?, notes = ? WHERE id = ? AND user_id = ?`,
   ).bind(req.date, req.description, Number(req.amount), req.type ?? "overig", req.notes ?? null, id, userId).run();
   const row = await c.env.DB.prepare("SELECT * FROM bank_transactions WHERE id = ?").bind(id).first();
+  await logAudit(c.env.DB, userId, "bank_transaction", id, "update", existing, row);
   return c.json(row);
 });
 
 api.delete("/api/bank-transactions/:id", async (c) => {
   const userId = c.get("userId")!;
   const { id } = c.req.param();
+  const existing = await c.env.DB.prepare("SELECT * FROM bank_transactions WHERE id = ? AND user_id = ?").bind(id, userId).first();
+  await logAudit(c.env.DB, userId, "bank_transaction", id, "delete", existing, null);
   await c.env.DB.prepare("DELETE FROM bank_transactions WHERE id = ? AND user_id = ?").bind(id, userId).run();
   return c.body(null, 204);
 });
