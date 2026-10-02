@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   LayoutDashboard, Building2, Clock, FileText, FileCheck, BarChart3,
   Settings, LogOut, NotebookPen, RepeatIcon, Users, Package, Receipt,
-  Calculator, Car, Landmark, BookOpen, PieChart, ChevronDown, Menu, X, Compass, Search,
+  Calculator, Car, Landmark, BookOpen, PieChart, ChevronDown, Menu, X, Compass, Search, Github,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { useOnboarding } from "./OnboardingProvider";
@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { ZedgerrLogo } from "./ZedgerrLogo";
 import { ThemeToggle } from "./ThemeToggle";
 import { openCommandPalette, isMac } from "./CommandPalette";
+import { AboutDialog } from "./AboutDialog";
 
 type NavItem = { title: string; url: string; icon: React.ElementType };
 
@@ -49,6 +50,7 @@ export function AppTopNav() {
   const [moreOpen, setMoreOpen] = useState(false);
   const [userOpen, setUserOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
   const moreRef = useRef<HTMLDivElement>(null);
   const userRef = useRef<HTMLDivElement>(null);
 
@@ -173,6 +175,14 @@ export function AppTopNav() {
             Search
             <kbd className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px]">{isMac ? "⌘" : "Ctrl"} K</kbd>
           </button>
+          <button
+            onClick={() => setAboutOpen(true)}
+            className="hidden md:flex items-center justify-center h-8 w-8 rounded-md text-[hsl(var(--nav-fg))] hover:text-[hsl(var(--nav-fg-active))] hover:bg-[hsl(var(--secondary))] transition-colors"
+            aria-label="Open source & community"
+            title="Open source & community"
+          >
+            <Github className="h-4 w-4" />
+          </button>
           <ThemeToggle />
           {/* Settings */}
           <Link
@@ -229,6 +239,8 @@ export function AppTopNav() {
           </button>
         </div>
       </header>
+
+      <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} />
 
       {/* Mobile menu overlay */}
       {mobileOpen && (
