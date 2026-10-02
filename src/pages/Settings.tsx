@@ -836,7 +836,7 @@ export default function Settings() {
                 </div>
                 <div className="grid gap-1.5 sm:col-span-2">
                   <Label>App URL <span className="text-muted-foreground font-normal text-xs">(used in invite links)</span></Label>
-                  <Input placeholder="https://invoices.example.com" value={smtp.base_url} onChange={(e) => setSmtp((s) => ({ ...s, base_url: e.target.value }))} />
+                  <Input placeholder="https://invoices.example.com" value={smtp.base_url} onChange={(e) => setSmtp((s) => ({ ...s, base_url: e.target.value }))} onBlur={(e) => { const v = e.target.value.trim(); if (v && !/^https?:\/\//i.test(v)) setSmtp((s) => ({ ...s, base_url: `https://${v}` })); }} />
                 </div>
                 <div className="flex items-center gap-2 sm:col-span-2">
                   <input type="checkbox" id="smtp-tls" checked={smtp.secure === 1} onChange={(e) => setSmtp((s) => ({ ...s, secure: e.target.checked ? 1 : 0 }))} className="h-4 w-4 rounded border-input accent-primary" />

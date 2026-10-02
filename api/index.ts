@@ -3225,7 +3225,9 @@ api.post("/api/org/invite", async (c) => {
         secure: smtp.secure === 1,
         auth: smtp.username ? { user: smtp.username, pass: smtp.password } : undefined,
       });
-      const inviteUrl = `${smtp.base_url.replace(/\/$/, "")}/invite?token=${token}`;
+      const baseUrl = smtp.base_url.replace(/\/$/, "");
+      const baseUrlNorm = /^https?:\/\//i.test(baseUrl) ? baseUrl : `http://${baseUrl}`;
+      const inviteUrl = `${baseUrlNorm}/invite?token=${token}`;
       const roleLabel = role.charAt(0).toUpperCase() + role.slice(1);
       const expiryDate = new Date(expiresAt).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
       await transport.sendMail({
