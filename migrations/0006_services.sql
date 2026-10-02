@@ -1,4 +1,4 @@
--- Diensten/catalogus: vaste bedragen om facturen op te baseren.
+-- Service catalogue: fixed amounts to add to invoices.
 CREATE TABLE services (
   id TEXT PRIMARY KEY NOT NULL,
   user_id TEXT NOT NULL,

@@ -53,9 +53,9 @@ interface InvoiceLineDraft {
   hours: string;
   hourly_rate: string;
   amount: string;
-  /** datum voor deze regel (uren gebruiken de urendatum, rest de factuurdatum) */
+  /** Line date: time entries keep their own date, other lines use the invoice date. */
   date: string | null;
-  /** gekoppelde urenregistratie — wordt na aanmaken op 'gefactureerd' gezet */
+  /** Linked time entry, marked as invoiced once the invoice is created. */
   time_entry_id: string | null;
 }
 
@@ -109,7 +109,7 @@ export default function Invoices() {
   const [paymentMethod, setPaymentMethod] = useState<"overboeking" | "contant">("overboeking");
   const [creating, setCreating] = useState(false);
 
-  // Inline product aanmaken/bewerken (zelfde als op de klantpagina)
+  // Inline product create/edit, same as on the client page
   const [productOpen, setProductOpen] = useState(false);
   const [editProduct, setEditProduct] = useState<CompanyProduct | null>(null);
   const [productForm, setProductForm] = useState(emptyProductForm);
@@ -190,7 +190,7 @@ export default function Invoices() {
     return `F${year}-${String(count).padStart(4, "0")}`;
   };
 
-  // ---- Regel-helpers (zelfde model als offertes) ----
+  // Line helpers, shared model with quotes
   const updateLine = (index: number, field: keyof InvoiceLineDraft, value: string) => {
     setLines((prev) => {
       const updated = [...prev];
@@ -271,7 +271,7 @@ export default function Invoices() {
   const validLines = () => lines.filter((l) => l.description.trim() || (parseFloat(l.amount) || 0) > 0);
   const invoiceSubtotal = () => round2(validLines().reduce((sum, l) => sum + (parseFloat(l.amount) || 0), 0));
 
-  // Inline product aanmaken/bewerken
+  // Inline product create/edit
   const openNewProduct = () => {
     setEditProduct(null);
     setProductForm(emptyProductForm);
@@ -525,7 +525,7 @@ export default function Invoices() {
 
   const selectedCompanyObj = companies.find((c) => c.id === selectedCompany);
   const availableAdvance = round2(Math.max(0, Number(selectedCompanyObj?.advance_balance ?? 0)));
-  // Uren die nog niet als regel zijn toegevoegd
+  // Unbilled hours that are not on the invoice yet
   const addedEntryIds = new Set(lines.map((l) => l.time_entry_id).filter(Boolean));
   const pickableEntries = uninvoicedEntries.filter((e) => !addedEntryIds.has(e.id));
 
@@ -558,7 +558,7 @@ export default function Invoices() {
                 </Select>
               </div>
 
-              {/* Lines — uren, producten en diensten samen op één factuur */}
+              {/* Lines: hours, products and services on one invoice */}
               <div className="grid gap-2">
                 <div className="flex items-center justify-between gap-2">
                   <Label>Lines</Label>
@@ -597,7 +597,7 @@ export default function Invoices() {
 
               {selectedCompany && (
                 <div className="grid gap-3">
-                  {/* Uren van klant */}
+                  {/* Client hours */}
                   <div className="grid gap-2 rounded-md border p-3 bg-muted/20">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
                       <Label className="mb-0 flex items-center gap-1.5"><Clock className="h-3.5 w-3.5" />Unbilled hours</Label>
@@ -628,7 +628,7 @@ export default function Invoices() {
                     )}
                   </div>
 
-                  {/* Producten van klant */}
+                  {/* Client products */}
                   <div className="grid gap-2 rounded-md border p-3 bg-muted/20">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
                       <Label className="mb-0 flex items-center gap-1.5"><Package className="h-3.5 w-3.5" />Client products</Label>
@@ -689,7 +689,7 @@ export default function Invoices() {
                     )}
                   </div>
 
-                  {/* Dienst */}
+                  {/* Service */}
                   {services.length > 0 && (
                     <div className="grid gap-2 rounded-md border p-3 bg-muted/20">
                       <Label className="mb-0 flex items-center gap-1.5"><Briefcase className="h-3.5 w-3.5" />Service (fixed amount)</Label>
@@ -832,7 +832,7 @@ export default function Invoices() {
           </DialogContent>
         </Dialog>
 
-        {/* Inline product aanmaken/bewerken */}
+        {/* Inline product create/edit */}
         <Dialog open={productOpen} onOpenChange={(v) => { setProductOpen(v); if (!v) setEditProduct(null); }}>
           <DialogContent className="max-w-sm">
             <DialogHeader>

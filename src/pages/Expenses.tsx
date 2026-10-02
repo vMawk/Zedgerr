@@ -323,7 +323,7 @@ export default function Expenses() {
             </Table>
           </Card>
 
-          {/* Totaalbalk */}
+          {/* Totals bar */}
           <div className="flex justify-end">
             <div className="rounded-lg border bg-muted/30 px-5 py-3 text-sm space-y-1 min-w-64">
               <div className="flex justify-between gap-8">

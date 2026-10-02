@@ -1,4 +1,4 @@
--- Producten per klant: eigen verkoopprijs en inkoopprijs.
+-- Products per client with their own sales and cost price.
 CREATE TABLE company_products (
   id TEXT PRIMARY KEY NOT NULL,
   user_id TEXT NOT NULL,

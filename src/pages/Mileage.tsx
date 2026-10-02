@@ -152,7 +152,7 @@ export default function Mileage() {
             </DialogHeader>
             <div className="grid gap-4 py-2">
 
-              {/* Datum + zakelijk/privé */}
+              {/* Date and business/private */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">
                   <Label>Date *</Label>
@@ -179,7 +179,7 @@ export default function Mileage() {
                 </div>
               </div>
 
-              {/* Van / Naar */}
+              {/* From / to */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">
                   <Label>Start address</Label>
@@ -248,7 +248,7 @@ export default function Mileage() {
                 </div>
               </div>
 
-              {/* Doel */}
+              {/* Purpose */}
               <div className="grid gap-2">
                 <Label>Purpose of trip *</Label>
                 <div className="flex flex-wrap gap-1.5 mb-1">
@@ -283,7 +283,7 @@ export default function Mileage() {
         </Dialog>
       </div>
 
-      {/* Periode filter */}
+      {/* Period filter */}
       <div className="flex flex-wrap gap-4 items-end">
         <div className="grid gap-1.5">
           <Label className="text-xs text-muted-foreground">From</Label>
@@ -295,7 +295,7 @@ export default function Mileage() {
         </div>
       </div>
 
-      {/* Statistieken */}
+      {/* Totals */}
       {entries.length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <Card>
@@ -325,7 +325,7 @@ export default function Mileage() {
         </div>
       )}
 
-      {/* Tabel */}
+      {/* Table */}
       {entries.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12 text-muted-foreground">

@@ -1,12 +1,12 @@
--- Phase 7: Multi-org + RBAC
+-- Organizations and role-based access
 --
--- Strategie: voor bestaande gebruikers geldt org.id = users.id (de eigenaar).
--- Daarmee hoeft geen bestaande user_id-kolom te worden gewijzigd.
--- Nieuwe teamleden krijgen een JWT met org_id = de eigenaar-user-id,
--- zodat alle WHERE user_id = ? queries transparant blijven werken.
+-- For existing users org.id equals users.id (the owner),
+-- so no existing user_id column has to change.
+-- Team members get a token with org_id set to the owner's user id,
+-- so every WHERE user_id = ? query keeps working unchanged.
 
 CREATE TABLE organizations (
-  id            TEXT PRIMARY KEY NOT NULL,   -- = owner user_id voor bestaande accounts
+  id            TEXT PRIMARY KEY NOT NULL,   -- equals the owner's user_id for existing accounts
   name          TEXT NOT NULL,
   owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
   plan          TEXT NOT NULL DEFAULT 'free' CHECK(plan IN ('free','pro','enterprise')),

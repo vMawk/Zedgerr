@@ -1,11 +1,11 @@
 export type InvoiceType = "business" | "private" | "reverse_charge";
 
-/** Types voor D1 / SQLite (Worker API). */
+/** Row types returned by the API. */
 
 export type Company = {
   id: string;
   user_id: string;
-  /** Gezet door API: klantenportaal actief voor dit bedrijf */
+  /** Set by the API when the client portal is enabled for this company. */
   has_portal?: boolean;
   name: string | null;
   contact_person: string | null;

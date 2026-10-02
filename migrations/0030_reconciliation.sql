@@ -1,6 +1,6 @@
--- Phase 5: bankafschrift reconciliatie
--- Voegt reconciliation-status toe aan bank_transactions.
--- bank_transaction_id FK op invoices en expenses voor directe koppeling.
+-- Bank statement reconciliation
+-- Adds reconciliation status to bank_transactions
+-- and a bank_transaction_id link on invoices and expenses.
 
 ALTER TABLE bank_transactions ADD COLUMN reconciled        INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE bank_transactions ADD COLUMN reconciled_at     TEXT;

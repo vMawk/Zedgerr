@@ -18,9 +18,14 @@ dist-ssr
 .env.*
 !.env.example
 
-# Local SQLite database, uploads and database dumps (contain real customer data)
+# Local SQLite database, uploads, backups and dumps (contain real customer data)
 data/
 .db-dumps/
+*.sql
+!migrations/*.sql
+*.db
+*.db-wal
+*.db-shm
 
 # Large media
 *.mp4

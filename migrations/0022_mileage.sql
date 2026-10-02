@@ -1,4 +1,4 @@
--- Kilometerregistratie voor belastingaftrek (€0,23/km zakelijk).
+-- Mileage log for business travel allowances.
 CREATE TABLE mileage_entries (
   id TEXT PRIMARY KEY NOT NULL,
   user_id TEXT NOT NULL,

@@ -1,4 +1,4 @@
--- SQLite / D1 — app schema (TEXT ids = UUIDs, REAL = numeric).
+-- SQLite schema (TEXT ids are UUIDs).
 -- Timestamps stored as ISO-8601 strings; booleans as INTEGER 0/1.
 
 CREATE TABLE business_settings (

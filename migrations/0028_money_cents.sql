@@ -1,8 +1,8 @@
--- Shadow INTEGER cents-kolommen voor exacte money-rekening.
--- REAL-kolommen blijven bestaan (backwards compat); *_cents zijn de canonieke waarden.
--- SQLite-triggers houden *_cents automatisch in sync — geen app-code nodig.
+-- Integer cents columns for exact money calculations.
+-- The REAL columns stay for compatibility; the *_cents columns are the source of truth.
+-- Triggers keep the *_cents columns in sync automatically.
 
--- ── invoices ────────────────────────────────────────────────────────────────
+-- invoices
 ALTER TABLE invoices ADD COLUMN subtotal_cents          INTEGER;
 ALTER TABLE invoices ADD COLUMN btw_amount_cents        INTEGER;
 ALTER TABLE invoices ADD COLUMN total_cents             INTEGER;
@@ -35,7 +35,7 @@ BEGIN
   WHERE id = NEW.id;
 END;
 
--- ── invoice_lines ───────────────────────────────────────────────────────────
+-- invoice_lines
 ALTER TABLE invoice_lines ADD COLUMN amount_cents INTEGER;
 
 UPDATE invoice_lines SET
@@ -54,7 +54,7 @@ WHEN NEW.amount != OLD.amount BEGIN
   WHERE id = NEW.id;
 END;
 
--- ── expenses ────────────────────────────────────────────────────────────────
+-- expenses
 ALTER TABLE expenses ADD COLUMN amount_excl_vat_cents INTEGER;
 ALTER TABLE expenses ADD COLUMN vat_amount_cents      INTEGER;
 ALTER TABLE expenses ADD COLUMN amount_incl_vat_cents INTEGER;
@@ -81,7 +81,7 @@ WHEN NEW.amount_excl_vat != OLD.amount_excl_vat OR NEW.amount_incl_vat != OLD.am
   WHERE id = NEW.id;
 END;
 
--- ── bank_transactions ────────────────────────────────────────────────────────
+-- bank_transactions
 ALTER TABLE bank_transactions ADD COLUMN amount_cents INTEGER;
 
 UPDATE bank_transactions SET
@@ -100,7 +100,7 @@ WHEN NEW.amount != OLD.amount BEGIN
   WHERE id = NEW.id;
 END;
 
--- ── quotes ───────────────────────────────────────────────────────────────────
+-- quotes
 ALTER TABLE quotes ADD COLUMN subtotal_cents   INTEGER;
 ALTER TABLE quotes ADD COLUMN btw_amount_cents INTEGER;
 ALTER TABLE quotes ADD COLUMN total_cents      INTEGER;

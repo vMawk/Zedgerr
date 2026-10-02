@@ -1,4 +1,4 @@
--- Auth: e-mail + PBKDF2-hash; JWT in Worker.
+-- Authentication: email with PBKDF2 password hash.
 CREATE TABLE users (
   id TEXT PRIMARY KEY NOT NULL,
   email TEXT NOT NULL UNIQUE COLLATE NOCASE,

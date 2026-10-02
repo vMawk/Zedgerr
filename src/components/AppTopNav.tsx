@@ -106,7 +106,7 @@ export function AppTopNav() {
             );
           })}
 
-          {/* Meer dropdown */}
+          {/* More dropdown */}
           <div ref={moreRef} className="relative">
             <button
               onClick={() => setMoreOpen((v) => !v)}

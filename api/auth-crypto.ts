@@ -1,5 +1,5 @@
 /** PBKDF2-SHA-256 via Web Crypto API. */
-/** Workers cap `deriveBits` PBKDF2 iterations (ca. 100k); hoger geeft een exception → 500 op register/login. */
+/** PBKDF2 iteration count. Changing it only affects new hashes; the count is stored with every hash. */
 const ITERATIONS = 100_000;
 const SALT_BYTES = 16;
 const KEY_BITS = 256;

@@ -1,13 +1,13 @@
--- Phase 4: dubbel boekhouden — rekeningschema, journaalposten, boekhoudperioden.
+-- Double-entry bookkeeping: chart of accounts, journal entries and accounting periods.
 --
--- Ontwerp:
---   chart_of_accounts     — hiërarchisch rekeningschema per user
---   accounting_periods    — boekhoudperioden per user (maand/kwartaal/jaar)
---   journal_entries       — journaalpost-headers
---   journal_entry_lines   — regels (debet/credit, altijd gesaldeerd)
+-- Tables:
+--   chart_of_accounts     chart of accounts per user
+--   accounting_periods    accounting periods per user (month or quarter)
+--   journal_entries       journal entry headers
+--   journal_entry_lines   debit and credit lines, always balanced
 --
--- Bedragen in INTEGER cents (geen REAL floating-point problemen).
--- is_system = 1: standaard NL-rekeningen die niet verwijderd kunnen worden.
+-- Amounts are stored as integer cents to avoid floating-point errors.
+-- is_system = 1 marks default accounts that cannot be deleted.
 
 CREATE TABLE chart_of_accounts (
   id              TEXT PRIMARY KEY NOT NULL,
@@ -25,12 +25,12 @@ CREATE TABLE chart_of_accounts (
 CREATE UNIQUE INDEX idx_coa_user_number ON chart_of_accounts(user_id, account_number);
 CREATE INDEX        idx_coa_user        ON chart_of_accounts(user_id);
 
--- ── Boekhoudperioden ──────────────────────────────────────────────────────────
+-- Accounting periods
 CREATE TABLE accounting_periods (
   id          TEXT PRIMARY KEY NOT NULL,
   user_id     TEXT NOT NULL,
   year        INTEGER NOT NULL,
-  period      INTEGER NOT NULL,   -- 1-12 (maand) of 1-4 (kwartaal)
+  period      INTEGER NOT NULL,   -- 1-12 (month) or 1-4 (quarter)
   period_type TEXT NOT NULL DEFAULT 'month' CHECK(period_type IN ('month','quarter','year')),
   status      TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','locked')),
   starts_on   TEXT NOT NULL,
@@ -41,14 +41,14 @@ CREATE TABLE accounting_periods (
 CREATE UNIQUE INDEX idx_periods_user_year_period ON accounting_periods(user_id, year, period, period_type);
 CREATE INDEX        idx_periods_user              ON accounting_periods(user_id);
 
--- ── Journaalposten ────────────────────────────────────────────────────────────
+-- Journal entries
 CREATE TABLE journal_entries (
   id           TEXT PRIMARY KEY NOT NULL,
   user_id      TEXT NOT NULL,
   period_id    TEXT REFERENCES accounting_periods(id) ON DELETE SET NULL,
   entry_date   TEXT NOT NULL,
   description  TEXT NOT NULL,
-  reference    TEXT,                      -- bijv. factuur-id of uitgave-id
+  reference    TEXT,                      -- for example an invoice or expense id
   reference_type TEXT,                   -- 'invoice','expense','bank_transaction'
   created_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -57,7 +57,7 @@ CREATE INDEX idx_journal_entries_user       ON journal_entries(user_id, entry_da
 CREATE INDEX idx_journal_entries_reference  ON journal_entries(reference_type, reference);
 CREATE INDEX idx_journal_entries_period     ON journal_entries(period_id);
 
--- ── Journaalpost-regels ───────────────────────────────────────────────────────
+-- Journal entry lines
 CREATE TABLE journal_entry_lines (
   id               TEXT PRIMARY KEY NOT NULL,
   journal_entry_id TEXT NOT NULL REFERENCES journal_entries(id) ON DELETE CASCADE,
@@ -71,5 +71,5 @@ CREATE TABLE journal_entry_lines (
 CREATE INDEX idx_jel_entry   ON journal_entry_lines(journal_entry_id);
 CREATE INDEX idx_jel_account ON journal_entry_lines(account_id);
 
--- ── Standaard NL rekeningschema (per user aangemaakt bij registratie) ─────────
--- Seeding via worker/index.ts seedDefaultChartOfAccounts(); hier alleen structuur.
+-- Default chart of accounts (created per user at registration)
+-- Seeded by seedDefaultChartOfAccounts() in api/index.ts; this file only defines the structure.

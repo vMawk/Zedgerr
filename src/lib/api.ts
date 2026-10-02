@@ -168,6 +168,17 @@ export const api = {
 
   getBusinessSettings: () => req<BusinessSettings | null>("GET", "/business-settings"),
   putBusinessSettings: (body: Record<string, unknown>) => req<BusinessSettings>("PUT", "/business-settings", body),
+  uploadLogo: (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return apiRequest<{ ok: boolean }>("/api/business-settings/logo", { method: "POST", body: form });
+  },
+  deleteLogo: () => apiRequest<{ ok: boolean }>("/api/business-settings/logo", { method: "DELETE" }),
+  getLogoBlob: async (): Promise<Blob | null> => {
+    const token = getStoredToken();
+    const r = await fetch(apiUrl("/api/business-settings/logo"), { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+    return r.ok ? r.blob() : null;
+  },
   sendTelegramTest: () => req<{ ok: boolean }>("POST", "/telegram/test"),
   sendUpcomingPaymentsTelegramTest: () =>
     req<{ ok: boolean; count: number }>("POST", "/telegram/test-upcoming-payments"),

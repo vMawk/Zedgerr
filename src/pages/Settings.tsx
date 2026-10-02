@@ -15,6 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ThemePicker } from "@/components/ThemeToggle";
 import { TwoFactorCard } from "@/components/settings/TwoFactorCard";
+import { LogoUpload } from "@/components/settings/LogoUpload";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Bell, Building2, Package, Palette, Percent, ShieldCheck, Users } from "lucide-react";
 import { SORTED_PRESETS, OTHER_PRESET, presetFor, rateOptions, bankAccountLabel } from "@/lib/tax-presets";
@@ -322,6 +323,10 @@ export default function Settings() {
           <CardDescription>Used on invoices and quotes</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          <div className="grid gap-2">
+            <Label>Logo</Label>
+            <LogoUpload />
+          </div>
           <div className="grid gap-2">
             <Label>Company name</Label>
             <Input value={form.company_name} onChange={(e) => updateField("company_name", e.target.value)} />

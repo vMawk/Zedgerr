@@ -2,6 +2,7 @@ import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import type { BusinessSettings, Company, Invoice, InvoiceLine, Quote, QuoteLine } from "@/lib/db-types";
 import { currencySymbol } from "@/lib/tax";
+import { api } from "@/lib/api";
 import { REVERSE_CHARGE_NOTE, presetFor, bankAccountLabel } from "@/lib/tax-presets";
 
 // jsPDF's built-in fonts only cover WinAnsi, so symbols like ₹ fall back to the ISO code.
@@ -52,9 +53,40 @@ function clientLines(company: Company | null, tax: string): string[] {
   ].filter((l): l is string => Boolean(l));
 }
 
-function drawHeader(doc: jsPDF, name: string | null | undefined, lines: string[]): number {
+type PdfLogo = { dataUrl: string; format: "PNG" | "JPEG"; w: number; h: number };
+
+async function loadBusinessLogo(settings: BusinessSettings | null): Promise<PdfLogo | null> {
+  if (!settings?.logo_url) return null;
+  try {
+    const blob = await api.getLogoBlob();
+    if (!blob) return null;
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+    const { width, height } = await new Promise<{ width: number; height: number }>((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
+      img.onerror = reject;
+      img.src = dataUrl;
+    });
+    const maxW = 50;
+    const maxH = 18;
+    const scale = Math.min(maxW / width, maxH / height);
+    return { dataUrl, format: blob.type === "image/png" ? "PNG" : "JPEG", w: width * scale, h: height * scale };
+  } catch {
+    return null;
+  }
+}
+
+function drawHeader(doc: jsPDF, name: string | null | undefined, lines: string[], logo: PdfLogo | null = null): number {
   let y = 22;
-  if (name) {
+  if (logo) {
+    doc.addImage(logo.dataUrl, logo.format, 20, 14, logo.w, logo.h);
+    y = 14 + logo.h + 8;
+  } else if (name) {
     doc.setFont("helvetica", "bold");
     doc.setFontSize(14);
     doc.text(name, 20, y);
@@ -86,7 +118,7 @@ export async function generateInvoicePDF(
         [settings?.private_postal_code, settings?.private_city].filter(Boolean).join(" "),
         settings?.private_country,
       ].filter((l): l is string => Boolean(l)))
-    : drawHeader(doc, settings?.company_name, ownBusinessLines(settings, tax));
+    : drawHeader(doc, settings?.company_name, ownBusinessLines(settings, tax), await loadBusinessLogo(settings));
 
   doc.setFontSize(24);
   doc.setFont("helvetica", "bold");
@@ -210,7 +242,7 @@ export async function generateQuotePDF(
   const money = moneyFormatter(settings);
   const tax = taxLabel(settings);
 
-  const headerEnd = drawHeader(doc, settings?.company_name, ownBusinessLines(settings, tax));
+  const headerEnd = drawHeader(doc, settings?.company_name, ownBusinessLines(settings, tax), await loadBusinessLogo(settings));
 
   doc.setFontSize(24);
   doc.setFont("helvetica", "bold");

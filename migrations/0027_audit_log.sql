@@ -1,6 +1,6 @@
--- Audit log: registreert alle mutaties op financiële entiteiten.
--- user_id: wie de actie uitvoerde (app-level; niet via trigger omdat triggers geen session-context hebben).
--- old_data / new_data: JSON snapshot van de rij voor/na de mutatie.
+-- Audit log of every change to financial records.
+-- user_id is set by the app, not a trigger, because triggers have no session context.
+-- old_data and new_data hold JSON snapshots of the row before and after the change.
 
 CREATE TABLE audit_log (
   id          TEXT PRIMARY KEY NOT NULL,

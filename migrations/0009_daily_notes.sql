@@ -1,4 +1,4 @@
--- Dagelijkse notities per gebruiker (autosave).
+-- Daily notes per user (autosaved).
 CREATE TABLE daily_notes (
   id TEXT PRIMARY KEY NOT NULL,
   user_id TEXT NOT NULL,

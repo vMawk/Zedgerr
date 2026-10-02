@@ -1,7 +1,9 @@
 {
   "name": "zedgerr",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
+  "license": "FSL-1.1-ALv2",
+  "description": "Self-hosted invoicing, time tracking and bookkeeping for freelancers and small businesses.",
   "type": "module",
   "packageManager": "npm@10.9.2",
   "scripts": {

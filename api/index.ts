@@ -1115,6 +1115,65 @@ api.put("/api/business-settings", async (c) => {
   return c.json(row);
 });
 
+const LOGO_TYPES: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg" };
+const LOGO_MAX_BYTES = 2 * 1024 * 1024;
+
+api.post("/api/business-settings/logo", async (c) => {
+  const userId = c.get("userId")!;
+  const form = await c.req.formData().catch(() => null);
+  const file = form?.get("file");
+  if (!(file instanceof File)) return c.json({ error: "No file provided" }, 400);
+  const ext = LOGO_TYPES[file.type];
+  if (!ext) return c.json({ error: "Use a PNG or JPEG image" }, 400);
+  if (file.size > LOGO_MAX_BYTES) return c.json({ error: "Logo must be 2 MB or smaller" }, 400);
+
+  const existing = await c.env.DB
+    .prepare("SELECT id, logo_url FROM business_settings WHERE user_id = ?")
+    .bind(userId)
+    .first<{ id: string; logo_url: string | null }>();
+
+  const key = `${userId}/branding/logo-${crypto.randomUUID()}.${ext}`;
+  await c.env.FILES.put(key, file.stream(), { httpMetadata: { contentType: file.type } });
+
+  const now = new Date().toISOString();
+  if (existing) {
+    await c.env.DB.prepare("UPDATE business_settings SET logo_url = ?, updated_at = ? WHERE id = ?").bind(key, now, existing.id).run();
+    if (existing.logo_url) await c.env.FILES.delete(existing.logo_url).catch(() => {});
+  } else {
+    await c.env.DB
+      .prepare("INSERT INTO business_settings (id, user_id, logo_url, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
+      .bind(crypto.randomUUID(), userId, key, now, now)
+      .run();
+  }
+  return c.json({ ok: true });
+});
+
+api.get("/api/business-settings/logo", async (c) => {
+  const userId = c.get("userId")!;
+  const row = await c.env.DB
+    .prepare("SELECT logo_url FROM business_settings WHERE user_id = ?")
+    .bind(userId)
+    .first<{ logo_url: string | null }>();
+  if (!row?.logo_url) return c.json({ error: "No logo" }, 404);
+  const obj = await c.env.FILES.get(row.logo_url);
+  if (!obj) return c.json({ error: "No logo" }, 404);
+  const type = row.logo_url.endsWith(".png") ? "image/png" : "image/jpeg";
+  return new Response(obj.body, { headers: { "Content-Type": type, "Cache-Control": "private, no-cache" } });
+});
+
+api.delete("/api/business-settings/logo", async (c) => {
+  const userId = c.get("userId")!;
+  const row = await c.env.DB
+    .prepare("SELECT id, logo_url FROM business_settings WHERE user_id = ?")
+    .bind(userId)
+    .first<{ id: string; logo_url: string | null }>();
+  if (row?.logo_url) {
+    await c.env.DB.prepare("UPDATE business_settings SET logo_url = NULL, updated_at = ? WHERE id = ?").bind(new Date().toISOString(), row.id).run();
+    await c.env.FILES.delete(row.logo_url).catch(() => {});
+  }
+  return c.json({ ok: true });
+});
+
 type InvoiceType = "business" | "private" | "reverse_charge";
 
 function normalizeInvoiceType(value: unknown): InvoiceType {
@@ -1394,7 +1453,7 @@ api.post("/api/invoices/:id/split", async (c) => {
 
   const today = new Date().toISOString().split("T")[0]!;
   const invDate = invoice.invoice_date || today;
-  // Vervaldatum termijnen: standaard 30 dagen na factuurdatum, en daarna telkens +30 dagen.
+  // Instalment due dates default to 30 days after the invoice date, then every 30 days.
   const baseDue = firstDue ?? addDaysIso(invDate, intervalDays);
   const taxFree = isTaxFreeType(invoice.invoice_type);
   const subtotalParts = splitEqual(Number(invoice.subtotal), parts);
@@ -2385,8 +2444,6 @@ api.delete("/api/attachments/:id", async (c) => {
   return c.body(null, 204);
 });
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const DEFAULT_ACCOUNTS: Array<{
   number: string;
@@ -2537,7 +2594,7 @@ async function createJournalEntry(
   return entryId;
 }
 
-// â”€â”€ Chart of accounts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Chart of accounts
 api.get("/api/accounts", async (c) => {
   const userId = c.get("userId")!;
   const { results } = await c.env.DB
@@ -2583,7 +2640,7 @@ api.delete("/api/accounts/:id", async (c) => {
   return c.body(null, 204);
 });
 
-// â”€â”€ Accounting periods â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Accounting periods
 api.get("/api/periods", async (c) => {
   const userId = c.get("userId")!;
   const { year } = c.req.query();
@@ -2623,7 +2680,7 @@ api.patch("/api/periods/:id", async (c) => {
   return c.json(row);
 });
 
-// â”€â”€ Journal entries â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Journal entries
 api.get("/api/journal-entries", async (c) => {
   const userId = c.get("userId")!;
   const { from, to, period_id, reference, limit: limitStr } = c.req.query();
@@ -2686,7 +2743,7 @@ api.delete("/api/journal-entries/:id", async (c) => {
   return c.body(null, 204);
 });
 
-// â”€â”€ Boekhoudkundig overzicht (trial balance) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Trial balance
 api.get("/api/trial-balance", async (c) => {
   const userId = c.get("userId")!;
   const { from, to } = c.req.query();
@@ -2719,10 +2776,8 @@ api.get("/api/trial-balance", async (c) => {
   return c.json(results ?? []);
 });
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-// â”€â”€ CSV-import (ING / Rabobank / ABN AMRO / generiek) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// CSV import (ING, Rabobank, ABN AMRO and generic formats)
 function parseAmount(raw: string): number {
   // Handle European decimal notation: 1.234,56 becomes 1234.56
   const cleaned = raw.trim().replace(/\./g, "").replace(",", ".");
@@ -2831,7 +2886,7 @@ api.post("/api/bank-transactions/import-csv", async (c) => {
   return c.json({ imported, skipped, total: parsed.length });
 });
 
-// â”€â”€ Reconciliation endpoints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Reconciliation endpoints
 api.post("/api/bank-transactions/:id/reconcile", async (c) => {
   const userId = c.get("userId")!;
   const { id } = c.req.param();
@@ -2862,7 +2917,7 @@ api.post("/api/bank-transactions/:id/unreconcile", async (c) => {
   return c.json({ ok: true });
 });
 
-// â”€â”€ Auto-match suggestions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Auto-match suggestions
 api.get("/api/bank-transactions/:id/suggestions", async (c) => {
   const userId = c.get("userId")!;
   const { id } = c.req.param();
@@ -2901,10 +2956,8 @@ api.get("/api/bank-transactions/:id/suggestions", async (c) => {
   return c.json(suggestions);
 });
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-// â”€â”€ Winst & verlies rekening (P&L) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Profit and loss
 api.get("/api/reports/pnl", async (c) => {
   const userId = c.get("userId")!;
   const { from, to, year } = c.req.query();
@@ -2988,7 +3041,7 @@ api.get("/api/reports/pnl", async (c) => {
   });
 });
 
-// â”€â”€ Balansrekening â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Balance sheet
 api.get("/api/reports/balance-sheet", async (c) => {
   const userId = c.get("userId")!;
   const { as_of } = c.req.query();
@@ -3030,7 +3083,7 @@ api.get("/api/reports/balance-sheet", async (c) => {
   });
 });
 
-// â”€â”€ BTW-aangifte overzicht â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Tax return summary
 api.get("/api/reports/vat", async (c) => {
   const userId = c.get("userId")!;
   const { year, quarter } = c.req.query();
@@ -3091,10 +3144,8 @@ api.get("/api/reports/vat", async (c) => {
   });
 });
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-// â”€â”€ Org info + members â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Org info + members
 api.get("/api/org", async (c) => {
   const orgId = c.get("userId")!;
   const org = await c.env.DB.prepare("SELECT * FROM organizations WHERE id = ?").bind(orgId).first();
@@ -3126,7 +3177,7 @@ api.patch("/api/org", async (c) => {
   return c.json(await c.env.DB.prepare("SELECT * FROM organizations WHERE id = ?").bind(orgId).first());
 });
 
-// â”€â”€ Invite member â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Invite member
 api.post("/api/org/invite", async (c) => {
   const orgId      = c.get("userId")!;
   const ownUserId  = c.get("ownUserId") ?? orgId;
@@ -3157,7 +3208,7 @@ api.post("/api/org/invite", async (c) => {
   return c.json({ invite_token: token, email, role, expires_at: expiresAt, org_name: org?.name });
 });
 
-// â”€â”€ Accept invite (new or existing user) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Accept invite (new or existing user)
 api.get("/api/org/invite/info", async (c) => {
   const { token } = c.req.query();
   if (!token) return c.json({ error: "Token is required" }, 400);
@@ -3225,7 +3276,7 @@ api.post("/api/org/invite/accept", async (c) => {
   return c.json({ token, user: { id: userId, email, org_id: invite.org_id, org_role: invite.role } });
 });
 
-// â”€â”€ Remove member â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Remove member
 api.delete("/api/org/members/:memberId", async (c) => {
   const orgId   = c.get("userId")!;
   const orgRole = c.get("orgRole") ?? "member";
@@ -3242,7 +3293,7 @@ api.delete("/api/org/members/:memberId", async (c) => {
   return c.body(null, 204);
 });
 
-// â”€â”€ Update member role â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Update member role
 api.patch("/api/org/members/:memberId", async (c) => {
   const orgId   = c.get("userId")!;
   const orgRole = c.get("orgRole") ?? "member";
@@ -3257,7 +3308,7 @@ api.patch("/api/org/members/:memberId", async (c) => {
   return c.json({ ok: true });
 });
 
-// â”€â”€ Cancel invite â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Cancel invite
 api.delete("/api/org/invites/:inviteId", async (c) => {
   const orgId   = c.get("userId")!;
   const orgRole = c.get("orgRole") ?? "member";
@@ -3267,7 +3318,7 @@ api.delete("/api/org/invites/:inviteId", async (c) => {
   return c.body(null, 204);
 });
 
-// â”€â”€ Switch org (for users in multiple orgs) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Switch org (for users in multiple orgs)
 api.post("/api/org/switch", async (c) => {
   const secret     = c.env.JWT_SECRET;
   const ownUserId  = c.get("ownUserId") ?? c.get("userId")!;
@@ -3286,7 +3337,7 @@ api.post("/api/org/switch", async (c) => {
   return c.json({ token, org_id: targetOrgId, org_role: member.role });
 });
 
-// â”€â”€ List my orgs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// List my orgs
 api.get("/api/org/mine", async (c) => {
   const ownUserId = c.get("ownUserId") ?? c.get("userId")!;
   const { results } = await c.env.DB
@@ -3299,7 +3350,7 @@ api.get("/api/org/mine", async (c) => {
   return c.json(results ?? []);
 });
 
-/** D1-fouten (o.a. ontbrekende tabellen) anders als kale "Internal Server Error" zonder JSON. */
+/** Global error handler — returns a JSON body so clients don't receive a bare 500 text response. */
 api.onError((err, c) => {
   console.error(err);
   const msg = err instanceof Error ? err.message : String(err);

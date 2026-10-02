@@ -55,15 +55,21 @@ function splitSqlStatements(sql: string): string[] {
 }
 
 export function runMigrations(db: Database.Database, migrationsDir: string): void {
+  const hasTable = (name: string) =>
+    Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name));
+  if (hasTable("_cf_migrations") && !hasTable("_migrations")) {
+    db.exec("ALTER TABLE _cf_migrations RENAME TO _migrations");
+  }
+
   db.exec(`
-    CREATE TABLE IF NOT EXISTS _cf_migrations (
+    CREATE TABLE IF NOT EXISTS _migrations (
       name TEXT PRIMARY KEY NOT NULL,
       applied_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `);
 
   const applied = new Set(
-    (db.prepare("SELECT name FROM _cf_migrations").all() as { name: string }[]).map((r) => r.name),
+    (db.prepare("SELECT name FROM _migrations").all() as { name: string }[]).map((r) => r.name),
   );
 
   const files = readdirSync(migrationsDir)
@@ -77,21 +83,23 @@ export function runMigrations(db: Database.Database, migrationsDir: string): voi
     console.log(`  Applying migration: ${file}`);
 
     try {
-      const statements = splitSqlStatements(sql);
-      for (const stmt of statements) {
-        try {
-          db.exec(stmt);
-        } catch (stmtErr) {
-          const msg = stmtErr instanceof Error ? stmtErr.message : String(stmtErr);
-          console.error(`  FAILED statement:\n${stmt}\n  Error: ${msg}`);
-          throw stmtErr;
+      // One transaction per file: a failing migration leaves the database untouched.
+      db.transaction(() => {
+        for (const stmt of splitSqlStatements(sql)) {
+          try {
+            db.exec(stmt);
+          } catch (stmtErr) {
+            const msg = stmtErr instanceof Error ? stmtErr.message : String(stmtErr);
+            console.error(`  FAILED statement:\n${stmt}\n  Error: ${msg}`);
+            throw stmtErr;
+          }
         }
-      }
-      db.prepare("INSERT INTO _cf_migrations (name) VALUES (?)").run(file);
+        db.prepare("INSERT INTO _migrations (name) VALUES (?)").run(file);
+      })();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes("already exists") || msg.includes("duplicate column")) {
-        db.prepare("INSERT OR IGNORE INTO _cf_migrations (name) VALUES (?)").run(file);
+        db.prepare("INSERT OR IGNORE INTO _migrations (name) VALUES (?)").run(file);
         console.log(`    Skipped (already applied): ${file}`);
       } else {
         throw err;

@@ -1,4 +1,4 @@
--- Extra velden op producten: serienummer, link, interne notities, BTW-instelling.
+-- Extra product fields: serial number, link, internal notes and tax settings.
 ALTER TABLE company_products ADD COLUMN serial_number TEXT;
 ALTER TABLE company_products ADD COLUMN url TEXT;
 ALTER TABLE company_products ADD COLUMN internal_notes TEXT;

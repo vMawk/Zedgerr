@@ -217,7 +217,7 @@ export default function Bankrekening() {
         </div>
       </div>
 
-      {/* Saldo groot */}
+      {/* Balance */}
       <Card className={`border-2 ${saldo >= 0 ? "border-green-200 dark:border-green-900" : "border-red-200 dark:border-red-900"}`}>
         <CardContent className="pt-5 pb-5">
           <div className="flex items-center gap-3">
@@ -232,7 +232,7 @@ export default function Bankrekening() {
         </CardContent>
       </Card>
 
-      {/* Periode filter */}
+      {/* Period filter */}
       <div className="flex flex-wrap gap-4 items-end">
         <div className="grid gap-1.5">
           <Label className="text-xs text-muted-foreground">From</Label>
@@ -244,7 +244,7 @@ export default function Bankrekening() {
         </div>
       </div>
 
-      {/* Statistieken periode */}
+      {/* Period totals */}
       {entries.length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
           <Card>
@@ -279,7 +279,7 @@ export default function Bankrekening() {
         </div>
       )}
 
-      {/* Tabel */}
+      {/* Table */}
       {entries.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12 text-muted-foreground">
@@ -350,7 +350,7 @@ export default function Bankrekening() {
         </Card>
       )}
 
-      {/* Dialog toevoegen/bewerken */}
+      {/* Add/edit dialog */}
       <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) resetForm(); }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
@@ -358,7 +358,7 @@ export default function Bankrekening() {
           </DialogHeader>
           <div className="grid gap-4 py-2">
 
-            {/* Type knoppen */}
+            {/* Type buttons */}
             <div className="grid gap-2">
               <Label>Type</Label>
               <div className="grid grid-cols-2 gap-1.5">
@@ -418,7 +418,7 @@ export default function Bankrekening() {
         </DialogContent>
       </Dialog>
 
-      {/* Verwijder bevestiging */}
+      {/* Delete confirmation */}
       <AlertDialog open={!!deleteTarget} onOpenChange={(v) => { if (!v) setDeleteTarget(null); }}>
         <AlertDialogContent>
           <AlertDialogHeader>

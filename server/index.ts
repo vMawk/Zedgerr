@@ -14,7 +14,7 @@ import { runMigrations } from "./migrations.js";
 import type { AppEnv } from "../api/types.js";
 
 const ROOT = process.cwd();
-const IS_PRODUCTION = process.env.NODE_ENV === "production";
+if (existsSync(join(ROOT, ".env"))) process.loadEnvFile(join(ROOT, ".env"));
 
 const DATA_DIR = resolve(process.env.DATA_DIR ?? join(ROOT, "data"));
 const DB_PATH = resolve(process.env.DB_PATH ?? join(DATA_DIR, "app.db"));
@@ -24,18 +24,23 @@ const DIST_DIR = resolve(process.env.DIST_DIR ?? join(ROOT, "dist"));
 const PORT = parseInt(process.env.PORT ?? "3000", 10);
 const TRUST_PROXY = process.env.TRUST_PROXY === "true";
 
+// Without JWT_SECRET a random secret is generated once and kept in the data volume,
+// so a plain `docker run` is secure and sessions survive restarts.
 function resolveJwtSecret(): string {
   const secret = process.env.JWT_SECRET;
-  if (secret && secret.length >= 32) return secret;
-  if (IS_PRODUCTION) {
-    console.error("JWT_SECRET must be set to a random string of at least 32 characters. Generate one with: openssl rand -hex 32");
+  if (secret) {
+    if (secret.length >= 32) return secret;
+    console.error("JWT_SECRET must be at least 32 characters. Remove it to let Zedgerr generate one, or use: openssl rand -hex 32");
     process.exit(1);
   }
-  const devSecretPath = join(DATA_DIR, ".dev-jwt-secret");
-  if (existsSync(devSecretPath)) return readFileSync(devSecretPath, "utf-8").trim();
+  const secretPath = join(DATA_DIR, ".jwt-secret");
+  const legacyPath = join(DATA_DIR, ".dev-jwt-secret");
+  for (const path of [secretPath, legacyPath]) {
+    if (existsSync(path)) return readFileSync(path, "utf-8").trim();
+  }
   const generated = randomBytes(32).toString("hex");
-  writeFileSync(devSecretPath, generated, { mode: 0o600 });
-  console.warn(`JWT_SECRET is not set; using a development secret stored in ${devSecretPath}.`);
+  writeFileSync(secretPath, generated, { mode: 0o600 });
+  console.log(`Generated a signing secret in ${secretPath}. Keep it with your backups.`);
   return generated;
 }
 

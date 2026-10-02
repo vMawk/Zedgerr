@@ -1,4 +1,4 @@
--- Zakelijke uitgaven / inkoopfacturen voor BTW-aangifte en winst/verlies.
+-- Business expenses and purchase invoices for tax returns and profit and loss.
 CREATE TABLE expenses (
   id TEXT PRIMARY KEY NOT NULL,
   user_id TEXT NOT NULL,

@@ -43,7 +43,7 @@ export default function Notes() {
       const dates = await api.getDailyNoteDates();
       setDatesWithNotes(dates);
     } catch {
-      /* Server zonder /notes/dates (oude deploy): kalender blijft uit lokale state / optimistic updates */
+      /* Older servers lack /notes/dates; the calendar then relies on local state. */
     }
   }, []);
 

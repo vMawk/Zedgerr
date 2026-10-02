@@ -216,7 +216,7 @@ export default function FinancieelRapport() {
               </div>
 
               <div className="grid gap-4 md:grid-cols-2">
-                {/* Activa */}
+                {/* Assets */}
                 <Card>
                   <CardContent className="p-0">
                     <div className="px-4 py-2 bg-muted/40 border-b">
@@ -240,7 +240,7 @@ export default function FinancieelRapport() {
                   </CardContent>
                 </Card>
 
-                {/* Passiva + Eigen vermogen */}
+                {/* Liabilities and equity */}
                 <Card>
                   <CardContent className="p-0">
                     <div className="px-4 py-2 bg-muted/40 border-b">

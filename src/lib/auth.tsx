@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState, ReactNode } from "react";
 import { setStoredToken, getStoredToken, apiUrl } from "@/lib/api";
 
-/** Ingelogde gebruiker uit D1 (`users`), via JWT — geen lokale SQLite-file. */
+/** The authenticated user loaded from the JWT. */
 export type AuthUser = { id: string; email: string };
 
 interface AuthContextType {

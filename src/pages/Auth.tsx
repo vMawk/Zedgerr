@@ -17,7 +17,7 @@ const HIGHLIGHTS = [
   { icon: FileText, text: "Invoices, quotes and credit notes in your own currency" },
   { icon: Globe2, text: "Tax presets for 40+ countries, including EU reverse charge" },
   { icon: Timer, text: "Time tracking, expenses, mileage and bank imports" },
-  { icon: ShieldCheck, text: "Self-hosted, open source, with two-factor sign-in" },
+  { icon: ShieldCheck, text: "Self-hosted on your own server, with two-factor sign-in" },
 ];
 
 function errorMessage(error: unknown, fallback: string) {
@@ -123,7 +123,7 @@ export default function Auth() {
           </ul>
         </div>
 
-        <p className="relative text-sm text-white/50">Open source bookkeeping for freelancers and small businesses.</p>
+        <p className="relative text-sm text-white/50">Bookkeeping for freelancers and small businesses.</p>
       </aside>
 
       <main className="relative flex items-center justify-center px-4 py-12 sm:px-8">

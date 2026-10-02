@@ -1,4 +1,4 @@
--- Eén klantenportaal-account per bedrijf (e-mail + wachtwoord).
+-- One client portal account per company (email and password).
 CREATE TABLE company_portal_users (
   id TEXT PRIMARY KEY NOT NULL,
   company_id TEXT NOT NULL UNIQUE REFERENCES companies(id) ON DELETE CASCADE,

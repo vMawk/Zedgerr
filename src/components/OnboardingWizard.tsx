@@ -6,6 +6,7 @@ import { useToast } from "@/hooks/use-toast";
 import { SORTED_PRESETS, OTHER_PRESET, presetFor, rateOptions, bankAccountLabel } from "@/lib/tax-presets";
 import { SUPPORTED_CURRENCIES } from "@/lib/tax";
 import { ZedgerrIcon } from "./ZedgerrLogo";
+import { LogoUpload } from "./settings/LogoUpload";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -358,6 +359,10 @@ export function OnboardingWizard({ onFinish, onClose }: Props) {
                     <div className="grid sm:grid-cols-2 gap-3">
                       <Field id="reg" label={preset.companyIdLabel} value={form.kvk_number} onChange={set("kvk_number")} />
                       <Field id="tax" label={preset.taxIdLabel} value={form.btw_number} onChange={set("btw_number")} />
+                    </div>
+                    <div className="grid gap-1.5">
+                      <Label>Logo <span className="font-normal text-muted-foreground">(optional)</span></Label>
+                      <LogoUpload compact />
                     </div>
                     <Field
                       id="bank"
