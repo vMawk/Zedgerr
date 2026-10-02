@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { useTaxSettings } from "@/lib/tax";
+import { rateOptions } from "@/lib/tax-presets";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
 import type { Company, CompanyProduct } from "@/lib/db-types";
@@ -22,7 +24,7 @@ const emptyForm = {
   internal_notes: "",
   sale_price: "",
   price_includes_vat: false,
-  vat_percentage: "21",
+  vat_percentage: "",
   cost_price: "",
 };
 
@@ -32,11 +34,9 @@ function exVat(price: number, pct: number) {
 function inclVat(price: number, pct: number) {
   return price * (1 + pct / 100);
 }
-function fmt(n: number) {
-  return `€ ${n.toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
 export default function Products() {
+  const { currencySymbol: cs, defaultRate, preset } = useTaxSettings();
+  const fmt = (n: number) => `${cs} ${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const { user } = useAuth();
   const { toast } = useToast();
 
@@ -60,11 +60,11 @@ export default function Products() {
   }, [selectedId]);
 
   const selected = companies.find((c) => c.id === selectedId);
-  const displayName = (c: Company) => c.name || c.contact_person || "Klant";
+  const displayName = (c: Company) => c.name || c.contact_person || "Client";
 
   const openNew = () => {
     setEditProduct(null);
-    setForm(emptyForm);
+    setForm({ ...emptyForm, vat_percentage: String(defaultRate) });
     setDialogOpen(true);
   };
 
@@ -77,7 +77,7 @@ export default function Products() {
       internal_notes: p.internal_notes ?? "",
       sale_price: String(p.sale_price),
       price_includes_vat: Boolean(p.price_includes_vat),
-      vat_percentage: String(p.vat_percentage ?? 21),
+      vat_percentage: String(p.vat_percentage ?? defaultRate),
       cost_price: p.cost_price != null ? String(p.cost_price) : "",
     });
     setDialogOpen(true);
@@ -92,35 +92,35 @@ export default function Products() {
       internal_notes: form.internal_notes.trim() || null,
       sale_price: parseFloat(form.sale_price),
       price_includes_vat: form.price_includes_vat,
-      vat_percentage: parseFloat(form.vat_percentage) || 21,
+      vat_percentage: parseFloat(form.vat_percentage) || defaultRate,
       cost_price: form.cost_price ? parseFloat(form.cost_price) : null,
     };
     try {
       if (editProduct) {
         await api.updateCompanyProduct(selectedId, editProduct.id, body);
-        toast({ title: "Product bijgewerkt" });
+        toast({ title: "Product updated" });
       } else {
         await api.createCompanyProduct(selectedId, body);
-        toast({ title: "Product toegevoegd" });
+        toast({ title: "Product added" });
       }
       setDialogOpen(false);
       api.getCompanyProducts(selectedId).then(setProducts);
     } catch (e: unknown) {
-      toast({ title: "Fout", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
+      toast({ title: "Error", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
     }
   };
 
   const handleDelete = async (p: CompanyProduct) => {
-    if (!selectedId || !confirm(`"${p.name}" verwijderen?`)) return;
+    if (!selectedId || !confirm(`Delete "${p.name}"?`)) return;
     await api.deleteCompanyProduct(selectedId, p.id);
-    toast({ title: "Product verwijderd" });
+    toast({ title: "Product deleted" });
     api.getCompanyProducts(selectedId).then(setProducts);
   };
 
   const set = (k: keyof typeof form, v: string | boolean) => setForm((f) => ({ ...f, [k]: v }));
 
   const saleNum = parseFloat(form.sale_price) || 0;
-  const vatPct = parseFloat(form.vat_percentage) || 21;
+  const vatPct = parseFloat(form.vat_percentage) || defaultRate;
   const priceExVat = form.price_includes_vat ? exVat(saleNum, vatPct) : saleNum;
   const priceInclVat = form.price_includes_vat ? saleNum : inclVat(saleNum, vatPct);
 
@@ -129,11 +129,11 @@ export default function Products() {
       {/* Left: client list */}
       <div className="w-64 shrink-0 border-r flex flex-col">
         <div className="p-4 border-b">
-          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Klanten</h2>
+          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Clients</h2>
         </div>
         <div className="overflow-y-auto flex-1">
           {companies.length === 0 && (
-            <p className="p-4 text-sm text-muted-foreground">Geen klanten gevonden.</p>
+            <p className="p-4 text-sm text-muted-foreground">No clients found.</p>
           )}
           {companies.map((c) => (
             <button
@@ -156,25 +156,25 @@ export default function Products() {
         {!selectedId ? (
           <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-3">
             <Package className="h-12 w-12 opacity-30" />
-            <p>Selecteer een klant om producten te beheren</p>
+            <p>Select a client to manage their products</p>
           </div>
         ) : (
           <>
             <div className="flex items-center justify-between">
               <div>
                 <h1 className="text-xl font-semibold">{selected ? displayName(selected) : ""}</h1>
-                <p className="text-sm text-muted-foreground">{products.length} product{products.length !== 1 ? "en" : ""}</p>
+                <p className="text-sm text-muted-foreground">{products.length} product{products.length !== 1 ? "s" : ""}</p>
               </div>
-              <Button size="sm" onClick={openNew}><Plus className="h-4 w-4 mr-1" />Product toevoegen</Button>
+              <Button size="sm" onClick={openNew}><Plus className="h-4 w-4 mr-1" />Add product</Button>
             </div>
 
             {loadingProducts ? (
-              <p className="text-sm text-muted-foreground">Laden…</p>
+              <p className="text-sm text-muted-foreground">Loading…</p>
             ) : products.length === 0 ? (
               <Card>
                 <CardContent className="py-12 flex flex-col items-center text-muted-foreground gap-2">
                   <Package className="h-8 w-8 opacity-40" />
-                  <p className="text-sm">Nog geen producten voor deze klant</p>
+                  <p className="text-sm">No products for this client yet</p>
                 </CardContent>
               </Card>
             ) : (
@@ -182,18 +182,18 @@ export default function Products() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Naam</TableHead>
-                      <TableHead>Serienummer</TableHead>
-                      <TableHead className="text-right">Excl. BTW</TableHead>
-                      <TableHead className="text-right">Incl. BTW</TableHead>
-                      <TableHead className="text-right">Inkoop</TableHead>
-                      <TableHead className="text-right">Marge</TableHead>
+                      <TableHead>Name</TableHead>
+                      <TableHead>Serial number</TableHead>
+                      <TableHead className="text-right">Excl. tax</TableHead>
+                      <TableHead className="text-right">Incl. tax</TableHead>
+                      <TableHead className="text-right">Cost</TableHead>
+                      <TableHead className="text-right">Margin</TableHead>
                       <TableHead className="w-20" />
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {products.map((p) => {
-                      const vat = p.vat_percentage ?? 21;
+                      const vat = p.vat_percentage ?? defaultRate;
                       const excl = p.price_includes_vat ? exVat(p.sale_price, vat) : p.sale_price;
                       const incl = p.price_includes_vat ? p.sale_price : inclVat(p.sale_price, vat);
                       const margin = p.cost_price != null ? excl - p.cost_price : null;
@@ -240,44 +240,42 @@ export default function Products() {
       <Dialog open={dialogOpen} onOpenChange={(v) => { setDialogOpen(v); if (!v) setEditProduct(null); }}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{editProduct ? "Product bewerken" : "Product toevoegen"}</DialogTitle>
+            <DialogTitle>{editProduct ? "Edit product" : "Add product"}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-3">
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Productinfo</p>
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Product details</p>
               <div className="grid gap-2">
-                <Label>Naam *</Label>
-                <Input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="Bijv. Jaarlicentie software" />
+                <Label>Name *</Label>
+                <Input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="e.g. Annual software licence" />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="grid gap-2">
-                  <Label>Serienummer <span className="text-muted-foreground font-normal">(intern)</span></Label>
+                  <Label>Serienummer <span className="text-muted-foreground font-normal">(internal)</span></Label>
                   <Input value={form.serial_number} onChange={(e) => set("serial_number", e.target.value)} placeholder="SN-12345" className="font-mono text-sm" />
                 </div>
                 <div className="grid gap-2">
-                  <Label>BTW-percentage (%)</Label>
+                  <Label>Tax rate (%)</Label>
                   <Select value={form.vat_percentage} onValueChange={(v) => set("vat_percentage", v)}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="21">21%</SelectItem>
-                      <SelectItem value="9">9%</SelectItem>
-                      <SelectItem value="0">0%</SelectItem>
+                      {rateOptions(preset, Number(form.vat_percentage)).map((r) => <SelectItem key={r} value={String(r)}>{r}%</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
               </div>
               <div className="grid gap-2">
-                <Label>Link <span className="text-muted-foreground font-normal">(intern)</span></Label>
+                <Label>Link <span className="text-muted-foreground font-normal">(internal)</span></Label>
                 <Input type="url" value={form.url} onChange={(e) => set("url", e.target.value)} placeholder="https://..." />
               </div>
               <div className="grid gap-2">
-                <Label>Interne notities <span className="text-muted-foreground font-normal">(niet op factuur)</span></Label>
-                <Textarea rows={2} value={form.internal_notes} onChange={(e) => set("internal_notes", e.target.value)} placeholder="Bijv. login gegevens, garantie info…" />
+                <Label>Internal notes <span className="text-muted-foreground font-normal">(not shown on invoices)</span></Label>
+                <Textarea rows={2} value={form.internal_notes} onChange={(e) => set("internal_notes", e.target.value)} placeholder="e.g. login details, warranty info…" />
               </div>
             </div>
 
             <div className="border-t pt-4 space-y-3">
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Prijs</p>
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Price</p>
               <div className="flex items-center gap-3">
                 <Switch
                   id="incl-vat"
@@ -285,13 +283,13 @@ export default function Products() {
                   onCheckedChange={(v) => set("price_includes_vat", v)}
                 />
                 <Label htmlFor="incl-vat" className="cursor-pointer">
-                  Prijs inclusief BTW invoeren
+                  Enter price including tax
                 </Label>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="grid gap-2">
                   <Label>
-                    Verkoopprijs ({form.price_includes_vat ? "incl. BTW" : "excl. BTW"}) *
+                    Sales price ({form.price_includes_vat ? "incl. tax" : "excl. tax"}) *
                   </Label>
                   <Input
                     type="number" step="0.01" min="0"
@@ -301,7 +299,7 @@ export default function Products() {
                   />
                 </div>
                 <div className="grid gap-2">
-                  <Label>Inkoopprijs (excl. BTW)</Label>
+                  <Label>Cost price (excl. tax)</Label>
                   <Input
                     type="number" step="0.01" min="0"
                     value={form.cost_price}
@@ -313,20 +311,20 @@ export default function Products() {
               {saleNum > 0 && (
                 <div className="rounded-md bg-muted/40 px-3 py-2 text-sm space-y-1">
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">Excl. BTW</span>
+                    <span className="text-muted-foreground">Excl. tax</span>
                     <span className="font-medium">{fmt(priceExVat)}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">BTW ({vatPct}%)</span>
+                    <span className="text-muted-foreground">Tax ({vatPct}%)</span>
                     <span>{fmt(priceInclVat - priceExVat)}</span>
                   </div>
                   <div className="flex justify-between border-t pt-1 mt-1">
-                    <span className="text-muted-foreground">Incl. BTW</span>
+                    <span className="text-muted-foreground">Incl. tax</span>
                     <span className="font-semibold">{fmt(priceInclVat)}</span>
                   </div>
                   {form.cost_price && parseFloat(form.cost_price) > 0 && (
                     <div className="flex justify-between border-t pt-1 mt-1">
-                      <span className="text-muted-foreground">Marge (excl. BTW)</span>
+                      <span className="text-muted-foreground">Margin (excl. tax)</span>
                       <span className={cn("font-medium", priceExVat - parseFloat(form.cost_price) >= 0 ? "text-emerald-600" : "text-destructive")}>
                         {fmt(priceExVat - parseFloat(form.cost_price))}
                       </span>
@@ -341,7 +339,7 @@ export default function Products() {
               onClick={handleSave}
               disabled={!form.name.trim() || !form.sale_price}
             >
-              {editProduct ? "Opslaan" : "Toevoegen"}
+              {editProduct ? "Save" : "Add"}
             </Button>
           </div>
         </DialogContent>

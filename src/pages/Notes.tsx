@@ -64,7 +64,7 @@ export default function Notes() {
 
   useEffect(() => {
     loadNote(date).catch((e: unknown) =>
-      toast({ title: "Fout", description: e instanceof Error ? e.message : String(e), variant: "destructive" }),
+      toast({ title: "Error", description: e instanceof Error ? e.message : String(e), variant: "destructive" }),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [date]);
@@ -77,7 +77,7 @@ export default function Notes() {
       syncDateMarker(d, text);
       void loadDatesWithNotes();
     } catch (e: unknown) {
-      toast({ title: "Opslaan mislukt", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
+      toast({ title: "Save failed", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
     } finally {
       setSaving(false);
     }
@@ -126,18 +126,18 @@ export default function Notes() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-semibold">Notities</h1>
+      <h1 className="text-xl font-semibold">Notes</h1>
       <Card>
         <CardHeader>
           <CardTitle>Dagnotitie</CardTitle>
           <CardDescription>
-            Typen is genoeg: notities worden automatisch gesynchroniseerd.
-            {saving ? " Opslaan..." : dirty ? " Wijzigingen in wachtrij..." : " Opgeslagen."}
+            Just type: notes are saved automatically.
+            {saving ? " Saving…" : dirty ? " Unsaved changes…" : " Saved."}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-2 max-w-xs">
-            <Label htmlFor="note-date">Datum</Label>
+            <Label htmlFor="note-date">Date</Label>
             <Input id="note-date" type="date" value={date} onChange={(e) => void onDateChange(e.target.value)} />
           </div>
           <div className="grid gap-2 max-w-xs">
@@ -157,10 +157,10 @@ export default function Notes() {
                 hasNote: { boxShadow: "inset 0 0 0 2px rgba(16, 185, 129, 0.55)" },
               }}
             />
-            <p className="text-xs text-muted-foreground">Dagen met notities zijn groen gemarkeerd.</p>
+            <p className="text-xs text-muted-foreground">Days with notes are highlighted in green.</p>
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="note-content">Notitie</Label>
+            <Label htmlFor="note-content">Note</Label>
             <Textarea
               id="note-content"
               value={content}
@@ -168,7 +168,7 @@ export default function Notes() {
                 setContent(e.target.value);
                 setDirty(true);
               }}
-              placeholder="Schrijf hier je notities voor deze dag..."
+              placeholder="Write your notes for this day…"
               className="min-h-[360px]"
             />
           </div>

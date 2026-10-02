@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTaxSettings } from "@/lib/tax";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
 import type { Company } from "@/lib/db-types";
@@ -15,6 +16,7 @@ interface CompanySummary {
 }
 
 export default function Reports() {
+  const { currencySymbol: cs } = useTaxSettings();
   const { user } = useAuth();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [filterCompany, setFilterCompany] = useState("all");
@@ -56,24 +58,24 @@ export default function Reports() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-semibold">Overzichten</h1>
+      <h1 className="text-xl font-semibold">Reports</h1>
 
       <div className="flex flex-wrap gap-4">
         <div className="grid gap-2">
-          <Label>Van</Label>
+          <Label>From</Label>
           <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
         </div>
         <div className="grid gap-2">
-          <Label>Tot</Label>
+          <Label>To</Label>
           <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
         </div>
         <div className="grid gap-2">
-          <Label>Bedrijf</Label>
+          <Label>Company</Label>
           <Select value={filterCompany} onValueChange={setFilterCompany}>
             <SelectTrigger className="w-48"><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">Alle bedrijven</SelectItem>
-              {companies.map((c) => <SelectItem key={c.id} value={c.id}>{c.name || c.contact_person || "Klant"}</SelectItem>)}
+              <SelectItem value="all">All companies</SelectItem>
+              {companies.map((c) => <SelectItem key={c.id} value={c.id}>{c.name || c.contact_person || "Client"}</SelectItem>)}
             </SelectContent>
           </Select>
         </div>
@@ -82,16 +84,16 @@ export default function Reports() {
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <Card>
           <CardContent className="pt-5 pb-5">
-            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Totaal uren</p>
+            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Total hours</p>
             <p className="text-3xl font-bold tabular-nums">{totals.hours.toFixed(1)}</p>
-            <p className="text-xs text-muted-foreground mt-1">in geselecteerde periode</p>
+            <p className="text-xs text-muted-foreground mt-1">in the selected period</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-5 pb-5">
-            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Totaal omzet</p>
-            <p className="text-3xl font-bold tabular-nums text-[hsl(var(--success))]">€{totals.revenue.toLocaleString("nl-NL", { minimumFractionDigits: 2 })}</p>
-            <p className="text-xs text-muted-foreground mt-1">op basis van uurtarief</p>
+            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Total revenue</p>
+            <p className="text-3xl font-bold tabular-nums text-[hsl(var(--success))]">{cs}{totals.revenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+            <p className="text-xs text-muted-foreground mt-1">based on hourly rate</p>
           </CardContent>
         </Card>
         {summaries.length > 0 && (
@@ -99,7 +101,7 @@ export default function Reports() {
             <CardContent className="pt-5 pb-5">
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Gem. uurtarief</p>
               <p className="text-3xl font-bold tabular-nums">
-                €{totals.hours > 0 ? (totals.revenue / totals.hours).toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "0,00"}
+                {cs}{totals.hours > 0 ? (totals.revenue / totals.hours).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "0,00"}
               </p>
               <p className="text-xs text-muted-foreground mt-1">gewogen gemiddelde</p>
             </CardContent>
@@ -112,9 +114,9 @@ export default function Reports() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Bedrijf</TableHead>
-                <TableHead>Uren</TableHead>
-                <TableHead>Omzet</TableHead>
+                <TableHead>Company</TableHead>
+                <TableHead>Hours</TableHead>
+                <TableHead>Revenue</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -122,7 +124,7 @@ export default function Reports() {
                 <TableRow key={s.company_name}>
                   <TableCell className="font-medium">{s.company_name}</TableCell>
                   <TableCell>{s.total_hours.toFixed(1)}</TableCell>
-                  <TableCell>€{s.total_revenue.toLocaleString("nl-NL", { minimumFractionDigits: 2 })}</TableCell>
+                  <TableCell>{cs}{s.total_revenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}</TableCell>
                 </TableRow>
               ))}
             </TableBody>

@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import { ZedgerrLogo } from "@/components/ZedgerrLogo";
+import { currencySymbol } from "@/lib/tax";
 import { usePortalAuth } from "@/lib/portal-auth";
 import {
   portalChangePassword,
@@ -21,15 +23,15 @@ import { generateInvoicePDF } from "@/lib/pdf";
 function monthLabel(key: string): string {
   const [y, m] = key.split("-");
   const d = new Date(Number(y), Number(m) - 1, 1);
-  return d.toLocaleDateString("nl-NL", { month: "short", year: "numeric" });
+  return d.toLocaleDateString(undefined, { month: "short", year: "numeric" });
 }
 
 function invoiceStatusLabel(status: string): string {
   const m: Record<string, string> = {
-    concept: "Concept",
-    verzonden: "Open / verzonden",
-    betaald: "Betaald",
-    vervallen: "Gesplitst",
+    concept: "Draft",
+    verzonden: "Open",
+    betaald: "Paid",
+    vervallen: "Void",
   };
   return m[status] ?? status;
 }
@@ -52,24 +54,24 @@ function PortalSettingsPanel() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (newPw.length < 6) {
-      toast({ title: "Nieuw wachtwoord te kort", description: "Minimaal 6 tekens.", variant: "destructive" });
+    if (newPw.length < 8) {
+      toast({ title: "New password too short", description: "At least 8 characters.", variant: "destructive" });
       return;
     }
     if (newPw !== confirmPw) {
-      toast({ title: "Wachtwoorden komen niet overeen", variant: "destructive" });
+      toast({ title: "Passwords do not match", variant: "destructive" });
       return;
     }
     setSaving(true);
     try {
       await portalChangePassword(currentPw, newPw);
-      toast({ title: "Wachtwoord bijgewerkt", description: "Je kunt voortaan met het nieuwe wachtwoord inloggen." });
+      toast({ title: "Password updated", description: "Use your new password next time you sign in." });
       setCurrentPw("");
       setNewPw("");
       setConfirmPw("");
     } catch (err: unknown) {
       toast({
-        title: "Mislukt",
+        title: "Failed",
         description: err instanceof Error ? err.message : String(err),
         variant: "destructive",
       });
@@ -85,18 +87,18 @@ function PortalSettingsPanel() {
           <Settings className="h-5 w-5 text-muted-foreground" />
           Account
         </CardTitle>
-        <CardDescription>Wijzig het wachtwoord voor uw klantenportaal.</CardDescription>
+        <CardDescription>Change the password for your client portal.</CardDescription>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-4">
           {portalEmail && (
             <div className="space-y-1">
-              <Label className="text-muted-foreground">Inlog-e-mail</Label>
+              <Label className="text-muted-foreground">Sign-in email</Label>
               <p className="text-sm font-medium">{portalEmail}</p>
             </div>
           )}
           <div className="space-y-2">
-            <Label htmlFor="portal-current-pw">Huidig wachtwoord</Label>
+            <Label htmlFor="portal-current-pw">Current password</Label>
             <Input
               id="portal-current-pw"
               type="password"
@@ -107,7 +109,7 @@ function PortalSettingsPanel() {
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="portal-new-pw">Nieuw wachtwoord</Label>
+            <Label htmlFor="portal-new-pw">New password</Label>
             <Input
               id="portal-new-pw"
               type="password"
@@ -115,12 +117,12 @@ function PortalSettingsPanel() {
               value={newPw}
               onChange={(e) => setNewPw(e.target.value)}
               required
-              minLength={6}
+              minLength={8}
             />
-            <p className="text-xs text-muted-foreground">Minimaal 6 tekens.</p>
+            <p className="text-xs text-muted-foreground">At least 8 characters.</p>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="portal-confirm-pw">Nieuw wachtwoord bevestigen</Label>
+            <Label htmlFor="portal-confirm-pw">Confirm new password</Label>
             <Input
               id="portal-confirm-pw"
               type="password"
@@ -128,12 +130,12 @@ function PortalSettingsPanel() {
               value={confirmPw}
               onChange={(e) => setConfirmPw(e.target.value)}
               required
-              minLength={6}
+              minLength={8}
             />
           </div>
           <Button type="submit" disabled={saving}>
             {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-            Wachtwoord opslaan
+            Save password
           </Button>
         </form>
       </CardContent>
@@ -159,13 +161,13 @@ function SubtleHoursTrend({ entries }: { entries: TimeRow[] }) {
 
   return (
     <div className="rounded-lg border border-border/50 bg-muted/20 px-3 py-3">
-      <p className="text-xs text-muted-foreground mb-3">Verdeling van uren over de maanden heen</p>
+      <p className="text-xs text-muted-foreground mb-3">Hours per month</p>
       <div className="flex h-11 items-end gap-px sm:gap-0.5">
         {data.map((d) => (
           <div
             key={d.key}
             className="flex min-h-0 min-w-0 flex-1 flex-col items-stretch justify-end gap-1.5"
-            title={`${d.label}: ${d.value.toLocaleString("nl-NL", { maximumFractionDigits: 2 })} uur`}
+            title={`${d.label}: ${d.value.toLocaleString(undefined, { maximumFractionDigits: 2 })} h`}
           >
             <div className="flex h-10 w-full flex-col justify-end">
               <div
@@ -189,22 +191,22 @@ function PortalHoursBlock({ entries }: { entries: TimeRow[] }) {
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
-        <span className="font-medium text-foreground">{sumHours.toLocaleString("nl-NL", { maximumFractionDigits: 2 })}</span> uur in{" "}
-        <span className="font-medium text-foreground">{entries.length}</span> regel{entries.length === 1 ? "" : "s"}
+        <span className="font-medium text-foreground">{sumHours.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span> hours in{" "}
+        <span className="font-medium text-foreground">{entries.length}</span> {entries.length === 1 ? "entry" : "entries"}
       </p>
 
       <SubtleHoursTrend entries={entries} />
 
       <div className="rounded-md border overflow-x-auto">
         {entries.length === 0 ? (
-          <p className="p-4 text-sm text-muted-foreground">Nog geen uren geregistreerd.</p>
+          <p className="p-4 text-sm text-muted-foreground">No hours logged yet.</p>
         ) : (
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Datum</TableHead>
-                <TableHead className="text-right">Uren</TableHead>
-                <TableHead>Omschrijving / dienst</TableHead>
+                <TableHead>Date</TableHead>
+                <TableHead className="text-right">Hours</TableHead>
+                <TableHead>Description / service</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -212,7 +214,7 @@ function PortalHoursBlock({ entries }: { entries: TimeRow[] }) {
                 <TableRow key={row.id}>
                   <TableCell className="whitespace-nowrap">{row.date}</TableCell>
                   <TableCell className="text-right tabular-nums">
-                    {Number(row.hours).toLocaleString("nl-NL", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                    {Number(row.hours).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
                   </TableCell>
                   <TableCell className="text-muted-foreground max-w-[min(480px,55vw)]">{row.description ?? "—"}</TableCell>
                 </TableRow>
@@ -238,7 +240,7 @@ export default function PortalDashboard() {
       .then(setData)
       .catch((e: unknown) => {
         toast({
-          title: "Fout",
+          title: "Error",
           description: e instanceof Error ? e.message : String(e),
           variant: "destructive",
         });
@@ -253,7 +255,7 @@ export default function PortalDashboard() {
       const d = await portalFetchInvoicePdfData(invoiceId);
       await generateInvoicePDF(d.invoice, d.lines, d.settings, d.company);
     } catch (e: unknown) {
-      toast({ title: "Fout", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
+      toast({ title: "Error", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
     } finally {
       setDownloadingId(null);
     }
@@ -264,15 +266,15 @@ export default function PortalDashboard() {
       <header className="border-b bg-card">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-4">
           <div className="flex items-center gap-3">
-            <img src="/zedgerr-logo.png" alt="Zedgerr" className="h-8 w-auto" />
+            <ZedgerrLogo />
             <div>
-              <p className="font-semibold">Klantenportaal</p>
+              <p className="font-semibold">Client portal</p>
               <p className="text-sm text-muted-foreground">{company?.name}</p>
             </div>
           </div>
           <Button variant="outline" size="sm" onClick={signOut}>
             <LogOut className="mr-2 h-4 w-4" />
-            Uitloggen
+            Sign out
           </Button>
         </div>
       </header>
@@ -280,35 +282,35 @@ export default function PortalDashboard() {
       <main className="mx-auto max-w-6xl px-4 py-8">
         <Tabs defaultValue="overview" className="w-full space-y-6">
           <TabsList>
-            <TabsTrigger value="overview">Overzicht</TabsTrigger>
-            <TabsTrigger value="settings">Instellingen</TabsTrigger>
+            <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="settings">Settings</TabsTrigger>
           </TabsList>
 
           <TabsContent value="overview" className="space-y-6 mt-0">
-            {loading && <p className="text-muted-foreground">Laden…</p>}
+            {loading && <p className="text-muted-foreground">Loading…</p>}
             {!loading && data && (
               <>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Card className="border-primary/15 shadow-sm">
                     <CardHeader className="flex flex-row items-center gap-2 pb-2">
                       <Clock className="h-5 w-5 text-primary" />
-                      <CardTitle className="text-lg">Totaal uren</CardTitle>
+                      <CardTitle className="text-lg">Total hours</CardTitle>
                     </CardHeader>
                     <CardContent>
                       <p className="text-3xl font-semibold tabular-nums tracking-tight">
-                        {data.totalHours.toLocaleString("nl-NL", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                        {data.totalHours.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
                       </p>
-                      <CardDescription className="mt-1">Alle geregistreerde uren (historisch)</CardDescription>
+                      <CardDescription className="mt-1">All logged hours</CardDescription>
                     </CardContent>
                   </Card>
                   <Card className="border-primary/15 shadow-sm">
                     <CardHeader className="flex flex-row items-center gap-2 pb-2">
                       <FileText className="h-5 w-5 text-primary" />
-                      <CardTitle className="text-lg">Facturen</CardTitle>
+                      <CardTitle className="text-lg">Invoices</CardTitle>
                     </CardHeader>
                     <CardContent>
                       <p className="text-3xl font-semibold tabular-nums tracking-tight">{data.invoices.length}</p>
-                      <CardDescription className="mt-1">Openstaand en betaald</CardDescription>
+                      <CardDescription className="mt-1">Open and paid</CardDescription>
                     </CardContent>
                   </Card>
                 </div>
@@ -318,12 +320,12 @@ export default function PortalDashboard() {
                     <AccordionTrigger className="text-lg font-semibold hover:no-underline py-4">
                       <span className="flex items-center gap-2">
                         <Clock className="h-5 w-5 text-muted-foreground" />
-                        Urenregistratie
+                        Hours
                       </span>
                     </AccordionTrigger>
                     <AccordionContent className="pb-4">
                       <CardDescription className="mb-4 -mt-1">
-                        Alle uren in één tabel; bovenin een rustige verdeling per maand. Klap de sectie dicht voor minder schermruimte.
+                        All your hours in one table, with a monthly overview at the top.
                       </CardDescription>
                       <PortalHoursBlock entries={data.timeEntries} />
                     </AccordionContent>
@@ -333,23 +335,23 @@ export default function PortalDashboard() {
                     <AccordionTrigger className="text-lg font-semibold hover:no-underline py-4">
                       <span className="flex items-center gap-2">
                         <FileText className="h-5 w-5 text-muted-foreground" />
-                        Facturen
+                        Invoices
                       </span>
                     </AccordionTrigger>
                     <AccordionContent className="pb-4">
-                      <CardDescription className="mb-4 -mt-1">Status en bedragen (incl. BTW waar van toepassing)</CardDescription>
+                      <CardDescription className="mb-4 -mt-1">Status and amounts (including tax where applicable)</CardDescription>
                       <div className="overflow-x-auto rounded-md border">
                         {data.invoices.length === 0 ? (
-                          <p className="p-4 text-sm text-muted-foreground">Nog geen facturen.</p>
+                          <p className="p-4 text-sm text-muted-foreground">No invoices yet.</p>
                         ) : (
                           <Table>
                             <TableHeader>
                               <TableRow>
-                                <TableHead>Nummer</TableHead>
-                                <TableHead>Datum</TableHead>
-                                <TableHead>Vervaldatum</TableHead>
+                                <TableHead>Number</TableHead>
+                                <TableHead>Date</TableHead>
+                                <TableHead>Due date</TableHead>
                                 <TableHead>Status</TableHead>
-                                <TableHead className="text-right">Totaal</TableHead>
+                                <TableHead className="text-right">Total</TableHead>
                                 <TableHead className="w-16 text-right">PDF</TableHead>
                               </TableRow>
                             </TableHeader>
@@ -367,14 +369,14 @@ export default function PortalDashboard() {
                                 >
                                   <TableCell className="font-medium whitespace-nowrap">{inv.invoice_number}</TableCell>
                                   <TableCell className="whitespace-nowrap">
-                                    {new Date(inv.invoice_date).toLocaleDateString("nl-NL")}
+                                    {new Date(inv.invoice_date).toLocaleDateString(undefined)}
                                   </TableCell>
                                   <TableCell className="whitespace-nowrap">
-                                    {inv.due_date ? new Date(inv.due_date).toLocaleDateString("nl-NL") : "—"}
+                                    {inv.due_date ? new Date(inv.due_date).toLocaleDateString(undefined) : "—"}
                                   </TableCell>
                                   <TableCell>{invoiceStatusLabel(inv.status)}</TableCell>
                                   <TableCell className="text-right tabular-nums">
-                                    €{Number(inv.total).toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    {currencySymbol(data.currency)}{Number(inv.total).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                   </TableCell>
                                   <TableCell className="text-right">
                                     <Button
@@ -382,7 +384,7 @@ export default function PortalDashboard() {
                                       size="icon"
                                       onClick={() => handleDownloadInvoice(inv.id)}
                                       disabled={downloadingId === inv.id || inv.status === "vervallen"}
-                                      title="PDF downloaden"
+                                      title="Download PDF"
                                     >
                                       <Download className="h-4 w-4" />
                                     </Button>

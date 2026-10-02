@@ -1,4 +1,7 @@
 import { useEffect, useState } from "react";
+import { useOpenOnNew } from "@/hooks/use-open-on-new";
+import { rateOptions } from "@/lib/tax-presets";
+import { useTaxSettings } from "@/lib/tax";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
 import type { Company, CompanyProduct, Quote } from "@/lib/db-types";
@@ -25,6 +28,13 @@ interface QuoteLine {
   amount: string;
 }
 
+const statusLabels: Record<string, string> = {
+  concept: "Draft",
+  verzonden: "Sent",
+  geaccepteerd: "Accepted",
+  afgewezen: "Declined",
+};
+
 const statusColors: Record<string, string> = {
   concept: "bg-muted text-muted-foreground",
   verzonden: "bg-primary/10 text-primary",
@@ -39,7 +49,7 @@ const emptyProductForm = {
   internal_notes: "",
   sale_price: "",
   price_includes_vat: false,
-  vat_percentage: "21",
+  vat_percentage: "",
   cost_price: "",
 };
 
@@ -48,17 +58,19 @@ function round2(n: number): number {
 }
 
 function productExVatPrice(p: CompanyProduct): number {
-  const vatPct = p.vat_percentage ?? 21;
+  const vatPct = p.vat_percentage ?? 0;
   return p.price_includes_vat ? p.sale_price / (1 + vatPct / 100) : p.sale_price;
 }
 
 export default function Quotes() {
+  const { currencySymbol: cs, defaultRate, preset } = useTaxSettings();
   const { user } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
   const [quotes, setQuotes] = useState<(Quote & { companies: { name: string | null; contact_person: string | null } | null })[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [open, setOpen] = useState(false);
+  useOpenOnNew(setOpen);
   const [selectedCompany, setSelectedCompany] = useState("");
   const [companyProducts, setCompanyProducts] = useState<CompanyProduct[]>([]);
   const [selectedProducts, setSelectedProducts] = useState<Record<string, number>>({});
@@ -67,7 +79,7 @@ export default function Quotes() {
   const [productForm, setProductForm] = useState(emptyProductForm);
   const [lines, setLines] = useState<QuoteLine[]>([{ description: "", hours: "", hourly_rate: "", amount: "" }]);
   const [notes, setNotes] = useState("");
-  const [btwPercentage, setBtwPercentage] = useState("21");
+  const [btwPercentage, setBtwPercentage] = useState(String(defaultRate));
   const [editOpen, setEditOpen] = useState(false);
   const [quoteToEdit, setQuoteToEdit] = useState<(Quote & { companies: { name: string | null; contact_person: string | null } | null }) | null>(null);
   const [editQuoteNumber, setEditQuoteNumber] = useState("");
@@ -106,7 +118,7 @@ export default function Quotes() {
     setSelectedProducts({});
     setLines([]);
     setNotes("");
-    setBtwPercentage("21");
+    setBtwPercentage(String(defaultRate));
   };
 
   const openNewProduct = () => {
@@ -124,7 +136,7 @@ export default function Quotes() {
       internal_notes: p.internal_notes ?? "",
       sale_price: String(p.sale_price),
       price_includes_vat: Boolean(p.price_includes_vat),
-      vat_percentage: String(p.vat_percentage ?? 21),
+      vat_percentage: String(p.vat_percentage ?? defaultRate),
       cost_price: p.cost_price != null ? String(p.cost_price) : "",
     });
     setProductOpen(true);
@@ -139,22 +151,22 @@ export default function Quotes() {
       internal_notes: productForm.internal_notes || null,
       sale_price: parseFloat(productForm.sale_price),
       price_includes_vat: productForm.price_includes_vat,
-      vat_percentage: parseFloat(productForm.vat_percentage) || 21,
+      vat_percentage: parseFloat(productForm.vat_percentage) || defaultRate,
       cost_price: productForm.cost_price ? parseFloat(productForm.cost_price) : null,
     };
     try {
       if (editProduct) {
         await api.updateCompanyProduct(selectedCompany, editProduct.id, body);
-        toast({ title: "Product bijgewerkt" });
+        toast({ title: "Product updated" });
       } else {
         await api.createCompanyProduct(selectedCompany, body);
-        toast({ title: "Product toegevoegd" });
+        toast({ title: "Product added" });
       }
       setProductOpen(false);
       setEditProduct(null);
       await refreshCompanyProducts();
     } catch (e: unknown) {
-      toast({ title: "Fout", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
+      toast({ title: "Error", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
     }
   };
 
@@ -187,12 +199,12 @@ export default function Quotes() {
         };
       });
     if (toAdd.length === 0) {
-      toast({ title: "Geen producten geselecteerd", description: "Vink minimaal één product aan.", variant: "destructive" });
+      toast({ title: "No products selected", description: "Select at least one product.", variant: "destructive" });
       return;
     }
     setLines((prev) => [...prev, ...toAdd]);
     setSelectedProducts({});
-    toast({ title: `${toAdd.length} productregel${toAdd.length === 1 ? "" : "s"} toegevoegd`, description: "Je kunt de regels hieronder nog aanpassen." });
+    toast({ title: `${toAdd.length} product line${toAdd.length === 1 ? "" : "s"} added`, description: "You can still edit the lines below." });
   };
 
   const validLines = () =>
@@ -204,7 +216,7 @@ export default function Quotes() {
     if (!user || !selectedCompany) return;
 
     const quoteLines = validLines().map((l) => ({
-      description: l.description.trim() || "Werkzaamheden",
+      description: l.description.trim() || "Work",
       hours: l.hours ? parseFloat(l.hours) : null,
       hourly_rate: l.hourly_rate ? parseFloat(l.hourly_rate) : null,
       amount: parseFloat(l.amount) || 0,
@@ -212,8 +224,8 @@ export default function Quotes() {
 
     if (quoteLines.length === 0 || quoteLines.every((l) => l.amount <= 0)) {
       toast({
-        title: "Geen regels",
-        description: "Voeg handmatig regels toe of selecteer producten.",
+        title: "No lines",
+        description: "Add lines manually or select products.",
         variant: "destructive",
       });
       return;
@@ -225,8 +237,8 @@ export default function Quotes() {
     const total = round2(subtotal + btwAmount);
 
     const now = new Date();
-    const count = quotes.filter((q) => q.quote_number.startsWith(`O${now.getFullYear()}`)).length + 1;
-    const quoteNumber = `O${now.getFullYear()}-${String(count).padStart(4, "0")}`;
+    const count = quotes.filter((q) => q.quote_number.startsWith(`Q${now.getFullYear()}`)).length + 1;
+    const quoteNumber = `Q${now.getFullYear()}-${String(count).padStart(4, "0")}`;
 
     try {
       const quote = await api.createQuote({
@@ -252,9 +264,9 @@ export default function Quotes() {
       setOpen(false);
       resetCreateForm();
       fetchData();
-      toast({ title: "Offerte aangemaakt", description: quoteNumber });
+      toast({ title: "Quote created", description: quoteNumber });
     } catch (error: unknown) {
-      toast({ title: "Fout", description: error instanceof Error ? error.message : String(error), variant: "destructive" });
+      toast({ title: "Error", description: error instanceof Error ? error.message : String(error), variant: "destructive" });
     }
   };
 
@@ -265,12 +277,12 @@ export default function Quotes() {
     try {
       const invoice = await api.createInvoiceFromQuote(quote.id);
       toast({
-        title: "Factuur aangemaakt",
-        description: `${invoice.invoice_number} — gebaseerd op ${quote.quote_number}`,
+        title: "Invoice created",
+        description: `${invoice.invoice_number} (from ${quote.quote_number})`,
       });
-      navigate("/facturen");
+      navigate("/invoices");
     } catch (error: unknown) {
-      toast({ title: "Fout", description: error instanceof Error ? error.message : String(error), variant: "destructive" });
+      toast({ title: "Error", description: error instanceof Error ? error.message : String(error), variant: "destructive" });
     } finally {
       setCreatingInvoiceFromId(null);
     }
@@ -308,27 +320,27 @@ export default function Quotes() {
       setEditOpen(false);
       setQuoteToEdit(null);
       await fetchData();
-      toast({ title: "Offerte bijgewerkt" });
+      toast({ title: "Quote updated" });
     } catch (e: unknown) {
-      toast({ title: "Fout", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
+      toast({ title: "Error", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
     }
   };
 
   const handleDeleteQuote = async (q: Quote) => {
-    if (!confirm(`Offerte ${q.quote_number} verwijderen?`)) return;
+    if (!confirm(`Delete quote ${q.quote_number}?`)) return;
     try {
       await api.deleteQuote(q.id);
       await fetchData();
-      toast({ title: "Offerte verwijderd" });
+      toast({ title: "Quote deleted" });
     } catch (e: unknown) {
-      toast({ title: "Fout", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
+      toast({ title: "Error", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
     }
   };
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Offertes</h1>
+        <h1 className="text-xl font-semibold">Quotes</h1>
         <Dialog
           open={open}
           onOpenChange={(v) => {
@@ -337,51 +349,51 @@ export default function Quotes() {
           }}
         >
           <DialogTrigger asChild>
-            <Button><Plus className="mr-2 h-4 w-4" />Offerte aanmaken</Button>
+            <Button><Plus className="mr-2 h-4 w-4" />Create quote</Button>
           </DialogTrigger>
           <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>Nieuwe offerte</DialogTitle>
+              <DialogTitle>New quote</DialogTitle>
             </DialogHeader>
             <div className="grid gap-4 py-4">
               <div className="grid gap-2">
-                <Label>Bedrijf</Label>
+                <Label>Company</Label>
                 <Select value={selectedCompany} onValueChange={setSelectedCompany}>
-                  <SelectTrigger><SelectValue placeholder="Selecteer bedrijf" /></SelectTrigger>
+                  <SelectTrigger><SelectValue placeholder="Select company" /></SelectTrigger>
                   <SelectContent>
-                    {companies.map((c) => <SelectItem key={c.id} value={c.id}>{c.name || c.contact_person || "Klant"}</SelectItem>)}
+                    {companies.map((c) => <SelectItem key={c.id} value={c.id}>{c.name || c.contact_person || "Client"}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
 
               <div className="grid gap-2">
                 <div className="flex items-center justify-between gap-2">
-                  <Label>Regels</Label>
+                  <Label>Lines</Label>
                   <Button type="button" variant="outline" size="sm" onClick={addLine}>
-                    <Plus className="mr-1 h-3 w-3" />Regel toevoegen
+                    <Plus className="mr-1 h-3 w-3" />Add line
                   </Button>
                 </div>
                 {lines.length === 0 ? (
                   <p className="text-sm text-muted-foreground rounded-md border border-dashed p-4 text-center">
-                    Nog geen regels. Voeg handmatig een regel toe of kies producten hieronder.
+                    No lines yet. Add a line manually or pick products below.
                   </p>
                 ) : (
                   lines.map((line, i) => (
                     <div key={i} className="grid grid-cols-12 gap-2 items-end">
                       <div className="col-span-4">
-                        <Input placeholder="Omschrijving" value={line.description} onChange={(e) => updateLine(i, "description", e.target.value)} />
+                        <Input placeholder="Description" value={line.description} onChange={(e) => updateLine(i, "description", e.target.value)} />
                       </div>
                       <div className="col-span-2">
-                        <Input type="number" placeholder="Uren" value={line.hours} onChange={(e) => updateLine(i, "hours", e.target.value)} />
+                        <Input type="number" placeholder="Hours" value={line.hours} onChange={(e) => updateLine(i, "hours", e.target.value)} />
                       </div>
                       <div className="col-span-2">
-                        <Input type="number" placeholder="Tarief" value={line.hourly_rate} onChange={(e) => updateLine(i, "hourly_rate", e.target.value)} />
+                        <Input type="number" placeholder="Rate" value={line.hourly_rate} onChange={(e) => updateLine(i, "hourly_rate", e.target.value)} />
                       </div>
                       <div className="col-span-3">
-                        <Input type="number" placeholder="Bedrag" value={line.amount} onChange={(e) => updateLine(i, "amount", e.target.value)} />
+                        <Input type="number" placeholder="Amount" value={line.amount} onChange={(e) => updateLine(i, "amount", e.target.value)} />
                       </div>
                       <div className="col-span-1">
-                        <Button type="button" variant="ghost" size="icon" onClick={() => removeLine(i)} title="Regel verwijderen">
+                        <Button type="button" variant="ghost" size="icon" onClick={() => removeLine(i)} title="Remove line">
                           <Trash2 className="h-3 w-3" />
                         </Button>
                       </div>
@@ -393,10 +405,10 @@ export default function Quotes() {
               {selectedCompany && (
                 <div className="grid gap-2 rounded-md border p-3 bg-muted/20">
                   <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <Label className="mb-0">Producten van klant</Label>
+                    <Label className="mb-0">Client products</Label>
                     <div className="flex gap-2">
                       <Button type="button" variant="outline" size="sm" onClick={openNewProduct}>
-                        <Plus className="mr-1 h-3 w-3" />Nieuw product
+                        <Plus className="mr-1 h-3 w-3" />New product
                       </Button>
                       <Button
                         type="button"
@@ -404,15 +416,15 @@ export default function Quotes() {
                         onClick={addSelectedProductsToLines}
                         disabled={!companyProducts.some((p) => (selectedProducts[p.id] ?? 0) > 0)}
                       >
-                        Toevoegen aan regels
+                        Add to lines
                       </Button>
                     </div>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Selecteer producten en voeg ze toe. Daarna kun je omschrijving en bedrag per regel nog aanpassen.
+                    Select products and add them. You can then still edit the description and amount of each line.
                   </p>
                   {companyProducts.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">Nog geen producten voor deze klant.</p>
+                    <p className="text-sm text-muted-foreground">No products for this client yet.</p>
                   ) : (
                     <div className="border rounded-md divide-y bg-background">
                       {companyProducts.map((p) => {
@@ -434,7 +446,7 @@ export default function Quotes() {
                               {p.serial_number && <p className="text-xs text-muted-foreground font-mono">{p.serial_number}</p>}
                             </div>
                             <span className="text-sm text-muted-foreground shrink-0 w-24 text-right">
-                              {exVatPrice.toLocaleString("nl-NL", { minimumFractionDigits: 2 })} excl.
+                              {exVatPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })} excl.
                             </span>
                             <Input
                               type="number"
@@ -447,7 +459,7 @@ export default function Quotes() {
                                 setSelectedProducts((prev) => ({ ...prev, [p.id]: n }));
                               }}
                             />
-                            <Button type="button" variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => openEditProduct(p)} title="Product bewerken">
+                            <Button type="button" variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => openEditProduct(p)} title="Edit product">
                               <Pencil className="h-3.5 w-3.5" />
                             </Button>
                           </div>
@@ -460,7 +472,7 @@ export default function Quotes() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">
-                  <Label>BTW-percentage</Label>
+                  <Label>Tax rate (%)</Label>
                   <Input type="number" value={btwPercentage} onChange={(e) => setBtwPercentage(e.target.value)} />
                 </div>
               </div>
@@ -472,16 +484,16 @@ export default function Quotes() {
                 if (subtotal <= 0) return null;
                 return (
                   <div className="rounded-md border bg-muted/30 p-3 text-sm">
-                    Totaal: <span className="font-medium">€{grossTotal.toLocaleString("nl-NL", { minimumFractionDigits: 2 })}</span>
-                    <span className="text-muted-foreground"> (excl. €{subtotal.toLocaleString("nl-NL", { minimumFractionDigits: 2 })} + BTW)</span>
+                    Total: <span className="font-medium">{cs}{grossTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                    <span className="text-muted-foreground"> (excl. {cs}{subtotal.toLocaleString(undefined, { minimumFractionDigits: 2 })} + tax)</span>
                   </div>
                 );
               })()}
               <div className="grid gap-2">
-                <Label>Notities</Label>
+                <Label>Notes</Label>
                 <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} />
               </div>
-              <Button onClick={handleCreate}>Offerte aanmaken</Button>
+              <Button onClick={handleCreate}>Create quote</Button>
             </div>
           </DialogContent>
         </Dialog>
@@ -489,26 +501,24 @@ export default function Quotes() {
         <Dialog open={productOpen} onOpenChange={(v) => { setProductOpen(v); if (!v) setEditProduct(null); }}>
           <DialogContent className="max-w-sm">
             <DialogHeader>
-              <DialogTitle>{editProduct ? "Product bewerken" : "Product toevoegen"}</DialogTitle>
+              <DialogTitle>{editProduct ? "Edit product" : "Add product"}</DialogTitle>
             </DialogHeader>
             <div className="space-y-4 py-2">
               <div className="grid gap-2">
-                <Label>Naam *</Label>
-                <Input value={productForm.name} onChange={(e) => setProductForm((f) => ({ ...f, name: e.target.value }))} placeholder="Bijv. Website licentie" />
+                <Label>Name *</Label>
+                <Input value={productForm.name} onChange={(e) => setProductForm((f) => ({ ...f, name: e.target.value }))} placeholder="e.g. Website licence" />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="grid gap-2">
-                  <Label>Serienummer</Label>
+                  <Label>Serial number</Label>
                   <Input value={productForm.serial_number} onChange={(e) => setProductForm((f) => ({ ...f, serial_number: e.target.value }))} placeholder="SN-12345" className="font-mono text-sm" />
                 </div>
                 <div className="grid gap-2">
-                  <Label>BTW (%)</Label>
+                  <Label>Tax rate (%)</Label>
                   <Select value={productForm.vat_percentage} onValueChange={(v) => setProductForm((f) => ({ ...f, vat_percentage: v }))}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="21">21%</SelectItem>
-                      <SelectItem value="9">9%</SelectItem>
-                      <SelectItem value="0">0%</SelectItem>
+                      {rateOptions(preset, Number(productForm.vat_percentage)).map((r) => <SelectItem key={r} value={String(r)}>{r}%</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
@@ -518,25 +528,25 @@ export default function Quotes() {
                 <Input type="url" value={productForm.url} onChange={(e) => setProductForm((f) => ({ ...f, url: e.target.value }))} placeholder="https://…" />
               </div>
               <div className="grid gap-2">
-                <Label>Interne notities</Label>
+                <Label>Internal notes</Label>
                 <Textarea rows={2} value={productForm.internal_notes} onChange={(e) => setProductForm((f) => ({ ...f, internal_notes: e.target.value }))} />
               </div>
               <div className="flex items-center gap-3">
                 <Switch id="quote-incl-vat" checked={productForm.price_includes_vat} onCheckedChange={(v) => setProductForm((f) => ({ ...f, price_includes_vat: v }))} />
-                <Label htmlFor="quote-incl-vat" className="cursor-pointer">Prijs inclusief BTW invoeren</Label>
+                <Label htmlFor="quote-incl-vat" className="cursor-pointer">Enter price including tax</Label>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="grid gap-2">
-                  <Label>Verkoopprijs ({productForm.price_includes_vat ? "incl." : "excl."} BTW) *</Label>
+                  <Label>Sales price ({productForm.price_includes_vat ? "incl." : "excl."} tax) *</Label>
                   <Input type="number" step="0.01" min="0" value={productForm.sale_price} onChange={(e) => setProductForm((f) => ({ ...f, sale_price: e.target.value }))} />
                 </div>
                 <div className="grid gap-2">
-                  <Label>Inkoopprijs (excl. BTW)</Label>
+                  <Label>Cost price (excl. tax)</Label>
                   <Input type="number" step="0.01" min="0" value={productForm.cost_price} onChange={(e) => setProductForm((f) => ({ ...f, cost_price: e.target.value }))} placeholder="optioneel" />
                 </div>
               </div>
               <Button onClick={handleSaveProduct} disabled={!productForm.name.trim() || !productForm.sale_price}>
-                {editProduct ? "Opslaan" : "Toevoegen"}
+                {editProduct ? "Save" : "Add"}
               </Button>
             </div>
           </DialogContent>
@@ -547,7 +557,7 @@ export default function Quotes() {
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12 text-muted-foreground">
             <FileCheck className="h-12 w-12 mb-4" />
-            <p>Nog geen offertes</p>
+            <p>No quotes yet</p>
           </CardContent>
         </Card>
       ) : (
@@ -555,39 +565,39 @@ export default function Quotes() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Nummer</TableHead>
-                <TableHead>Bedrijf</TableHead>
-                <TableHead>Datum</TableHead>
-                <TableHead>Totaal</TableHead>
+                <TableHead>Number</TableHead>
+                <TableHead>Company</TableHead>
+                <TableHead>Date</TableHead>
+                <TableHead>Total</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead className="w-20 text-right">Acties</TableHead>
+                <TableHead className="w-20 text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {quotes.map((quote) => (
                 <TableRow key={quote.id}>
                   <TableCell className="font-medium">{quote.quote_number}</TableCell>
-                  <TableCell>{quote.companies?.name || quote.companies?.contact_person || "Klant"}</TableCell>
-                  <TableCell>{new Date(quote.quote_date).toLocaleDateString("nl-NL")}</TableCell>
-                  <TableCell>€{Number(quote.total).toLocaleString("nl-NL", { minimumFractionDigits: 2 })}</TableCell>
+                  <TableCell>{quote.companies?.name || quote.companies?.contact_person || "Client"}</TableCell>
+                  <TableCell>{new Date(quote.quote_date).toLocaleDateString(undefined)}</TableCell>
+                  <TableCell>{cs}{Number(quote.total).toLocaleString(undefined, { minimumFractionDigits: 2 })}</TableCell>
                   <TableCell>
-                    <Badge variant="secondary" className={statusColors[quote.status]}>{quote.status}</Badge>
+                    <Badge variant="secondary" className={statusColors[quote.status]}>{statusLabels[quote.status] ?? quote.status}</Badge>
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-1">
-                      <Button variant="ghost" size="icon" onClick={() => openEdit(quote)} title="Bewerken">
+                      <Button variant="ghost" size="icon" onClick={() => openEdit(quote)} title="Edit">
                         <Pencil className="h-4 w-4" />
                       </Button>
                       <Button
                         variant="ghost"
                         size="icon"
                         onClick={() => handleCreateInvoiceFromQuote(quote)}
-                        title="Factuur maken van offerte"
+                        title="Create invoice from quote"
                         disabled={creatingInvoiceFromId === quote.id}
                       >
                         <FileText className="h-4 w-4" />
                       </Button>
-                      <Button variant="ghost" size="icon" onClick={() => handleDownloadPDF(quote)} title="PDF downloaden">
+                      <Button variant="ghost" size="icon" onClick={() => handleDownloadPDF(quote)} title="Download PDF">
                         <Download className="h-4 w-4" />
                       </Button>
                       <Button
@@ -595,7 +605,7 @@ export default function Quotes() {
                         size="icon"
                         className="text-destructive hover:text-destructive hover:bg-destructive/10"
                         onClick={() => handleDeleteQuote(quote)}
-                        title="Offerte verwijderen"
+                        title="Delete quote"
                       >
                         <Trash2 className="h-4 w-4" />
                       </Button>
@@ -611,20 +621,20 @@ export default function Quotes() {
       <Dialog open={editOpen} onOpenChange={(v) => { setEditOpen(v); if (!v) setQuoteToEdit(null); }}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>Offerte bewerken</DialogTitle>
+            <DialogTitle>Edit quote</DialogTitle>
           </DialogHeader>
           <div className="grid gap-4 py-2">
             <div className="grid gap-2">
-              <Label>Offertenummer</Label>
+              <Label>Quote number</Label>
               <Input value={editQuoteNumber} onChange={(e) => setEditQuoteNumber(e.target.value)} />
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
-                <Label>Offertedatum</Label>
+                <Label>Quote date</Label>
                 <Input type="date" value={editQuoteDate} onChange={(e) => setEditQuoteDate(e.target.value)} />
               </div>
               <div className="grid gap-2">
-                <Label>Geldig t/m</Label>
+                <Label>Valid until</Label>
                 <Input type="date" value={editValidUntil} onChange={(e) => setEditValidUntil(e.target.value)} />
               </div>
             </div>
@@ -633,18 +643,18 @@ export default function Quotes() {
               <Select value={editStatus} onValueChange={setEditStatus}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="concept">concept</SelectItem>
-                  <SelectItem value="verzonden">verzonden</SelectItem>
-                  <SelectItem value="geaccepteerd">geaccepteerd</SelectItem>
-                  <SelectItem value="afgewezen">afgewezen</SelectItem>
+                  <SelectItem value="concept">Draft</SelectItem>
+                  <SelectItem value="verzonden">Sent</SelectItem>
+                  <SelectItem value="geaccepteerd">Accepted</SelectItem>
+                  <SelectItem value="afgewezen">Declined</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div className="grid gap-2">
-              <Label>Notities</Label>
+              <Label>Notes</Label>
               <Textarea value={editNotes} onChange={(e) => setEditNotes(e.target.value)} />
             </div>
-            <Button onClick={handleSaveEdit}>Opslaan</Button>
+            <Button onClick={handleSaveEdit}>Save</Button>
           </div>
         </DialogContent>
       </Dialog>

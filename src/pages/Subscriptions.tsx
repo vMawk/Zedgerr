@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useState, useCallback } from "react";
+import { useTaxSettings } from "@/lib/tax";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
 import type { Subscription, SubscriptionPayment } from "@/lib/db-types";
@@ -20,11 +21,11 @@ import {
 type Category = "prive" | "zakelijk";
 
 const billingCycleLabels: Record<string, string> = {
-  wekelijks: "Wekelijks",
-  maandelijks: "Maandelijks",
-  kwartaal: "Per kwartaal",
-  halfjaarlijks: "Halfjaarlijks",
-  jaarlijks: "Jaarlijks",
+  wekelijks: "Weekly",
+  maandelijks: "Monthly",
+  kwartaal: "Quarterly",
+  halfjaarlijks: "Every 6 months",
+  jaarlijks: "Yearly",
 };
 
 const billingCycleMonthly: Record<string, number> = {
@@ -50,16 +51,16 @@ const paymentMethodIcons: Record<string, typeof CreditCard> = {
 
 const paymentMethodLabels: Record<string, string> = {
   rekening: "Bank",
-  creditcard: "Creditcard",
+  creditcard: "Credit card",
   ideal: "iDEAL",
   paypal: "PayPal",
-  incasso: "Incasso",
-  overig: "Overig",
+  incasso: "Direct debit",
+  overig: "Other",
 };
 
 const monthNames = [
-  "jan", "feb", "mrt", "apr", "mei", "jun",
-  "jul", "aug", "sep", "okt", "nov", "dec",
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ];
 
 const emptyForm: Partial<Subscription> = {
@@ -77,11 +78,7 @@ const emptyForm: Partial<Subscription> = {
 
 function formatDate(d: string | null | undefined): string {
   if (!d) return "—";
-  return new Date(d).toLocaleDateString("nl-NL", { day: "numeric", month: "short", year: "numeric" });
-}
-
-function formatCurrency(n: number): string {
-  return n.toLocaleString("nl-NL", { style: "currency", currency: "EUR" });
+  return new Date(d).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
 }
 
 function daysUntil(d: string | null | undefined): number | null {
@@ -111,7 +108,7 @@ function generatePeriods(sub: Subscription): string[] {
   const rangeStart = new Date(currentYear - 1, 0, 1);
   const rangeEnd = new Date(currentYear, 11, 31);
 
-  let cursor = new Date(startYear, startMonth, 1);
+  const cursor = new Date(startYear, startMonth, 1);
 
   if (cursor > rangeEnd) {
     while (cursor > rangeStart) {
@@ -154,7 +151,7 @@ function PaymentTimeline({
 
   return (
     <div className="space-y-2 pt-3 border-t">
-      <p className="text-xs font-medium text-muted-foreground">Betaalhistorie</p>
+      <p className="text-xs font-medium text-muted-foreground">Payment history</p>
       <div className="grid grid-cols-4 gap-1.5">
         {periods.map((period) => {
           const [y, m] = period.split("-");
@@ -196,6 +193,9 @@ function PaymentTimeline({
 }
 
 export default function Subscriptions() {
+  const { currency } = useTaxSettings();
+  const formatCurrency = (n: number) => n.toLocaleString(undefined, { style: "currency", currency });
+  const { currencySymbol: cs } = useTaxSettings();
   const { user } = useAuth();
   const { toast } = useToast();
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
@@ -264,7 +264,7 @@ export default function Subscriptions() {
         await api.toggleSubscriptionPayment(subId, periodDate);
         await fetchPayments(subId);
       } catch (error: unknown) {
-        toast({ title: "Fout", description: error instanceof Error ? error.message : String(error), variant: "destructive" });
+        toast({ title: "Error", description: error instanceof Error ? error.message : String(error), variant: "destructive" });
       }
     },
     [fetchPayments, toast],
@@ -304,7 +304,7 @@ export default function Subscriptions() {
         new Set(
           subscriptions.flatMap((s) => s.tags ?? []).map((t) => t.trim()).filter(Boolean),
         ),
-      ).sort((a, b) => a.localeCompare(b, "nl-NL")),
+      ).sort((a, b) => a.localeCompare(b)),
     [subscriptions],
   );
 
@@ -319,7 +319,7 @@ export default function Subscriptions() {
 
   const handleSave = async () => {
     if (!user || !form.name?.trim()) {
-      toast({ title: "Vul een naam in", variant: "destructive" });
+      toast({ title: "Enter a name", variant: "destructive" });
       return;
     }
     try {
@@ -336,17 +336,17 @@ export default function Subscriptions() {
       };
       if (editId) {
         await api.updateSubscription(editId, payload);
-        toast({ title: "Abonnement bijgewerkt" });
+        toast({ title: "Subscription updated" });
       } else {
         await api.createSubscription(payload as Partial<Subscription> & { name: string });
-        toast({ title: "Abonnement toegevoegd" });
+        toast({ title: "Subscription added" });
       }
       setOpen(false);
       setForm(emptyForm);
       setEditId(null);
       fetchSubscriptions();
     } catch (error: unknown) {
-      toast({ title: "Fout", description: error instanceof Error ? error.message : String(error), variant: "destructive" });
+      toast({ title: "Error", description: error instanceof Error ? error.message : String(error), variant: "destructive" });
     }
   };
 
@@ -365,16 +365,16 @@ export default function Subscriptions() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Weet je zeker dat je dit abonnement wilt verwijderen?")) return;
+    if (!confirm("Delete this subscription?")) return;
     await api.deleteSubscription(id);
     fetchSubscriptions();
-    toast({ title: "Abonnement verwijderd" });
+    toast({ title: "Subscription deleted" });
   };
 
   const updateField = (field: string, value: string | number | null | undefined) =>
     setForm((prev) => ({ ...prev, [field]: value }));
 
-  const quickTags = ["Noodzakelijk", "Luxe", "Hobby", "Vrije tijd", "Werk", "Gezondheid", "Entertainment", "Besparen"];
+  const quickTags = ["Essential", "Luxury", "Hobby", "Leisure", "Work", "Health", "Entertainment", "Savings"];
 
   const preserveScroll = (updater: () => void) => {
     const y = window.scrollY;
@@ -399,7 +399,7 @@ export default function Subscriptions() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Abonnementen</h1>
+        <h1 className="text-xl font-semibold">Subscriptions</h1>
         <Dialog
           open={open}
           onOpenChange={(v) => {
@@ -413,27 +413,27 @@ export default function Subscriptions() {
           <DialogTrigger asChild>
             <Button>
               <Plus className="mr-2 h-4 w-4" />
-              Abonnement toevoegen
+              Add subscription
             </Button>
           </DialogTrigger>
           <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>{editId ? "Abonnement bewerken" : "Nieuw abonnement"}</DialogTitle>
+              <DialogTitle>{editId ? "Edit subscription" : "New subscription"}</DialogTitle>
             </DialogHeader>
             <div className="grid gap-4 py-4">
               <div className="grid gap-2">
-                <Label>Naam *</Label>
+                <Label>Name *</Label>
                 <Input
-                  placeholder="bijv. Netflix, Spotify, KPN..."
+                  placeholder="e.g. Netflix, Spotify, Adobe…"
                   value={form.name || ""}
                   onChange={(e) => updateField("name", e.target.value)}
                 />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">
-                  <Label>Bedrag per periode</Label>
+                  <Label>Amount per period</Label>
                   <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">€</span>
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">{cs}</span>
                     <Input
                       type="number"
                       step="0.01"
@@ -445,7 +445,7 @@ export default function Subscriptions() {
                   </div>
                 </div>
                 <div className="grid gap-2">
-                  <Label>Betaalcyclus</Label>
+                  <Label>Billing cycle</Label>
                   <Select
                     value={form.billing_cycle || "maandelijks"}
                     onValueChange={(v) => updateField("billing_cycle", v)}
@@ -465,28 +465,28 @@ export default function Subscriptions() {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">
-                  <Label>Betalingsmethode</Label>
+                  <Label>Payment method</Label>
                   <Select
                     value={form.payment_method || ""}
                     onValueChange={(v) => updateField("payment_method", v)}
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="Selecteer..." />
+                      <SelectValue placeholder="Select…" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="rekening">Bankrekening</SelectItem>
-                      <SelectItem value="creditcard">Creditcard</SelectItem>
+                      <SelectItem value="rekening">Bank account</SelectItem>
+                      <SelectItem value="creditcard">Credit card</SelectItem>
                       <SelectItem value="ideal">iDEAL</SelectItem>
                       <SelectItem value="paypal">PayPal</SelectItem>
-                      <SelectItem value="incasso">Automatische incasso</SelectItem>
-                      <SelectItem value="overig">Overig</SelectItem>
+                      <SelectItem value="incasso">Direct debit</SelectItem>
+                      <SelectItem value="overig">Other</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
                 <div className="grid gap-2">
-                  <Label>Contractnummer</Label>
+                  <Label>Contract number</Label>
                   <Input
-                    placeholder="Optioneel"
+                    placeholder="Optional"
                     value={form.contract_number || ""}
                     onChange={(e) => updateField("contract_number", e.target.value)}
                   />
@@ -494,7 +494,7 @@ export default function Subscriptions() {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">
-                  <Label>Contract t/m</Label>
+                  <Label>Contract ends</Label>
                   <Input
                     type="date"
                     value={form.contract_end_date || ""}
@@ -502,7 +502,7 @@ export default function Subscriptions() {
                   />
                 </div>
                 <div className="grid gap-2">
-                  <Label>Volgende betaling</Label>
+                  <Label>Next payment</Label>
                   <Input
                     type="date"
                     value={form.next_payment_date || ""}
@@ -511,9 +511,9 @@ export default function Subscriptions() {
                 </div>
               </div>
               <div className="grid gap-2">
-                <Label>Notities</Label>
+                <Label>Notes</Label>
                 <Textarea
-                  placeholder="Optioneel"
+                  placeholder="Optional"
                   value={form.notes || ""}
                   onChange={(e) => updateField("notes", e.target.value)}
                 />
@@ -521,7 +521,7 @@ export default function Subscriptions() {
               <div className="grid gap-2">
                 <Label>Tags</Label>
                 <Input
-                  placeholder="bijv. Noodzakelijk, Luxe, Hobby"
+                  placeholder="e.g. Essential, Luxury, Hobby"
                   value={(form.tags ?? []).join(", ")}
                   onChange={(e) =>
                     preserveScroll(() => {
@@ -553,7 +553,7 @@ export default function Subscriptions() {
                   })}
                 </div>
               </div>
-              <Button onClick={handleSave}>{editId ? "Opslaan" : "Toevoegen"}</Button>
+              <Button onClick={handleSave}>{editId ? "Save" : "Add"}</Button>
             </div>
           </DialogContent>
         </Dialog>
@@ -569,7 +569,7 @@ export default function Subscriptions() {
               : "text-muted-foreground hover:text-foreground"
           }`}
         >
-          Privé
+          Personal
         </button>
         <button
           onClick={() => setCategory("zakelijk")}
@@ -579,7 +579,7 @@ export default function Subscriptions() {
               : "text-muted-foreground hover:text-foreground"
           }`}
         >
-          Zakelijk
+          Business
         </button>
       </div>
 
@@ -591,12 +591,12 @@ export default function Subscriptions() {
           </div>
           <div>
             <p className="text-sm text-muted-foreground">
-              Geschatte maandelijkse kosten ({category === "prive" ? "privé" : "zakelijk"})
+              Estimated monthly cost ({category === "prive" ? "personal" : "business"})
             </p>
             <p className="text-2xl font-bold">{formatCurrency(monthlyTotal)}</p>
           </div>
           <div className="ml-auto text-right">
-            <p className="text-sm text-muted-foreground">Aantal abonnementen</p>
+            <p className="text-sm text-muted-foreground">Subscriptions</p>
             <p className="text-2xl font-bold">{filtered.length}</p>
           </div>
         </CardContent>
@@ -606,16 +606,16 @@ export default function Subscriptions() {
         <CardContent className="pt-6">
           <div className="grid gap-3 md:grid-cols-4">
             <Input
-              placeholder="Zoek op naam, contractnummer of notitie..."
+              placeholder="Search by name, contract number or note…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
             <Select value={cycleFilter} onValueChange={setCycleFilter}>
               <SelectTrigger>
-                <SelectValue placeholder="Alle cycli" />
+                <SelectValue placeholder="All cycles" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">Alle cycli</SelectItem>
+                <SelectItem value="all">All cycles</SelectItem>
                 {Object.entries(billingCycleLabels).map(([key, label]) => (
                   <SelectItem key={key} value={key}>
                     {label}
@@ -625,21 +625,21 @@ export default function Subscriptions() {
             </Select>
             <Select value={paymentFilter} onValueChange={setPaymentFilter}>
               <SelectTrigger>
-                <SelectValue placeholder="Alle statussen" />
+                <SelectValue placeholder="All statuses" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">Alle betaalstatussen</SelectItem>
-                <SelectItem value="paid">PAID deze maand</SelectItem>
-                <SelectItem value="open">Open deze maand</SelectItem>
-                <SelectItem value="na">Niet van toepassing deze maand</SelectItem>
+                <SelectItem value="all">All payment statuses</SelectItem>
+                <SelectItem value="paid">Paid this month</SelectItem>
+                <SelectItem value="open">Open this month</SelectItem>
+                <SelectItem value="na">Not due this month</SelectItem>
               </SelectContent>
             </Select>
             <Select value={tagFilter} onValueChange={setTagFilter}>
               <SelectTrigger>
-                <SelectValue placeholder="Alle tags" />
+                <SelectValue placeholder="All tags" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">Alle tags</SelectItem>
+                <SelectItem value="all">All tags</SelectItem>
                 {allTags.map((tag) => (
                   <SelectItem key={tag} value={tag}>
                     {tag}
@@ -656,7 +656,7 @@ export default function Subscriptions() {
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12 text-muted-foreground">
             <RepeatIcon className="h-12 w-12 mb-4" />
-            <p>Nog geen {category === "prive" ? "privé" : "zakelijke"} abonnementen</p>
+            <p>No {category === "prive" ? "personal" : "business"} subscriptions yet</p>
           </CardContent>
         </Card>
       ) : (
@@ -666,13 +666,13 @@ export default function Subscriptions() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Abonnement</TableHead>
-                    <TableHead>Cyclus</TableHead>
-                    <TableHead>Bedrag</TableHead>
-                    <TableHead>Volgende betaling</TableHead>
-                    <TableHead>Deze maand</TableHead>
+                    <TableHead>Subscription</TableHead>
+                    <TableHead>Cycle</TableHead>
+                    <TableHead>Amount</TableHead>
+                    <TableHead>Next payment</TableHead>
+                    <TableHead>This month</TableHead>
                     <TableHead>Tags</TableHead>
-                    <TableHead className="text-right">Acties</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -697,7 +697,7 @@ export default function Subscriptions() {
                         {sub.payment_method && (
                           <Badge variant="outline" className="text-xs font-normal gap-1">
                             <PaymentIcon className="h-3 w-3" />
-                            {paymentMethodLabels[sub.payment_method] ?? "Overig"}
+                            {paymentMethodLabels[sub.payment_method] ?? "Other"}
                           </Badge>
                         )}
                         {sub.contract_number && (
@@ -722,7 +722,7 @@ export default function Subscriptions() {
                       </span>
                       {nextDays !== null && nextDays >= 0 && nextDays <= 7 && (
                         <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
-                          over {nextDays} {nextDays === 1 ? "dag" : "dagen"}
+                          in {nextDays} {nextDays === 1 ? "day" : "days"}
                         </Badge>
                       )}
                     </div>
@@ -730,7 +730,7 @@ export default function Subscriptions() {
                   <TableCell>
                     {paymentStatus === "paid" && <Badge className="bg-emerald-600 hover:bg-emerald-600">PAID</Badge>}
                     {paymentStatus === "open" && <Badge variant="destructive">OPEN</Badge>}
-                    {paymentStatus === "na" && <Badge variant="secondary">N.V.T.</Badge>}
+                    {paymentStatus === "na" && <Badge variant="secondary">N/A</Badge>}
                   </TableCell>
                   <TableCell>
                     <div className="flex flex-wrap gap-1 max-w-[220px]">
@@ -765,9 +765,9 @@ export default function Subscriptions() {
                       <div className="space-y-2 py-2">
                         {sub.contract_end_date && (
                           <p className="text-xs text-muted-foreground">
-                            Contract t/m: {formatDate(sub.contract_end_date)}
-                            {contractDays !== null && contractDays >= 0 && contractDays <= 30 && " (loopt bijna af)"}
-                            {contractDays !== null && contractDays < 0 && " (afgelopen)"}
+                            Contract ends: {formatDate(sub.contract_end_date)}
+                            {contractDays !== null && contractDays >= 0 && contractDays <= 30 && " (ending soon)"}
+                            {contractDays !== null && contractDays < 0 && " (ended)"}
                           </p>
                         )}
                         {sub.notes && <p className="text-xs text-muted-foreground">{sub.notes}</p>}

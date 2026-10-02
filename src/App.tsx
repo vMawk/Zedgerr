@@ -1,34 +1,37 @@
+import { lazy, Suspense } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Route, Routes, Navigate } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { ThemeProvider } from "next-themes";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { AppLayout } from "@/components/AppLayout";
-import Dashboard from "./pages/Dashboard";
-import Companies from "./pages/Companies";
-import CompanyDetail from "./pages/CompanyDetail";
-import TimeEntries from "./pages/TimeEntries";
-import Invoices from "./pages/Invoices";
-import Quotes from "./pages/Quotes";
-import Reports from "./pages/Reports";
-import Settings from "./pages/Settings";
-import Notes from "./pages/Notes";
-import Subscriptions from "./pages/Subscriptions";
-import Leads from "./pages/Leads";
-import Products from "./pages/Products";
-import Expenses from "./pages/Expenses";
-import Tax from "./pages/Tax";
-import Mileage from "./pages/Mileage";
-import Bankrekening from "./pages/Bankrekening";
-import Boekhouding from "./pages/Boekhouding";
-import FinancieelRapport from "./pages/FinancieelRapport";
-import InviteAccept from "./pages/InviteAccept";
-import NotFound from "./pages/NotFound";
-import Auth from "./pages/Auth";
+import { OnboardingProvider } from "@/components/OnboardingProvider";
 import { PortalProvider, usePortalAuth } from "@/lib/portal-auth";
-import PortalLogin from "./pages/PortalLogin";
-import PortalDashboard from "./pages/PortalDashboard";
+const Dashboard = lazy(() => import("./pages/Dashboard"));
+const Companies = lazy(() => import("./pages/Companies"));
+const CompanyDetail = lazy(() => import("./pages/CompanyDetail"));
+const TimeEntries = lazy(() => import("./pages/TimeEntries"));
+const Invoices = lazy(() => import("./pages/Invoices"));
+const Quotes = lazy(() => import("./pages/Quotes"));
+const Reports = lazy(() => import("./pages/Reports"));
+const Settings = lazy(() => import("./pages/Settings"));
+const Notes = lazy(() => import("./pages/Notes"));
+const Subscriptions = lazy(() => import("./pages/Subscriptions"));
+const Leads = lazy(() => import("./pages/Leads"));
+const Products = lazy(() => import("./pages/Products"));
+const Expenses = lazy(() => import("./pages/Expenses"));
+const Tax = lazy(() => import("./pages/Tax"));
+const Mileage = lazy(() => import("./pages/Mileage"));
+const Bankrekening = lazy(() => import("./pages/Bankrekening"));
+const Boekhouding = lazy(() => import("./pages/Boekhouding"));
+const FinancieelRapport = lazy(() => import("./pages/FinancieelRapport"));
+const InviteAccept = lazy(() => import("./pages/InviteAccept"));
+const NotFound = lazy(() => import("./pages/NotFound"));
+const Auth = lazy(() => import("./pages/Auth"));
+const PortalLogin = lazy(() => import("./pages/PortalLogin"));
+const PortalDashboard = lazy(() => import("./pages/PortalDashboard"));
 
 const queryClient = new QueryClient();
 
@@ -42,7 +45,11 @@ function ProtectedRoutes() {
     );
   }
   if (!user) return <Navigate to="/auth" replace />;
-  return <AppLayout />;
+  return (
+    <OnboardingProvider>
+      <AppLayout />
+    </OnboardingProvider>
+  );
 }
 
 function AuthRoute() {
@@ -58,7 +65,7 @@ function AuthRoute() {
   return <Auth />;
 }
 
-function KlantenportaalPage() {
+function ClientPortalPage() {
   return (
     <PortalProvider>
       <PortalShell />
@@ -80,16 +87,18 @@ function PortalShell() {
 }
 
 const App = () => (
+  <ThemeProvider attribute="class" defaultTheme="system" enableSystem storageKey="zedgerr-theme" disableTransitionOnChange>
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
       <Toaster />
       <Sonner />
       <BrowserRouter>
         <AuthProvider>
+          <Suspense fallback={null}>
           <Routes>
             <Route path="/auth" element={<AuthRoute />} />
             <Route path="/invite" element={<InviteAccept />} />
-            <Route path="/portal" element={<KlantenportaalPage />} />
+            <Route path="/portal" element={<ClientPortalPage />} />
             <Route element={<ProtectedRoutes />}>
               <Route path="/" element={<Dashboard />} />
               <Route path="/companies" element={<Companies />} />
@@ -112,10 +121,12 @@ const App = () => (
             </Route>
             <Route path="*" element={<NotFound />} />
           </Routes>
+          </Suspense>
         </AuthProvider>
       </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>
+  </ThemeProvider>
 );
 
 export default App;

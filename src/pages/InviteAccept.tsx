@@ -30,7 +30,7 @@ export default function InviteAccept() {
     if (!token) { setLoading(false); return; }
     apiRequest<InviteInfo>(`/api/org/invite/info?token=${encodeURIComponent(token)}`)
       .then((data) => { setInfo(data); setLoading(false); })
-      .catch(() => { setError("Uitnodiging niet gevonden of verlopen."); setLoading(false); });
+      .catch(() => { setError("Invitation not found or expired."); setLoading(false); });
   }, [token]);
 
   const handleAccept = async () => {
@@ -41,7 +41,7 @@ export default function InviteAccept() {
         body: JSON.stringify({ token, password }),
       });
       setStoredToken(result.token);
-      toast({ title: `Welkom! Je bent nu lid van de organisatie.` });
+      toast({ title: "Welcome! You have joined the organization." });
       navigate("/", { replace: true });
       window.location.reload();
     } catch (err: unknown) {
@@ -51,16 +51,16 @@ export default function InviteAccept() {
     }
   };
 
-  if (loading) return <div className="flex items-center justify-center min-h-screen"><p className="text-muted-foreground">Uitnodiging laden…</p></div>;
+  if (loading) return <div className="flex items-center justify-center min-h-screen"><p className="text-muted-foreground">Loading invitation…</p></div>;
 
   return (
     <div className="flex items-center justify-center min-h-screen bg-background p-4">
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle>Uitnodiging accepteren</CardTitle>
+          <CardTitle>Accept invitation</CardTitle>
           {info && (
             <CardDescription>
-              Je bent uitgenodigd voor <strong>{info.org_name}</strong> als <strong>{info.role}</strong>.
+              You have been invited to join <strong>{info.org_name}</strong> as <strong>{info.role}</strong>.
             </CardDescription>
           )}
         </CardHeader>
@@ -73,22 +73,22 @@ export default function InviteAccept() {
                 <Input value={info.email} disabled />
               </div>
               <div className="grid gap-1.5">
-                <Label>Wachtwoord</Label>
+                <Label>Password</Label>
                 <Input
                   type="password"
-                  placeholder="Kies een wachtwoord (als je nog geen account hebt)"
+                  placeholder="Choose a password (only if you don't have an account yet)"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && handleAccept()}
                 />
-                <p className="text-xs text-muted-foreground">Heb je al een account? Laat dit veld leeg.</p>
+                <p className="text-xs text-muted-foreground">Already have an account? Leave this field empty.</p>
               </div>
               <Button className="w-full" onClick={handleAccept} disabled={accepting}>
-                {accepting ? "Bezig…" : "Uitnodiging accepteren"}
+                {accepting ? "Working…" : "Accept invitation"}
               </Button>
             </>
           )}
-          {!info && !error && <p className="text-sm text-muted-foreground text-center">Geen geldige uitnodiging.</p>}
+          {!info && !error && <p className="text-sm text-muted-foreground text-center">This invitation is not valid.</p>}
         </CardContent>
       </Card>
     </div>

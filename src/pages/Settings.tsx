@@ -13,8 +13,34 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Plus, Pencil, Trash2, UserPlus, Crown, Shield, Eye, User, Trash } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ThemePicker } from "@/components/ThemeToggle";
+import { TwoFactorCard } from "@/components/settings/TwoFactorCard";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Bell, Building2, Package, Palette, Percent, ShieldCheck, Users } from "lucide-react";
+import { SORTED_PRESETS, OTHER_PRESET, presetFor, rateOptions, bankAccountLabel } from "@/lib/tax-presets";
+import { SUPPORTED_CURRENCIES, currencySymbol } from "@/lib/tax";
+
+const SETTINGS_TABS = [
+  { value: "business", label: "Business", icon: Building2 },
+  { value: "tax", label: "Tax & mileage", icon: Percent },
+  { value: "services", label: "Services", icon: Package },
+  { value: "security", label: "Security", icon: ShieldCheck },
+  { value: "team", label: "Team", icon: Users },
+  { value: "notifications", label: "Notifications", icon: Bell },
+  { value: "appearance", label: "Appearance", icon: Palette },
+] as const;
+
+function initialTab() {
+  const hash = window.location.hash.slice(1);
+  return SETTINGS_TABS.some((t) => t.value === hash) ? hash : "business";
+}
 
 export default function Settings() {
+  const [tab, setTab] = useState(initialTab);
+  const changeTab = (value: string) => {
+    setTab(value);
+    window.history.replaceState(null, "", `#${value}`);
+  };
   const { user } = useAuth();
   const { toast } = useToast();
   const [form, setForm] = useState({
@@ -22,7 +48,8 @@ export default function Settings() {
     street: "", postal_code: "", city: "", country: "",
     kvk_number: "", btw_number: "", iban: "",
     private_name: "", private_street: "", private_postal_code: "", private_city: "", private_country: "",
-    tax_name: "VAT", default_tax_rate: "20", currency: "EUR",
+    tax_name: "VAT", default_tax_rate: "0", currency: "EUR",
+    country_code: "", mileage_rate: "0", distance_unit: "km",
   });
   const [existingId, setExistingId] = useState<string | null>(null);
   const [services, setServices] = useState<Service[]>([]);
@@ -112,8 +139,11 @@ export default function Settings() {
           private_city: data.private_city || "",
           private_country: data.private_country || "",
           tax_name: data.tax_name || "VAT",
-          default_tax_rate: String(data.default_tax_rate ?? 20),
+          default_tax_rate: String(data.default_tax_rate ?? 0),
           currency: data.currency || "EUR",
+          country_code: data.country_code || "",
+          mileage_rate: String(data.mileage_rate ?? 0),
+          distance_unit: data.distance_unit || "km",
         });
       }
     });
@@ -123,15 +153,36 @@ export default function Settings() {
   const handleSave = async () => {
     if (!user) return;
     try {
-      const saved = await api.putBusinessSettings({ ...form, default_tax_rate: Number(form.default_tax_rate) });
+      const saved = await api.putBusinessSettings({
+        ...form,
+        country_code: form.country_code || null,
+        default_tax_rate: Number(form.default_tax_rate) || 0,
+        mileage_rate: Number(form.mileage_rate) || 0,
+      });
+      await queryClient.invalidateQueries({ queryKey: ["business-settings"] });
       if (saved) setExistingId(saved.id);
       toast({ title: "Settings saved" });
     } catch (error: unknown) {
-      toast({ title: "Fout", description: error instanceof Error ? error.message : String(error), variant: "destructive" });
+      toast({ title: "Error", description: error instanceof Error ? error.message : String(error), variant: "destructive" });
     }
   };
 
   const updateField = (field: string, value: string) => setForm((prev) => ({ ...prev, [field]: value }));
+
+  const preset = presetFor(form.country_code);
+
+  const applyCountry = (code: string) => {
+    const p = presetFor(code);
+    setForm((f) => ({
+      ...f,
+      country_code: code,
+      country: code === OTHER_PRESET.code ? f.country : p.name,
+      tax_name: p.taxName,
+      default_tax_rate: String(p.standardRate),
+      currency: p.currency,
+      distance_unit: p.distanceUnit,
+    }));
+  };
 
   const refreshServices = async () => {
     const s = await api.getServices();
@@ -193,8 +244,8 @@ export default function Settings() {
       toast({ title: "Password", description: "Please fill in all fields.", variant: "destructive" });
       return;
     }
-    if (next.length < 6) {
-      toast({ title: "Password", description: "New password must be at least 6 characters.", variant: "destructive" });
+    if (next.length < 8) {
+      toast({ title: "Password", description: "New password must be at least 8 characters.", variant: "destructive" });
       return;
     }
     if (next !== confirm) {
@@ -250,8 +301,21 @@ export default function Settings() {
   };
 
   return (
-    <div className="space-y-6 max-w-2xl">
-      <h1 className="text-xl font-semibold">Settings</h1>
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-xl font-semibold">Settings</h1>
+        <p className="text-sm text-muted-foreground">Manage your business details, tax, security and workspace.</p>
+      </div>
+      <Tabs value={tab} onValueChange={changeTab} className="space-y-6">
+        <TabsList className="h-auto flex-wrap justify-start">
+          {SETTINGS_TABS.map((t) => (
+            <TabsTrigger key={t.value} value={t.value} className="gap-1.5">
+              <t.icon className="h-4 w-4" />
+              {t.label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+        <TabsContent value="business" className="space-y-6 max-w-3xl mt-0">
       <Card>
         <CardHeader>
           <CardTitle>Business details</CardTitle>
@@ -296,66 +360,21 @@ export default function Settings() {
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="grid gap-2">
-              <Label>Company / registration number</Label>
+              <Label>{preset.companyIdLabel}</Label>
               <Input value={form.kvk_number} onChange={(e) => updateField("kvk_number", e.target.value)} />
             </div>
             <div className="grid gap-2">
-              <Label>Tax ID / VAT number</Label>
+              <Label>{preset.taxIdLabel}</Label>
               <Input value={form.btw_number} onChange={(e) => updateField("btw_number", e.target.value)} />
             </div>
           </div>
           <div className="grid gap-2">
-            <Label>IBAN / Bank account</Label>
+            <Label>{bankAccountLabel(form.country_code).label}</Label>
             <Input value={form.iban} onChange={(e) => updateField("iban", e.target.value)} />
           </div>
           <Button onClick={handleSave}>Save</Button>
         </CardContent>
       </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Tax & currency</CardTitle>
-          <CardDescription>Configure your local tax name, default rate, and currency. Works for VAT, GST, Sales Tax, IVA, and more.</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-3 gap-4">
-            <div className="grid gap-2">
-              <Label>Tax label</Label>
-              <Input value={form.tax_name} onChange={(e) => updateField("tax_name", e.target.value)} placeholder="VAT / GST / Tax" />
-            </div>
-            <div className="grid gap-2">
-              <Label>Default rate (%)</Label>
-              <Input type="number" step="0.1" min="0" max="100" value={form.default_tax_rate} onChange={(e) => updateField("default_tax_rate", e.target.value)} placeholder="20" />
-            </div>
-            <div className="grid gap-2">
-              <Label>Currency</Label>
-              <Select value={form.currency} onValueChange={(v) => updateField("currency", v)}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="EUR">EUR — Euro</SelectItem>
-                  <SelectItem value="USD">USD — US Dollar</SelectItem>
-                  <SelectItem value="GBP">GBP — British Pound</SelectItem>
-                  <SelectItem value="AUD">AUD — Australian Dollar</SelectItem>
-                  <SelectItem value="CAD">CAD — Canadian Dollar</SelectItem>
-                  <SelectItem value="NZD">NZD — New Zealand Dollar</SelectItem>
-                  <SelectItem value="CHF">CHF — Swiss Franc</SelectItem>
-                  <SelectItem value="SEK">SEK — Swedish Krona</SelectItem>
-                  <SelectItem value="NOK">NOK — Norwegian Krone</SelectItem>
-                  <SelectItem value="DKK">DKK — Danish Krone</SelectItem>
-                  <SelectItem value="JPY">JPY — Japanese Yen</SelectItem>
-                  <SelectItem value="INR">INR — Indian Rupee</SelectItem>
-                  <SelectItem value="BRL">BRL — Brazilian Real</SelectItem>
-                  <SelectItem value="MXN">MXN — Mexican Peso</SelectItem>
-                  <SelectItem value="SGD">SGD — Singapore Dollar</SelectItem>
-                  <SelectItem value="ZAR">ZAR — South African Rand</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <Button onClick={handleSave}>Save</Button>
-        </CardContent>
-      </Card>
-
       <Card>
         <CardHeader>
           <CardTitle>Private / personal details</CardTitle>
@@ -387,7 +406,113 @@ export default function Settings() {
           <Button onClick={handleSave}>Save</Button>
         </CardContent>
       </Card>
-
+        </TabsContent>
+        <TabsContent value="tax" className="space-y-6 max-w-3xl mt-0">
+      <Card>
+        <CardHeader>
+          <CardTitle>Country & tax</CardTitle>
+          <CardDescription>
+            Choosing a country fills in its usual tax name, rate and currency. You can still adjust each value, for example if you are not tax-registered.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-2">
+            <Label>Country</Label>
+            <Select value={form.country_code} onValueChange={applyCountry}>
+              <SelectTrigger><SelectValue placeholder="Select your country" /></SelectTrigger>
+              <SelectContent className="max-h-72">
+                {SORTED_PRESETS.map((p) => <SelectItem key={p.code} value={p.code}>{p.name}</SelectItem>)}
+                <SelectItem value={OTHER_PRESET.code}>{OTHER_PRESET.name}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          {preset.regions && (
+            <div className="grid gap-2">
+              <Label>Province or territory</Label>
+              <Select
+                onValueChange={(name) => {
+                  const r = preset.regions?.find((x) => x.name === name);
+                  if (r) setForm((f) => ({ ...f, tax_name: r.taxName, default_tax_rate: String(r.rate) }));
+                }}
+              >
+                <SelectTrigger><SelectValue placeholder="Apply a provincial rate…" /></SelectTrigger>
+                <SelectContent className="max-h-72">
+                  {preset.regions.map((r) => <SelectItem key={r.name} value={r.name}>{r.name} ({r.taxName} {r.rate}%)</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="grid gap-2">
+              <Label>Tax name</Label>
+              <Input value={form.tax_name} onChange={(e) => updateField("tax_name", e.target.value)} placeholder="VAT / GST / Sales tax" />
+            </div>
+            <div className="grid gap-2">
+              <Label>Default rate (%)</Label>
+              <Input type="number" step="0.001" min="0" max="100" value={form.default_tax_rate} onChange={(e) => updateField("default_tax_rate", e.target.value)} />
+            </div>
+            <div className="grid gap-2">
+              <Label>Currency</Label>
+              <Select value={form.currency} onValueChange={(v) => updateField("currency", v)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent className="max-h-72">
+                  {SUPPORTED_CURRENCIES.map((c) => <SelectItem key={c} value={c}>{c} ({currencySymbol(c)})</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {rateOptions(preset, Number(form.default_tax_rate)).map((r) => (
+              <button
+                key={r}
+                type="button"
+                onClick={() => updateField("default_tax_rate", String(r))}
+                className={`rounded-full border px-2.5 py-0.5 text-xs tabular-nums transition-colors ${
+                  Number(form.default_tax_rate) === r ? "border-primary bg-primary text-primary-foreground" : "hover:bg-muted"
+                }`}
+              >
+                {r}%
+              </button>
+            ))}
+          </div>
+          {preset.note && <p className="text-xs text-muted-foreground">{preset.note}</p>}
+          {preset.eu && (
+            <p className="text-xs text-muted-foreground">
+              Invoicing a business in another EU country? Choose "EU business abroad (reverse charge)" as the invoice type to charge 0% {form.tax_name || "VAT"}.
+            </p>
+          )}
+          <Button onClick={handleSave}>Save</Button>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle>Mileage</CardTitle>
+          <CardDescription>
+            The allowance per {form.distance_unit === "mi" ? "mile" : "kilometre"} for business trips. Use the rate your tax authority allows, or 0 to only track distance.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="grid gap-2">
+              <Label>Distance unit</Label>
+              <Select value={form.distance_unit} onValueChange={(v) => updateField("distance_unit", v)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="km">Kilometres</SelectItem>
+                  <SelectItem value="mi">Miles</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label>Rate per {form.distance_unit} ({currencySymbol(form.currency)})</Label>
+              <Input type="number" step="0.001" min="0" value={form.mileage_rate} onChange={(e) => updateField("mileage_rate", e.target.value)} />
+            </div>
+          </div>
+          <Button onClick={handleSave}>Save</Button>
+        </CardContent>
+      </Card>
+        </TabsContent>
+        <TabsContent value="services" className="space-y-6 max-w-3xl mt-0">
       <Card>
         <CardHeader>
           <CardTitle>Services</CardTitle>
@@ -456,7 +581,8 @@ export default function Settings() {
           </Dialog>
         </CardContent>
       </Card>
-
+        </TabsContent>
+        <TabsContent value="security" className="space-y-6 max-w-3xl mt-0">
       <Card>
         <CardHeader>
           <CardTitle>Change password</CardTitle>
@@ -495,24 +621,9 @@ export default function Settings() {
           </Button>
         </CardContent>
       </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Telegram</CardTitle>
-          <CardDescription>Send a test notification to verify your Telegram integration</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-wrap gap-2">
-            <Button onClick={handleSendTelegramTest} disabled={sendingTelegramTest}>
-              {sendingTelegramTest ? "Sending…" : "Test Telegram message"}
-            </Button>
-            <Button variant="outline" onClick={handleSendUpcomingTelegramTest} disabled={sendingUpcomingTelegramTest}>
-              {sendingUpcomingTelegramTest ? "Sending…" : "Test upcoming payments"}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
+          <TwoFactorCard />
+        </TabsContent>
+        <TabsContent value="team" className="space-y-6 max-w-3xl mt-0">
       <Card>
         <CardHeader>
           <CardTitle>Team</CardTitle>
@@ -613,6 +724,37 @@ export default function Settings() {
           </div>
         </CardContent>
       </Card>
+        </TabsContent>
+        <TabsContent value="notifications" className="space-y-6 max-w-3xl mt-0">
+      <Card>
+        <CardHeader>
+          <CardTitle>Telegram</CardTitle>
+          <CardDescription>Send a test notification to verify your Telegram integration</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={handleSendTelegramTest} disabled={sendingTelegramTest}>
+              {sendingTelegramTest ? "Sending…" : "Test Telegram message"}
+            </Button>
+            <Button variant="outline" onClick={handleSendUpcomingTelegramTest} disabled={sendingUpcomingTelegramTest}>
+              {sendingUpcomingTelegramTest ? "Sending…" : "Test upcoming payments"}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+        </TabsContent>
+        <TabsContent value="appearance" className="space-y-6 max-w-3xl mt-0">
+      <Card>
+        <CardHeader>
+          <CardTitle>Appearance</CardTitle>
+          <CardDescription>Choose light or dark mode, or follow your device setting.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ThemePicker />
+        </CardContent>
+      </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { useOpenOnNew } from "@/hooks/use-open-on-new";
+import { useTaxSettings } from "@/lib/tax";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
 import type { Company, TimeEntry } from "@/lib/db-types";
@@ -14,11 +16,13 @@ import { useToast } from "@/hooks/use-toast";
 import { Plus, Pencil, Trash2, Clock, WandSparkles } from "lucide-react";
 
 export default function TimeEntries() {
+  const { currencySymbol: cs } = useTaxSettings();
   const { user } = useAuth();
   const { toast } = useToast();
   const [entries, setEntries] = useState<(TimeEntry & { companies: Company | null })[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [open, setOpen] = useState(false);
+  useOpenOnNew(setOpen);
   const [editId, setEditId] = useState<string | null>(null);
   const [form, setForm] = useState({ company_id: "", date: new Date().toISOString().split("T")[0], hours: "", description: "", hourly_rate: "" });
   const [improvingDescription, setImprovingDescription] = useState(false);
@@ -52,9 +56,9 @@ export default function TimeEntries() {
       setOpen(false);
       resetForm();
       fetchData();
-      toast({ title: editId ? "Uren bijgewerkt" : "Uren toegevoegd" });
+      toast({ title: editId ? "Time entry updated" : "Time entry added" });
     } catch (error: unknown) {
-      toast({ title: "Fout", description: error instanceof Error ? error.message : String(error), variant: "destructive" });
+      toast({ title: "Error", description: error instanceof Error ? error.message : String(error), variant: "destructive" });
     }
   };
 
@@ -76,7 +80,7 @@ export default function TimeEntries() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Verwijderen?")) return;
+    if (!confirm("Delete this item?")) return;
     await api.deleteTimeEntry(id);
     fetchData();
   };
@@ -85,8 +89,8 @@ export default function TimeEntries() {
     const text = form.description.trim();
     if (!text) {
       toast({
-        title: "Geen tekst",
-        description: "Vul eerst werkzaamheden in die je wilt verbeteren.",
+        title: "Nothing to improve",
+        description: "Enter a description of the work first.",
         variant: "destructive",
       });
       return;
@@ -95,9 +99,9 @@ export default function TimeEntries() {
     try {
       const res = await api.improveGrammar(text);
       setForm((p) => ({ ...p, description: res.text }));
-      toast({ title: "Tekst verbeterd" });
+      toast({ title: "Text improved" });
     } catch (error: unknown) {
-      toast({ title: "AI verbeteren mislukt", description: error instanceof Error ? error.message : String(error), variant: "destructive" });
+      toast({ title: "AI improvement failed", description: error instanceof Error ? error.message : String(error), variant: "destructive" });
     } finally {
       setImprovingDescription(false);
     }
@@ -106,50 +110,50 @@ export default function TimeEntries() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Urenregistratie</h1>
+        <h1 className="text-xl font-semibold">Time tracking</h1>
         <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) resetForm(); }}>
           <DialogTrigger asChild>
-            <Button><Plus className="mr-2 h-4 w-4" />Uren toevoegen</Button>
+            <Button><Plus className="mr-2 h-4 w-4" />Log time</Button>
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>{editId ? "Uren bewerken" : "Uren registreren"}</DialogTitle>
+              <DialogTitle>{editId ? "Edit time entry" : "Log time"}</DialogTitle>
             </DialogHeader>
             <div className="grid gap-4 py-4">
               <div className="grid gap-2">
-                <Label>Bedrijf *</Label>
+                <Label>Company *</Label>
                 <Select value={form.company_id} onValueChange={(v) => setForm((p) => ({ ...p, company_id: v }))}>
-                  <SelectTrigger><SelectValue placeholder="Selecteer bedrijf" /></SelectTrigger>
+                  <SelectTrigger><SelectValue placeholder="Select company" /></SelectTrigger>
                   <SelectContent>
-                    {companies.map((c) => <SelectItem key={c.id} value={c.id}>{c.name || c.contact_person || "Klant"}</SelectItem>)}
+                    {companies.map((c) => <SelectItem key={c.id} value={c.id}>{c.name || c.contact_person || "Client"}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">
-                  <Label>Datum *</Label>
+                  <Label>Date *</Label>
                   <Input type="date" value={form.date} onChange={(e) => setForm((p) => ({ ...p, date: e.target.value }))} />
                 </div>
                 <div className="grid gap-2">
-                  <Label>Uren *</Label>
+                  <Label>Hours *</Label>
                   <Input type="number" step="0.25" value={form.hours} onChange={(e) => setForm((p) => ({ ...p, hours: e.target.value }))} />
                 </div>
               </div>
               <div className="grid gap-2">
                 <div className="flex items-center justify-between gap-3">
-                  <Label>Werkzaamheden</Label>
+                  <Label>Description</Label>
                   <Button type="button" variant="outline" size="sm" onClick={handleImproveDescription} disabled={improvingDescription}>
                     <WandSparkles className="mr-2 h-4 w-4" />
-                    {improvingDescription ? "Verbeteren..." : "AI grammatica verbeteren"}
+                    {improvingDescription ? "Improving…" : "Improve with AI"}
                   </Button>
                 </div>
                 <Textarea value={form.description} onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))} />
               </div>
               <div className="grid gap-2">
-                <Label>Afwijkend uurtarief (€)</Label>
-                <Input type="number" step="0.01" value={form.hourly_rate} onChange={(e) => setForm((p) => ({ ...p, hourly_rate: e.target.value }))} placeholder="Leeg = standaardtarief" />
+                <Label>Custom hourly rate</Label>
+                <Input type="number" step="0.01" value={form.hourly_rate} onChange={(e) => setForm((p) => ({ ...p, hourly_rate: e.target.value }))} placeholder="Empty = default rate" />
               </div>
-              <Button onClick={handleSave}>{editId ? "Opslaan" : "Toevoegen"}</Button>
+              <Button onClick={handleSave}>{editId ? "Save" : "Add"}</Button>
             </div>
           </DialogContent>
         </Dialog>
@@ -159,7 +163,7 @@ export default function TimeEntries() {
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12 text-muted-foreground">
             <Clock className="h-12 w-12 mb-4" />
-            <p>Nog geen uren geregistreerd</p>
+            <p>No time logged yet</p>
           </CardContent>
         </Card>
       ) : (
@@ -167,22 +171,22 @@ export default function TimeEntries() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Datum</TableHead>
-                <TableHead>Bedrijf</TableHead>
-                <TableHead>Uren</TableHead>
-                <TableHead className="hidden md:table-cell">Werkzaamheden</TableHead>
-                <TableHead>Tarief</TableHead>
+                <TableHead>Date</TableHead>
+                <TableHead>Company</TableHead>
+                <TableHead>Hours</TableHead>
+                <TableHead className="hidden md:table-cell">Description</TableHead>
+                <TableHead>Rate</TableHead>
                 <TableHead className="w-20"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {entries.map((entry) => (
                 <TableRow key={entry.id}>
-                  <TableCell>{new Date(entry.date).toLocaleDateString("nl-NL")}</TableCell>
-                  <TableCell>{entry.companies?.name || entry.companies?.contact_person || "Klant"}</TableCell>
+                  <TableCell>{new Date(entry.date).toLocaleDateString(undefined)}</TableCell>
+                  <TableCell>{entry.companies?.name || entry.companies?.contact_person || "Client"}</TableCell>
                   <TableCell>{Number(entry.hours).toFixed(2)}</TableCell>
                   <TableCell className="hidden md:table-cell max-w-xs truncate">{entry.description}</TableCell>
-                  <TableCell>{entry.hourly_rate ? `€${Number(entry.hourly_rate).toFixed(2)}` : "-"}</TableCell>
+                  <TableCell>{entry.hourly_rate ? `${cs}${Number(entry.hourly_rate).toFixed(2)}` : "-"}</TableCell>
                   <TableCell>
                     <div className="flex gap-1">
                       <Button variant="ghost" size="icon" onClick={() => handleEdit(entry)}><Pencil className="h-3 w-3" /></Button>

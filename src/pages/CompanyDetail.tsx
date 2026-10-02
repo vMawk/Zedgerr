@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { rateOptions } from "@/lib/tax-presets";
+import { useTaxSettings } from "@/lib/tax";
 import { useParams, Link } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
@@ -19,8 +21,8 @@ import { ArrowLeft, FileText, FileCheck, Package, Plus, Pencil, Trash2, External
 import { Link as RouterLink } from "react-router-dom";
 
 const STATUS_LABELS: Record<string, string> = {
-  concept: "Concept", verzonden: "Verzonden", betaald: "Betaald",
-  verlopen: "Verlopen", geaccepteerd: "Geaccepteerd", afgewezen: "Afgewezen",
+  concept: "Draft", verzonden: "Sent", betaald: "Paid",
+  verlopen: "Expired", geaccepteerd: "Accepted", afgewezen: "Declined",
 };
 const STATUS_VARIANTS: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
   betaald: "default", geaccepteerd: "default",
@@ -28,9 +30,10 @@ const STATUS_VARIANTS: Record<string, "default" | "secondary" | "destructive" | 
   verlopen: "destructive", afgewezen: "destructive",
 };
 
-const emptyProduct = { name: "", serial_number: "", url: "", internal_notes: "", sale_price: "", price_includes_vat: false, vat_percentage: "21", cost_price: "" };
+const emptyProduct = { name: "", serial_number: "", url: "", internal_notes: "", sale_price: "", price_includes_vat: false, vat_percentage: "", cost_price: "" };
 
 export default function CompanyDetail() {
+  const { currencySymbol: cs, defaultRate, preset } = useTaxSettings();
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
   const { toast } = useToast();
@@ -62,7 +65,7 @@ export default function CompanyDetail() {
 
   const openNewProduct = () => {
     setEditProduct(null);
-    setProductForm(emptyProduct);
+    setProductForm({ ...emptyProduct, vat_percentage: String(defaultRate) });
     setProductOpen(true);
   };
 
@@ -75,7 +78,7 @@ export default function CompanyDetail() {
       internal_notes: p.internal_notes ?? "",
       sale_price: String(p.sale_price),
       price_includes_vat: Boolean(p.price_includes_vat),
-      vat_percentage: String(p.vat_percentage ?? 21),
+      vat_percentage: String(p.vat_percentage ?? defaultRate),
       cost_price: p.cost_price != null ? String(p.cost_price) : "",
     });
     setProductOpen(true);
@@ -90,33 +93,33 @@ export default function CompanyDetail() {
       internal_notes: productForm.internal_notes || null,
       sale_price: parseFloat(productForm.sale_price),
       price_includes_vat: productForm.price_includes_vat,
-      vat_percentage: parseFloat(productForm.vat_percentage) || 21,
+      vat_percentage: parseFloat(productForm.vat_percentage) || defaultRate,
       cost_price: productForm.cost_price ? parseFloat(productForm.cost_price) : null,
     };
     try {
       if (editProduct) {
         await api.updateCompanyProduct(id, editProduct.id, body);
-        toast({ title: "Product bijgewerkt" });
+        toast({ title: "Product updated" });
       } else {
         await api.createCompanyProduct(id, body);
-        toast({ title: "Product toegevoegd" });
+        toast({ title: "Product added" });
       }
       setProductOpen(false);
       fetchAll();
     } catch (e: unknown) {
-      toast({ title: "Fout", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
+      toast({ title: "Error", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
     }
   };
 
   const handleDeleteProduct = async (p: CompanyProduct) => {
-    if (!id || !confirm(`Product "${p.name}" verwijderen?`)) return;
+    if (!id || !confirm(`Delete product "${p.name}"?`)) return;
     await api.deleteCompanyProduct(id, p.id);
-    toast({ title: "Product verwijderd" });
+    toast({ title: "Product deleted" });
     fetchAll();
   };
 
-  const displayName = company?.name || company?.contact_person || "Klant";
-  const fmt = (n: number) => `€ ${n.toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const displayName = company?.name || company?.contact_person || "Client";
+  const fmt = (n: number) => `${cs} ${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   const totalInvoiced = invoices.reduce((s, i) => s + Number(i.total), 0);
   const totalPaid = invoices.filter((i) => i.status === "betaald").reduce((s, i) => s + Number(i.total), 0);
@@ -124,8 +127,8 @@ export default function CompanyDetail() {
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3">
-        <Link to="/bedrijven">
-          <Button variant="ghost" size="sm"><ArrowLeft className="h-4 w-4 mr-1" />Bedrijven</Button>
+        <Link to="/companies">
+          <Button variant="ghost" size="sm"><ArrowLeft className="h-4 w-4 mr-1" />Companies</Button>
         </Link>
         <h1 className="text-xl font-semibold">{displayName}</h1>
       </div>
@@ -134,25 +137,25 @@ export default function CompanyDetail() {
         <Card>
           <CardContent className="pt-4 grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-3 text-sm">
             {company.name && company.contact_person && (
-              <div><p className="text-muted-foreground text-xs">Contactpersoon</p><p>{company.contact_person}</p></div>
+              <div><p className="text-muted-foreground text-xs">Contact person</p><p>{company.contact_person}</p></div>
             )}
             {company.email && (
-              <div><p className="text-muted-foreground text-xs">E-mail</p><p>{company.email}</p></div>
+              <div><p className="text-muted-foreground text-xs">Email</p><p>{company.email}</p></div>
             )}
             {company.phone && (
-              <div><p className="text-muted-foreground text-xs">Telefoon</p><p>{company.phone}</p></div>
+              <div><p className="text-muted-foreground text-xs">Phone</p><p>{company.phone}</p></div>
             )}
             {(company.street || company.city) && (
               <div>
-                <p className="text-muted-foreground text-xs">Adres</p>
+                <p className="text-muted-foreground text-xs">Address</p>
                 <p>{[company.street, company.postal_code, company.city].filter(Boolean).join(", ")}</p>
               </div>
             )}
             {company.kvk_number && (
-              <div><p className="text-muted-foreground text-xs">KvK</p><p>{company.kvk_number}</p></div>
+              <div><p className="text-muted-foreground text-xs">Reg. no.</p><p>{company.kvk_number}</p></div>
             )}
             {company.btw_number && (
-              <div><p className="text-muted-foreground text-xs">BTW</p><p>{company.btw_number}</p></div>
+              <div><p className="text-muted-foreground text-xs">Tax no.</p><p>{company.btw_number}</p></div>
             )}
           </CardContent>
         </Card>
@@ -160,15 +163,15 @@ export default function CompanyDetail() {
 
       <div className="grid grid-cols-3 gap-4">
         <Card><CardContent className="pt-4">
-          <p className="text-xs text-muted-foreground">Totaal gefactureerd</p>
+          <p className="text-xs text-muted-foreground">Total invoiced</p>
           <p className="text-xl font-semibold mt-1">{fmt(totalInvoiced)}</p>
         </CardContent></Card>
         <Card><CardContent className="pt-4">
-          <p className="text-xs text-muted-foreground">Betaald</p>
+          <p className="text-xs text-muted-foreground">Paid</p>
           <p className="text-xl font-semibold mt-1">{fmt(totalPaid)}</p>
         </CardContent></Card>
         <Card><CardContent className="pt-4">
-          <p className="text-xs text-muted-foreground">Openstaand</p>
+          <p className="text-xs text-muted-foreground">Outstanding</p>
           <p className="text-xl font-semibold mt-1">{fmt(totalInvoiced - totalPaid)}</p>
         </CardContent></Card>
       </div>
@@ -176,28 +179,28 @@ export default function CompanyDetail() {
       <Tabs defaultValue="facturen">
         <TabsList>
           <TabsTrigger value="facturen" className="gap-1.5">
-            <FileText className="h-3.5 w-3.5" />Facturen ({invoices.length})
+            <FileText className="h-3.5 w-3.5" />Invoices ({invoices.length})
           </TabsTrigger>
           <TabsTrigger value="offertes" className="gap-1.5">
-            <FileCheck className="h-3.5 w-3.5" />Offertes ({quotes.length})
+            <FileCheck className="h-3.5 w-3.5" />Quotes ({quotes.length})
           </TabsTrigger>
           <TabsTrigger value="producten" className="gap-1.5">
-            <Package className="h-3.5 w-3.5" />Producten ({products.length})
+            <Package className="h-3.5 w-3.5" />Products ({products.length})
           </TabsTrigger>
         </TabsList>
 
         <TabsContent value="facturen" className="mt-4">
           {invoices.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Nog geen facturen voor deze klant.</p>
+            <p className="text-sm text-muted-foreground">No invoices for this client yet.</p>
           ) : (
             <Card>
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Nummer</TableHead>
-                    <TableHead>Datum</TableHead>
-                    <TableHead>Vervaldatum</TableHead>
-                    <TableHead className="text-right">Bedrag</TableHead>
+                    <TableHead>Number</TableHead>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Due date</TableHead>
+                    <TableHead className="text-right">Amount</TableHead>
                     <TableHead>Status</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -205,8 +208,8 @@ export default function CompanyDetail() {
                   {invoices.map((inv) => (
                     <TableRow key={inv.id}>
                       <TableCell className="font-medium">{inv.invoice_number}</TableCell>
-                      <TableCell>{new Date(inv.invoice_date).toLocaleDateString("nl-NL")}</TableCell>
-                      <TableCell>{inv.due_date ? new Date(inv.due_date).toLocaleDateString("nl-NL") : "—"}</TableCell>
+                      <TableCell>{new Date(inv.invoice_date).toLocaleDateString(undefined)}</TableCell>
+                      <TableCell>{inv.due_date ? new Date(inv.due_date).toLocaleDateString(undefined) : "—"}</TableCell>
                       <TableCell className="text-right">{fmt(Number(inv.total))}</TableCell>
                       <TableCell>
                         <Badge variant={STATUS_VARIANTS[inv.status] ?? "secondary"}>
@@ -223,16 +226,16 @@ export default function CompanyDetail() {
 
         <TabsContent value="offertes" className="mt-4">
           {quotes.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Nog geen offertes voor deze klant.</p>
+            <p className="text-sm text-muted-foreground">No quotes for this client yet.</p>
           ) : (
             <Card>
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Nummer</TableHead>
-                    <TableHead>Datum</TableHead>
-                    <TableHead>Geldig tot</TableHead>
-                    <TableHead className="text-right">Bedrag</TableHead>
+                    <TableHead>Number</TableHead>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Valid until</TableHead>
+                    <TableHead className="text-right">Amount</TableHead>
                     <TableHead>Status</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -240,8 +243,8 @@ export default function CompanyDetail() {
                   {quotes.map((q) => (
                     <TableRow key={q.id}>
                       <TableCell className="font-medium">{q.quote_number}</TableCell>
-                      <TableCell>{new Date(q.quote_date).toLocaleDateString("nl-NL")}</TableCell>
-                      <TableCell>{q.valid_until ? new Date(q.valid_until).toLocaleDateString("nl-NL") : "—"}</TableCell>
+                      <TableCell>{new Date(q.quote_date).toLocaleDateString(undefined)}</TableCell>
+                      <TableCell>{q.valid_until ? new Date(q.valid_until).toLocaleDateString(undefined) : "—"}</TableCell>
                       <TableCell className="text-right">{fmt(Number(q.total))}</TableCell>
                       <TableCell>
                         <Badge variant={STATUS_VARIANTS[q.status] ?? "secondary"}>
@@ -258,25 +261,25 @@ export default function CompanyDetail() {
 
         <TabsContent value="producten" className="mt-4 space-y-3">
           <div className="flex justify-end">
-            <Button size="sm" onClick={openNewProduct}><Plus className="h-4 w-4 mr-1" />Product toevoegen</Button>
+            <Button size="sm" onClick={openNewProduct}><Plus className="h-4 w-4 mr-1" />Add product</Button>
           </div>
           {products.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Nog geen producten voor deze klant.</p>
+            <p className="text-sm text-muted-foreground">No products for this client yet.</p>
           ) : (
             <Card>
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Naam</TableHead>
-                    <TableHead className="text-right">Verkoopprijs</TableHead>
-                    <TableHead className="text-right">Inkoopprijs</TableHead>
-                    <TableHead className="text-right">Marge</TableHead>
+                    <TableHead>Name</TableHead>
+                    <TableHead className="text-right">Sales price</TableHead>
+                    <TableHead className="text-right">Cost price</TableHead>
+                    <TableHead className="text-right">Margin</TableHead>
                     <TableHead className="w-20" />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {products.map((p) => {
-                    const vat = p.vat_percentage ?? 21;
+                    const vat = p.vat_percentage ?? defaultRate;
                     const exVat = p.price_includes_vat ? p.sale_price / (1 + vat / 100) : p.sale_price;
                     const margin = p.cost_price != null ? exVat - p.cost_price : null;
                     return (
@@ -322,54 +325,52 @@ export default function CompanyDetail() {
       <Dialog open={productOpen} onOpenChange={(v) => { setProductOpen(v); if (!v) setEditProduct(null); }}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>{editProduct ? "Product bewerken" : "Product toevoegen"}</DialogTitle>
+            <DialogTitle>{editProduct ? "Edit product" : "Add product"}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="grid gap-2">
-              <Label>Naam *</Label>
-              <Input value={productForm.name} onChange={(e) => setProductForm((f) => ({ ...f, name: e.target.value }))} placeholder="Bijv. Website licentie" />
+              <Label>Name *</Label>
+              <Input value={productForm.name} onChange={(e) => setProductForm((f) => ({ ...f, name: e.target.value }))} placeholder="e.g. Website licence" />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="grid gap-2">
-                <Label>Serienummer <span className="text-muted-foreground font-normal text-xs">(intern)</span></Label>
+                <Label>Serienummer <span className="text-muted-foreground font-normal text-xs">(internal)</span></Label>
                 <Input value={productForm.serial_number} onChange={(e) => setProductForm((f) => ({ ...f, serial_number: e.target.value }))} placeholder="SN-12345" className="font-mono text-sm" />
               </div>
               <div className="grid gap-2">
-                <Label>BTW (%)</Label>
+                <Label>Tax rate (%)</Label>
                 <Select value={productForm.vat_percentage} onValueChange={(v) => setProductForm((f) => ({ ...f, vat_percentage: v }))}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="21">21%</SelectItem>
-                    <SelectItem value="9">9%</SelectItem>
-                    <SelectItem value="0">0%</SelectItem>
+                    {rateOptions(preset, Number(productForm.vat_percentage)).map((r) => <SelectItem key={r} value={String(r)}>{r}%</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
             </div>
             <div className="grid gap-2">
-              <Label>Link <span className="text-muted-foreground font-normal text-xs">(intern)</span></Label>
+              <Label>Link <span className="text-muted-foreground font-normal text-xs">(internal)</span></Label>
               <Input type="url" value={productForm.url} onChange={(e) => setProductForm((f) => ({ ...f, url: e.target.value }))} placeholder="https://…" />
             </div>
             <div className="grid gap-2">
-              <Label>Interne notities</Label>
-              <Textarea rows={2} value={productForm.internal_notes} onChange={(e) => setProductForm((f) => ({ ...f, internal_notes: e.target.value }))} placeholder="Niet zichtbaar op factuur" />
+              <Label>Internal notes</Label>
+              <Textarea rows={2} value={productForm.internal_notes} onChange={(e) => setProductForm((f) => ({ ...f, internal_notes: e.target.value }))} placeholder="Not shown on invoices" />
             </div>
             <div className="flex items-center gap-3">
               <Switch id="cd-incl-vat" checked={productForm.price_includes_vat} onCheckedChange={(v) => setProductForm((f) => ({ ...f, price_includes_vat: v }))} />
-              <Label htmlFor="cd-incl-vat" className="cursor-pointer">Prijs inclusief BTW invoeren</Label>
+              <Label htmlFor="cd-incl-vat" className="cursor-pointer">Enter price including tax</Label>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="grid gap-2">
-                <Label>Verkoopprijs ({productForm.price_includes_vat ? "incl." : "excl."} BTW) *</Label>
+                <Label>Sales price ({productForm.price_includes_vat ? "incl." : "excl."} tax) *</Label>
                 <Input type="number" step="0.01" min="0" value={productForm.sale_price} onChange={(e) => setProductForm((f) => ({ ...f, sale_price: e.target.value }))} placeholder="0.00" />
               </div>
               <div className="grid gap-2">
-                <Label>Inkoopprijs (excl. BTW)</Label>
+                <Label>Cost price (excl. tax)</Label>
                 <Input type="number" step="0.01" min="0" value={productForm.cost_price} onChange={(e) => setProductForm((f) => ({ ...f, cost_price: e.target.value }))} placeholder="optioneel" />
               </div>
             </div>
             <Button className="w-full" onClick={handleSaveProduct} disabled={!productForm.name.trim() || !productForm.sale_price}>
-              {editProduct ? "Opslaan" : "Toevoegen"}
+              {editProduct ? "Save" : "Add"}
             </Button>
           </div>
         </DialogContent>

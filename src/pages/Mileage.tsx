@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTaxSettings } from "@/lib/tax";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
 import type { MileageEntry } from "@/lib/db-types";
@@ -14,9 +15,9 @@ import { Badge } from "@/components/ui/badge";
 import { Plus, Pencil, Trash2, Car } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
-const KM_RATE = 0.23;
 
-const PURPOSES = ["Klantbezoek", "Vergadering", "Leverancier", "Woon-werk", "Overig"];
+
+const PURPOSES = ["Client visit", "Meeting", "Supplier", "Commute", "Other"];
 
 const emptyForm = {
   date: new Date().toISOString().split("T")[0],
@@ -32,10 +33,12 @@ const emptyForm = {
 
 function fmtNum(n: number | null | undefined, decimals = 0): string {
   if (n == null) return "—";
-  return n.toLocaleString("nl-NL", { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+  return n.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
 }
 
 export default function Mileage() {
+  const { mileageRate: KM_RATE, distanceUnit: unit, currencySymbol: cs } = useTaxSettings();
+  const rateLabel = `Allowance (${cs}${KM_RATE}/${unit})`;
   const { user } = useAuth();
   const { toast } = useToast();
   const currentYear = new Date().getFullYear();
@@ -74,7 +77,7 @@ export default function Mileage() {
     setOpen(true);
   };
 
-  // Auto-bereken distance_km vanuit odometerstanden
+  // Derive distance from the odometer readings when both are filled in
   const odoStart = parseFloat(form.odometer_start) || null;
   const odoEnd = parseFloat(form.odometer_end) || null;
   const derivedKm = odoStart != null && odoEnd != null ? Math.max(0, odoEnd - odoStart) : null;
@@ -98,16 +101,16 @@ export default function Mileage() {
     try {
       if (editEntry) {
         await api.updateMileageEntry(editEntry.id, body);
-        toast({ title: "Rit bijgewerkt" });
+        toast({ title: "Trip updated" });
       } else {
         await api.createMileageEntry(body);
-        toast({ title: "Rit toegevoegd" });
+        toast({ title: "Trip added" });
       }
       setOpen(false);
       resetForm();
       fetchEntries();
     } catch (e: unknown) {
-      toast({ title: "Fout", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
+      toast({ title: "Error", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
     } finally {
       setSaving(false);
     }
@@ -120,9 +123,9 @@ export default function Mileage() {
       await api.deleteMileageEntry(deleteTarget.id);
       setDeleteTarget(null);
       fetchEntries();
-      toast({ title: "Rit verwijderd" });
+      toast({ title: "Trip deleted" });
     } catch (e: unknown) {
-      toast({ title: "Fout", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
+      toast({ title: "Error", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
     } finally {
       setDeleting(false);
     }
@@ -138,21 +141,21 @@ export default function Mileage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Kilometerregistratie</h1>
+        <h1 className="text-xl font-semibold">Mileage</h1>
         <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) resetForm(); }}>
           <DialogTrigger asChild>
-            <Button><Plus className="mr-2 h-4 w-4" />Rit toevoegen</Button>
+            <Button><Plus className="mr-2 h-4 w-4" />Add trip</Button>
           </DialogTrigger>
           <DialogContent className="max-w-lg">
             <DialogHeader>
-              <DialogTitle>{editEntry ? "Rit bewerken" : "Nieuwe rit"}</DialogTitle>
+              <DialogTitle>{editEntry ? "Edit trip" : "New trip"}</DialogTitle>
             </DialogHeader>
             <div className="grid gap-4 py-2">
 
               {/* Datum + zakelijk/privé */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">
-                  <Label>Datum *</Label>
+                  <Label>Date *</Label>
                   <Input type="date" value={form.date} onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))} />
                 </div>
                 <div className="grid gap-2">
@@ -163,14 +166,14 @@ export default function Mileage() {
                       onClick={() => setForm((f) => ({ ...f, is_private: false }))}
                       className={`flex-1 rounded-md border px-3 py-1.5 text-sm font-medium transition-colors ${!form.is_private ? "bg-primary text-primary-foreground border-primary" : "hover:bg-accent"}`}
                     >
-                      Zakelijk
+                      Business
                     </button>
                     <button
                       type="button"
                       onClick={() => setForm((f) => ({ ...f, is_private: true }))}
                       className={`flex-1 rounded-md border px-3 py-1.5 text-sm font-medium transition-colors ${form.is_private ? "bg-secondary text-secondary-foreground border-secondary" : "hover:bg-accent"}`}
                     >
-                      Privé
+                      Private
                     </button>
                   </div>
                 </div>
@@ -179,67 +182,67 @@ export default function Mileage() {
               {/* Van / Naar */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">
-                  <Label>Beginadres</Label>
-                  <Input placeholder="Bijv. Amsterdam" value={form.from_location} onChange={(e) => setForm((f) => ({ ...f, from_location: e.target.value }))} />
+                  <Label>Start address</Label>
+                  <Input placeholder="e.g. London" value={form.from_location} onChange={(e) => setForm((f) => ({ ...f, from_location: e.target.value }))} />
                 </div>
                 <div className="grid gap-2">
-                  <Label>Eindadres</Label>
-                  <Input placeholder="Bijv. Utrecht" value={form.to_location} onChange={(e) => setForm((f) => ({ ...f, to_location: e.target.value }))} />
+                  <Label>End address</Label>
+                  <Input placeholder="e.g. Oxford" value={form.to_location} onChange={(e) => setForm((f) => ({ ...f, to_location: e.target.value }))} />
                 </div>
               </div>
 
               {/* Odometer */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">
-                  <Label>Beginstand (km)</Label>
+                  <Label>Start odometer ({unit})</Label>
                   <Input
                     type="number"
                     step="1"
                     min="0"
-                    placeholder="bijv. 25430"
+                    placeholder="e.g. 25430"
                     value={form.odometer_start}
                     onChange={(e) => setForm((f) => ({ ...f, odometer_start: e.target.value }))}
                   />
                 </div>
                 <div className="grid gap-2">
-                  <Label>Eindstand (km)</Label>
+                  <Label>End odometer ({unit})</Label>
                   <Input
                     type="number"
                     step="1"
                     min="0"
-                    placeholder="bijv. 25482"
+                    placeholder="e.g. 25482"
                     value={form.odometer_end}
                     onChange={(e) => setForm((f) => ({ ...f, odometer_end: e.target.value }))}
                   />
                 </div>
               </div>
 
-              {/* Aantal km — auto of handmatig */}
+              {/* Distance: derived or entered manually */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">
-                  <Label>Aantal kilometers</Label>
+                  <Label>Distance ({unit})</Label>
                   {derivedKm != null ? (
                     <div className="h-9 flex items-center px-3 rounded-md border bg-muted/40 text-sm font-medium tabular-nums">
-                      {fmtNum(derivedKm, 1)} km
-                      <span className="ml-2 text-xs text-muted-foreground">(berekend)</span>
+                      {fmtNum(derivedKm, 1)} {unit}
+                      <span className="ml-2 text-xs text-muted-foreground">(calculated)</span>
                     </div>
                   ) : (
                     <Input
                       type="number"
                       step="0.1"
                       min="0"
-                      placeholder="bijv. 52"
+                      placeholder="e.g. 52"
                       value={form.distance_km}
                       onChange={(e) => setForm((f) => ({ ...f, distance_km: e.target.value }))}
                     />
                   )}
                 </div>
                 <div className="grid gap-2">
-                  <Label>Aftrekbaar (€0,23/km)</Label>
+                  <Label>{rateLabel}</Label>
                   <div className="h-9 flex items-center px-3 rounded-md border bg-muted/40 text-sm font-medium tabular-nums">
                     {form.is_private
-                      ? <span className="text-muted-foreground text-xs">Privé — niet aftrekbaar</span>
-                      : `€${(effectiveKm * KM_RATE).toLocaleString("nl-NL", { minimumFractionDigits: 2 })}`
+                      ? <span className="text-muted-foreground text-xs">Private, not deductible</span>
+                      : `${cs}${(effectiveKm * KM_RATE).toLocaleString(undefined, { minimumFractionDigits: 2 })}`
                     }
                   </div>
                 </div>
@@ -247,7 +250,7 @@ export default function Mileage() {
 
               {/* Doel */}
               <div className="grid gap-2">
-                <Label>Doel van de rit *</Label>
+                <Label>Purpose of trip *</Label>
                 <div className="flex flex-wrap gap-1.5 mb-1">
                   {PURPOSES.map((p) => (
                     <button
@@ -261,19 +264,19 @@ export default function Mileage() {
                   ))}
                 </div>
                 <Input
-                  placeholder="Of typ zelf…"
+                  placeholder="Or type your own…"
                   value={form.purpose}
                   onChange={(e) => setForm((f) => ({ ...f, purpose: e.target.value }))}
                 />
               </div>
 
               <div className="grid gap-2">
-                <Label>Notities</Label>
+                <Label>Notes</Label>
                 <Textarea rows={2} value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} />
               </div>
 
               <Button onClick={handleSave} disabled={saving || !canSave}>
-                {saving ? "Bezig…" : editEntry ? "Opslaan" : "Toevoegen"}
+                {saving ? "Working…" : editEntry ? "Save" : "Add"}
               </Button>
             </div>
           </DialogContent>
@@ -283,11 +286,11 @@ export default function Mileage() {
       {/* Periode filter */}
       <div className="flex flex-wrap gap-4 items-end">
         <div className="grid gap-1.5">
-          <Label className="text-xs text-muted-foreground">Van</Label>
+          <Label className="text-xs text-muted-foreground">From</Label>
           <Input type="date" value={filterFrom} onChange={(e) => setFilterFrom(e.target.value)} className="h-8 text-sm" />
         </div>
         <div className="grid gap-1.5">
-          <Label className="text-xs text-muted-foreground">Tot</Label>
+          <Label className="text-xs text-muted-foreground">To</Label>
           <Input type="date" value={filterTo} onChange={(e) => setFilterTo(e.target.value)} className="h-8 text-sm" />
         </div>
       </div>
@@ -297,25 +300,25 @@ export default function Mileage() {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <Card>
             <CardContent className="pt-4 pb-4">
-              <p className="text-xs text-muted-foreground mb-1">Totaal km</p>
-              <p className="text-2xl font-bold tabular-nums">{fmtNum(totalKmAll, 1)} km</p>
+              <p className="text-xs text-muted-foreground mb-1">Total {unit}</p>
+              <p className="text-2xl font-bold tabular-nums">{fmtNum(totalKmAll, 1)} {unit}</p>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="pt-4 pb-4">
-              <p className="text-xs text-muted-foreground mb-1">Zakelijk km</p>
-              <p className="text-2xl font-bold tabular-nums">{fmtNum(totalKmZakelijk, 1)} km</p>
+              <p className="text-xs text-muted-foreground mb-1">Business {unit}</p>
+              <p className="text-2xl font-bold tabular-nums">{fmtNum(totalKmZakelijk, 1)} {unit}</p>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="pt-4 pb-4">
-              <p className="text-xs text-muted-foreground mb-1">Aftrekbaar (€0,23/km)</p>
-              <p className="text-2xl font-bold tabular-nums text-green-600 dark:text-green-400">€{totalDeduction.toLocaleString("nl-NL", { minimumFractionDigits: 2 })}</p>
+              <p className="text-xs text-muted-foreground mb-1">{rateLabel}</p>
+              <p className="text-2xl font-bold tabular-nums text-green-600 dark:text-green-400">{cs}{totalDeduction.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="pt-4 pb-4">
-              <p className="text-xs text-muted-foreground mb-1">Ritten</p>
+              <p className="text-xs text-muted-foreground mb-1">Trips</p>
               <p className="text-2xl font-bold">{entries.length}</p>
             </CardContent>
           </Card>
@@ -327,8 +330,8 @@ export default function Mileage() {
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12 text-muted-foreground">
             <Car className="h-12 w-12 mb-4" />
-            <p>Geen ritten gevonden</p>
-            <p className="text-sm mt-1">Voeg een rit toe om €0,23/km zakelijk te aftrekken</p>
+            <p>No trips found</p>
+            <p className="text-sm mt-1">Log a business trip to track its mileage allowance</p>
           </CardContent>
         </Card>
       ) : (
@@ -337,23 +340,23 @@ export default function Mileage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="whitespace-nowrap">Datum</TableHead>
-                  <TableHead>Van</TableHead>
-                  <TableHead>Naar</TableHead>
-                  <TableHead>Doel</TableHead>
-                  <TableHead className="text-right whitespace-nowrap">Beginstand</TableHead>
-                  <TableHead className="text-right whitespace-nowrap">Eindstand</TableHead>
-                  <TableHead className="text-right">Km</TableHead>
+                  <TableHead className="whitespace-nowrap">Date</TableHead>
+                  <TableHead>From</TableHead>
+                  <TableHead>To</TableHead>
+                  <TableHead>Purpose</TableHead>
+                  <TableHead className="text-right whitespace-nowrap">Start</TableHead>
+                  <TableHead className="text-right whitespace-nowrap">End</TableHead>
+                  <TableHead className="text-right">{unit}</TableHead>
                   <TableHead>Type</TableHead>
-                  <TableHead className="text-right">Aftrek</TableHead>
-                  <TableHead className="w-20 text-right">Acties</TableHead>
+                  <TableHead className="text-right">Deduction</TableHead>
+                  <TableHead className="w-20 text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {entries.map((e) => (
                   <TableRow key={e.id}>
                     <TableCell className="whitespace-nowrap text-sm">
-                      {new Date(e.date).toLocaleDateString("nl-NL")}
+                      {new Date(e.date).toLocaleDateString(undefined)}
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground max-w-[120px] truncate">
                       {e.from_location || "—"}
@@ -373,21 +376,21 @@ export default function Mileage() {
                     </TableCell>
                     <TableCell>
                       <Badge variant={e.is_private ? "secondary" : "outline"} className="text-xs whitespace-nowrap">
-                        {e.is_private ? "Privé" : "Zakelijk"}
+                        {e.is_private ? "Private" : "Business"}
                       </Badge>
                     </TableCell>
                     <TableCell className="text-right tabular-nums text-sm font-medium">
                       {e.is_private
                         ? <span className="text-muted-foreground">—</span>
-                        : `€${(Number(e.distance_km) * KM_RATE).toLocaleString("nl-NL", { minimumFractionDigits: 2 })}`
+                        : `${cs}${(Number(e.distance_km) * KM_RATE).toLocaleString(undefined, { minimumFractionDigits: 2 })}`
                       }
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-1">
-                        <Button variant="ghost" size="icon" onClick={() => openEdit(e)} title="Bewerken">
+                        <Button variant="ghost" size="icon" onClick={() => openEdit(e)} title="Edit">
                           <Pencil className="h-4 w-4" />
                         </Button>
-                        <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => setDeleteTarget(e)} title="Verwijderen">
+                        <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => setDeleteTarget(e)} title="Delete">
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>
@@ -403,16 +406,16 @@ export default function Mileage() {
       <AlertDialog open={!!deleteTarget} onOpenChange={(v) => { if (!v) setDeleteTarget(null); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Rit verwijderen?</AlertDialogTitle>
+            <AlertDialogTitle>Delete trip?</AlertDialogTitle>
             <AlertDialogDescription>
-              <span className="font-medium text-foreground">{deleteTarget?.purpose}</span> op{" "}
-              {deleteTarget ? new Date(deleteTarget.date).toLocaleDateString("nl-NL") : ""} wordt permanent verwijderd.
+              <span className="font-medium text-foreground">{deleteTarget?.purpose}</span> on{" "}
+              {deleteTarget ? new Date(deleteTarget.date).toLocaleDateString(undefined) : ""} will be permanently deleted.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting}>Annuleren</AlertDialogCancel>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
             <Button variant="destructive" onClick={handleDelete} disabled={deleting}>
-              {deleting ? "Bezig…" : "Verwijderen"}
+              {deleting ? "Working…" : "Delete"}
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>

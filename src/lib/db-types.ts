@@ -1,3 +1,5 @@
+export type InvoiceType = "business" | "private" | "reverse_charge";
+
 /** Types voor D1 / SQLite (Worker API). */
 
 export type Company = {
@@ -52,7 +54,7 @@ export type Invoice = {
   /** Tekst op PDF: krediet of voorschot (default krediet als ontbreekt) */
   advance_label?: "krediet" | "voorschot";
   notes: string | null;
-  invoice_type: "business" | "private";
+  invoice_type: InvoiceType;
   payment_method: "overboeking" | "contant";
   is_credit_note: boolean;
   credit_note_for_id: string | null;
@@ -120,6 +122,12 @@ export type BusinessSettings = {
   private_city: string | null;
   private_country: string | null;
   logo_url: string | null;
+  tax_name: string | null;
+  default_tax_rate: number | null;
+  currency: string | null;
+  country_code: string | null;
+  mileage_rate: number | null;
+  distance_unit: string | null;
   created_at: string;
   updated_at: string;
 };

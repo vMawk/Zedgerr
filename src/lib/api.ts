@@ -7,6 +7,7 @@ import type {
   DailyNote,
   Expense,
   Invoice,
+  InvoiceType,
   InvoiceLine,
   Lead,
   MileageEntry,
@@ -30,9 +31,15 @@ export function apiUrl(path: string): string {
   return o ? `${o}${p}` : p;
 }
 
-const TOKEN_KEY = "client_flow_jwt";
+const TOKEN_KEY = "zedgerr_token";
+const LEGACY_TOKEN_KEY = "client_flow_jwt";
 
 export function getStoredToken(): string | null {
+  const legacy = localStorage.getItem(LEGACY_TOKEN_KEY);
+  if (legacy) {
+    localStorage.setItem(TOKEN_KEY, legacy);
+    localStorage.removeItem(LEGACY_TOKEN_KEY);
+  }
   return localStorage.getItem(TOKEN_KEY);
 }
 
@@ -56,7 +63,7 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
   });
   if (r.status === 401) {
     setStoredToken(null);
-    throw new Error("Sessie verlopen of niet ingelogd. Log opnieuw in.");
+    throw new Error("Session expired. Please sign in again.");
   }
   if (!r.ok) {
     const text = await r.text();
@@ -95,7 +102,7 @@ export async function apiRequest<T = unknown>(
   });
   if (r.status === 401) {
     setStoredToken(null);
-    throw new Error("Sessie verlopen. Log opnieuw in.");
+    throw new Error("Session expired. Please sign in again.");
   }
   if (!r.ok) {
     const text = await r.text();
@@ -187,7 +194,7 @@ export const api = {
       due_date?: string | null;
       status?: string;
       notes?: string | null;
-      invoice_type?: "business" | "private";
+      invoice_type?: InvoiceType;
       payment_method?: "overboeking" | "contant";
       subtotal?: number;
       btw_percentage?: number;

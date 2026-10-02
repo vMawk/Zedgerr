@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ZedgerrLogo } from "@/components/ZedgerrLogo";
 import { usePortalAuth } from "@/lib/portal-auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,8 +20,8 @@ export default function PortalLogin() {
     try {
       await signIn(email, password);
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : "Inloggen mislukt";
-      toast({ title: "Fout", description: message, variant: "destructive" });
+      const message = error instanceof Error ? error.message : "Sign-in failed";
+      toast({ title: "Error", description: message, variant: "destructive" });
     } finally {
       setLoading(false);
     }
@@ -31,10 +32,10 @@ export default function PortalLogin() {
       <Card className="w-full max-w-md">
         <CardHeader className="text-center space-y-2">
           <div className="mx-auto mb-3 flex justify-center">
-            <img src="/zedgerr-logo.png" alt="Zedgerr" className="h-10 w-auto max-w-[200px] object-contain" />
+            <ZedgerrLogo size="lg" />
           </div>
-          <CardTitle className="text-2xl font-semibold">Klantenportaal</CardTitle>
-          <CardDescription>Bekijk uw uren en facturen</CardDescription>
+          <CardTitle className="text-2xl font-semibold">Client portal</CardTitle>
+          <CardDescription>View your hours and invoices</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -45,13 +46,13 @@ export default function PortalLogin() {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="uw@bedrijf.nl"
+                placeholder="you@company.com"
                 required
                 autoComplete="username"
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="portal-password">Wachtwoord</Label>
+              <Label htmlFor="portal-password">Password</Label>
               <Input
                 id="portal-password"
                 type="password"
@@ -64,7 +65,7 @@ export default function PortalLogin() {
               />
             </div>
             <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? "Laden..." : "Inloggen"}
+              {loading ? "Signing in…" : "Sign in"}
             </Button>
           </form>
         </CardContent>

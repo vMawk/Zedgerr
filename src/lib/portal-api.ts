@@ -2,8 +2,14 @@ import { apiUrl } from "@/lib/api";
 import type { BusinessSettings, Company, Invoice, InvoiceLine } from "@/lib/db-types";
 
 const PORTAL_TOKEN_KEY = "REPLACE_ME";
+const LEGACY_PORTAL_TOKEN_KEY = "REPLACE_ME";
 
 export function getPortalToken(): string | null {
+  const legacy = localStorage.getItem(LEGACY_PORTAL_TOKEN_KEY);
+  if (legacy) {
+    localStorage.setItem(PORTAL_TOKEN_KEY, legacy);
+    localStorage.removeItem(LEGACY_PORTAL_TOKEN_KEY);
+  }
   return localStorage.getItem(PORTAL_TOKEN_KEY);
 }
 
@@ -20,6 +26,7 @@ export function portalApiUrl(path: string): string {
 export type PortalCompany = { id: string; name: string };
 
 export type PortalDashboard = {
+  currency: string;
   totalHours: number;
   timeEntries: { id: string; date: string; hours: number; description: string | null }[];
   invoices: {
@@ -50,28 +57,28 @@ export async function portalLogin(email: string, password: string): Promise<{ to
     } catch {
       /* use raw */
     }
-    throw new Error(msg || "Inloggen mislukt");
+    throw new Error(msg || "Sign-in failed");
   }
   return r.json() as Promise<{ token: string; company: PortalCompany }>;
 }
 
 export async function portalFetchDashboard(): Promise<PortalDashboard> {
   const t = getPortalToken();
-  if (!t) throw new Error("Niet ingelogd");
+  if (!t) throw new Error("Not signed in");
   const r = await fetch(portalApiUrl("/portal/dashboard"), {
     headers: { Authorization: `Bearer ${t}` },
   });
   if (r.status === 401) {
     setPortalToken(null);
-    throw new Error("Sessie verlopen. Log opnieuw in.");
+    throw new Error("Session expired. Please sign in again.");
   }
-  if (!r.ok) throw new Error((await r.text()) || "Fout bij laden");
+  if (!r.ok) throw new Error((await r.text()) || "Failed to load");
   return r.json() as Promise<PortalDashboard>;
 }
 
 export async function portalChangePassword(currentPassword: string, newPassword: string): Promise<void> {
   const t = getPortalToken();
-  if (!t) throw new Error("Niet ingelogd");
+  if (!t) throw new Error("Not signed in");
   const r = await fetch(portalApiUrl("/portal/password"), {
     method: "PATCH",
     headers: { Authorization: `Bearer ${t}`, "Content-Type": "application/json" },
@@ -79,7 +86,7 @@ export async function portalChangePassword(currentPassword: string, newPassword:
   });
   if (r.status === 401) {
     setPortalToken(null);
-    throw new Error("Sessie verlopen. Log opnieuw in.");
+    throw new Error("Session expired. Please sign in again.");
   }
   if (!r.ok) {
     let msg = await r.text();
@@ -89,21 +96,21 @@ export async function portalChangePassword(currentPassword: string, newPassword:
     } catch {
       /* use raw */
     }
-    throw new Error(msg || "Wachtwoord wijzigen mislukt");
+    throw new Error(msg || "Could not change password");
   }
 }
 
 export async function portalFetchMe(): Promise<{ id: string; name: string; portal_email: string }> {
   const t = getPortalToken();
-  if (!t) throw new Error("Niet ingelogd");
+  if (!t) throw new Error("Not signed in");
   const r = await fetch(portalApiUrl("/portal/me"), {
     headers: { Authorization: `Bearer ${t}` },
   });
   if (r.status === 401) {
     setPortalToken(null);
-    throw new Error("Sessie verlopen");
+    throw new Error("Session expired. Please sign in again.");
   }
-  if (!r.ok) throw new Error((await r.text()) || "Fout");
+  if (!r.ok) throw new Error((await r.text()) || "Request failed");
   return r.json() as Promise<{ id: string; name: string; portal_email: string }>;
 }
 
@@ -114,15 +121,15 @@ export async function portalFetchInvoicePdfData(invoiceId: string): Promise<{
   settings: BusinessSettings | null;
 }> {
   const t = getPortalToken();
-  if (!t) throw new Error("Niet ingelogd");
+  if (!t) throw new Error("Not signed in");
   const r = await fetch(portalApiUrl(`/portal/invoices/${encodeURIComponent(invoiceId)}/pdf-data`), {
     headers: { Authorization: `Bearer ${t}` },
   });
   if (r.status === 401) {
     setPortalToken(null);
-    throw new Error("Sessie verlopen");
+    throw new Error("Session expired. Please sign in again.");
   }
-  if (!r.ok) throw new Error((await r.text()) || "Fout");
+  if (!r.ok) throw new Error((await r.text()) || "Request failed");
   return r.json() as Promise<{
     invoice: Invoice;
     lines: InvoiceLine[];

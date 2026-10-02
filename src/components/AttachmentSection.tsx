@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api } from "@/lib/api";
+import { api, getStoredToken } from "@/lib/api";
 import type { Attachment } from "@/lib/db-types";
 import { Button } from "@/components/ui/button";
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
@@ -44,10 +44,10 @@ export function AttachmentSection({ entityType, entityId }: Props) {
       for (const file of Array.from(files)) {
         await api.uploadAttachment(entityType, entityId, file);
       }
-      toast({ title: `${files.length === 1 ? "Bijlage" : "Bijlagen"} geüpload` });
+      toast({ title: `${files.length === 1 ? "Attachment" : "Attachments"} uploaded` });
       load();
     } catch (e: unknown) {
-      toast({ title: "Upload mislukt", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
+      toast({ title: "Upload failed", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
     } finally {
       setUploading(false);
       if (inputRef.current) inputRef.current.value = "";
@@ -61,9 +61,9 @@ export function AttachmentSection({ entityType, entityId }: Props) {
       await api.deleteAttachment(deleteTarget.id);
       setDeleteTarget(null);
       load();
-      toast({ title: "Bijlage verwijderd" });
+      toast({ title: "Attachment deleted" });
     } catch (e: unknown) {
-      toast({ title: "Fout", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
+      toast({ title: "Error", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
     } finally {
       setDeleting(false);
     }
@@ -72,7 +72,7 @@ export function AttachmentSection({ entityType, entityId }: Props) {
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-        <p className="text-sm font-medium">Bijlagen</p>
+        <p className="text-sm font-medium">Attachments</p>
         <Button
           type="button"
           variant="outline"
@@ -82,7 +82,7 @@ export function AttachmentSection({ entityType, entityId }: Props) {
           className="h-7 text-xs"
         >
           {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <Paperclip className="h-3.5 w-3.5 mr-1" />}
-          {uploading ? "Bezig…" : "Toevoegen"}
+          {uploading ? "Working…" : "Add"}
         </Button>
         <input
           ref={inputRef}
@@ -95,7 +95,7 @@ export function AttachmentSection({ entityType, entityId }: Props) {
       </div>
 
       {attachments.length === 0 && !uploading && (
-        <p className="text-xs text-muted-foreground">Nog geen bijlagen. Voeg bonnetjes, foto's of PDF's toe.</p>
+        <p className="text-xs text-muted-foreground">No attachments yet. Add receipts, photos or PDFs.</p>
       )}
 
       {attachments.length > 0 && (
@@ -107,21 +107,21 @@ export function AttachmentSection({ entityType, entityId }: Props) {
               {a.size_bytes && <span className="text-xs text-muted-foreground tabular-nums shrink-0">{formatBytes(a.size_bytes)}</span>}
               <button
                 type="button"
-                title="Openen"
+                title="Open"
                 className="shrink-0 text-muted-foreground hover:text-foreground"
                 onClick={async () => {
                   try {
-                    const token = localStorage.getItem("client_flow_jwt");
+                    const token = getStoredToken();
                     const res = await fetch(api.downloadAttachmentUrl(a.id), {
                       headers: token ? { Authorization: `Bearer ${token}` } : {},
                     });
-                    if (!res.ok) throw new Error("Download mislukt");
+                    if (!res.ok) throw new Error("Download failed");
                     const blob = await res.blob();
                     const url = URL.createObjectURL(blob);
                     window.open(url, "_blank");
                     setTimeout(() => URL.revokeObjectURL(url), 60000);
                   } catch {
-                    toast({ title: "Kan bestand niet openen", variant: "destructive" });
+                    toast({ title: "Could not open file", variant: "destructive" });
                   }
                 }}
               >
@@ -130,7 +130,7 @@ export function AttachmentSection({ entityType, entityId }: Props) {
               <button
                 type="button"
                 onClick={() => setDeleteTarget(a)}
-                title="Verwijderen"
+                title="Delete"
                 className="shrink-0 text-muted-foreground hover:text-destructive"
               >
                 <Trash2 className="h-3.5 w-3.5" />
@@ -143,15 +143,15 @@ export function AttachmentSection({ entityType, entityId }: Props) {
       <AlertDialog open={!!deleteTarget} onOpenChange={(v) => { if (!v) setDeleteTarget(null); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Bijlage verwijderen?</AlertDialogTitle>
+            <AlertDialogTitle>Delete attachment?</AlertDialogTitle>
             <AlertDialogDescription>
-              <span className="font-medium text-foreground">{deleteTarget?.filename}</span> wordt permanent verwijderd.
+              <span className="font-medium text-foreground">{deleteTarget?.filename}</span> will be permanently deleted.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting}>Annuleren</AlertDialogCancel>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
             <Button variant="destructive" onClick={handleDelete} disabled={deleting}>
-              {deleting ? "Bezig…" : "Verwijderen"}
+              {deleting ? "Working…" : "Delete"}
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>

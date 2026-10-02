@@ -1,64 +1,60 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
+import { useTaxSettings } from "@/lib/tax";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 
-// IB 2025 — box 1 schijven (beneden AOW-leeftijd)
-const IB_2025 = [
-  { limit: 38441, rate: 0.3697 },
-  { limit: 76817, rate: 0.3748 },
-  { limit: Infinity, rate: 0.495 },
-];
-
-// Algemene heffingskorting 2025 (benadering)
-function ahk2025(inkomen: number): number {
-  const max = 3483;
-  const afbouwStart = 23941;
-  const afbouwTarief = 0.06083;
-  if (inkomen <= afbouwStart) return max;
-  const reduction = (inkomen - afbouwStart) * afbouwTarief;
-  return Math.max(0, max - reduction);
-}
-
-function calcIB(belastbaarInkomen: number): number {
-  if (belastbaarInkomen <= 0) return 0;
-  let ib = 0;
-  let prev = 0;
-  for (const { limit, rate } of IB_2025) {
-    const slice = Math.min(belastbaarInkomen, limit) - prev;
-    if (slice <= 0) break;
-    ib += slice * rate;
-    prev = limit;
-  }
-  return Math.round(ib * 100) / 100;
-}
-
 function fmt(n: number): string {
-  return n.toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function quarterRange(year: number, q: number): [string, string] {
   const starts = ["01-01", "04-01", "07-01", "10-01"];
-  const ends   = ["03-31", "06-30", "09-30", "12-31"];
+  const ends = ["03-31", "06-30", "09-30", "12-31"];
   return [`${year}-${starts[q - 1]}`, `${year}-${ends[q - 1]}`];
 }
 
-function currentQuarter(): number {
-  return Math.ceil((new Date().getMonth() + 1) / 3);
+const currentYear = new Date().getFullYear();
+const YEARS = Array.from({ length: 5 }, (_, i) => currentYear - i);
+
+function YearSelect({ value, onChange }: { value: number; onChange: (y: number) => void }) {
+  return (
+    <div className="grid gap-1.5">
+      <Label className="text-xs text-muted-foreground">Year</Label>
+      <Select value={String(value)} onValueChange={(v) => onChange(Number(v))}>
+        <SelectTrigger className="w-28 h-8 text-sm"><SelectValue /></SelectTrigger>
+        <SelectContent>
+          {YEARS.map((y) => <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}
+        </SelectContent>
+      </Select>
+    </div>
+  );
 }
 
-// --- BTW-aangifte ---
-function BtwTab() {
+function Row({ label, value, strong, tone }: { label: string; value: string; strong?: boolean; tone?: "pay" | "reclaim" }) {
+  return (
+    <div className={`flex justify-between gap-4 ${strong ? "border-t pt-2 font-medium" : ""}`}>
+      <span className={strong ? "" : "text-muted-foreground"}>{label}</span>
+      <span
+        className={`tabular-nums ${strong ? "font-bold" : "font-medium"} ${
+          tone === "pay" ? "text-destructive/90" : tone === "reclaim" ? "text-success" : ""
+        }`}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function TaxSummaryTab() {
   const { user } = useAuth();
-  const currentYear = new Date().getFullYear();
+  const { taxName, currencySymbol: cs } = useTaxSettings();
   const [year, setYear] = useState(currentYear);
-  const [quarter, setQuarter] = useState(currentQuarter());
+  const [quarter, setQuarter] = useState(Math.ceil((new Date().getMonth() + 1) / 3));
   const [data, setData] = useState<{
     verkoop_omzet: number; verkoop_btw: number;
     inkoop_excl: number; inkoop_btw: number; saldo_btw: number;
@@ -72,114 +68,73 @@ function BtwTab() {
     api.getTaxReport(from, to).then(setData).finally(() => setLoading(false));
   }, [user, year, quarter]);
 
-  const years = Array.from({ length: 5 }, (_, i) => currentYear - i);
-  const teBetalen = data ? data.saldo_btw > 0 : false;
+  const payable = data ? data.saldo_btw > 0 : false;
 
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap gap-4 items-end">
+        <YearSelect value={year} onChange={setYear} />
         <div className="grid gap-1.5">
-          <Label className="text-xs text-muted-foreground">Jaar</Label>
-          <Select value={String(year)} onValueChange={(v) => setYear(Number(v))}>
-            <SelectTrigger className="w-28 h-8 text-sm"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {years.map((y) => <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="grid gap-1.5">
-          <Label className="text-xs text-muted-foreground">Kwartaal</Label>
+          <Label className="text-xs text-muted-foreground">Quarter</Label>
           <Select value={String(quarter)} onValueChange={(v) => setQuarter(Number(v))}>
             <SelectTrigger className="w-32 h-8 text-sm"><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="1">Q1 (jan–mrt)</SelectItem>
-              <SelectItem value="2">Q2 (apr–jun)</SelectItem>
-              <SelectItem value="3">Q3 (jul–sep)</SelectItem>
-              <SelectItem value="4">Q4 (okt–dec)</SelectItem>
+              <SelectItem value="1">Q1 (Jan–Mar)</SelectItem>
+              <SelectItem value="2">Q2 (Apr–Jun)</SelectItem>
+              <SelectItem value="3">Q3 (Jul–Sep)</SelectItem>
+              <SelectItem value="4">Q4 (Oct–Dec)</SelectItem>
             </SelectContent>
           </Select>
         </div>
       </div>
 
-      {loading && <p className="text-sm text-muted-foreground">Laden…</p>}
+      {loading && <p className="text-sm text-muted-foreground">Loading…</p>}
 
       {data && !loading && (
         <div className="space-y-4">
-          {/* Rubriek 1a: verkoop */}
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Rubriek 1a — Verkoop (omzet belast met BTW)</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2 text-sm">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Omzet excl. BTW</span>
-                <span className="font-medium tabular-nums">€{fmt(data.verkoop_omzet)}</span>
-              </div>
-              <div className="flex justify-between border-t pt-2">
-                <span className="font-medium">BTW op verkopen (te voldoen)</span>
-                <span className="font-bold tabular-nums text-destructive/90">€{fmt(data.verkoop_btw)}</span>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Rubriek 5b: inkoop */}
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Rubriek 5b — Voorbelasting (BTW op inkopen)</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2 text-sm">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Inkopen excl. BTW</span>
-                <span className="font-medium tabular-nums">€{fmt(data.inkoop_excl)}</span>
-              </div>
-              <div className="flex justify-between border-t pt-2">
-                <span className="font-medium">BTW op inkopen (aftrekbaar)</span>
-                <span className="font-bold tabular-nums text-success">€{fmt(data.inkoop_btw)}</span>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Saldo */}
-          <Card className={teBetalen ? "border-destructive/40 bg-destructive/5" : "border-success/40 bg-success/5"}>
-            <CardContent className="pt-5">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">Saldo BTW</p>
-                  <p className="text-2xl font-bold tabular-nums">€{fmt(Math.abs(data.saldo_btw))}</p>
-                  <p className="text-sm text-muted-foreground mt-1">
-                    {teBetalen ? "Te betalen aan Belastingdienst" : "Te ontvangen van Belastingdienst"}
-                  </p>
-                </div>
-                <Badge variant="secondary" className={teBetalen ? "bg-destructive/10 text-destructive text-sm px-3 py-1" : "bg-success/10 text-success text-sm px-3 py-1"}>
-                  {teBetalen ? "Te betalen" : "Te ontvangen"}
-                </Badge>
-              </div>
-            </CardContent>
-          </Card>
-
-          {data.verkoop_btw > 0 && (
-            <Card className="border-amber-400/40 bg-amber-50/30 dark:bg-amber-950/20">
-              <CardContent className="pt-4 pb-4 flex items-center justify-between gap-4">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">Zet nu opzij</p>
-                  <p className="text-xl font-bold tabular-nums text-amber-700 dark:text-amber-400">
-                    €{fmt(Math.max(0, data.saldo_btw))}
-                  </p>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    Te betalen aan Belastingdienst voor Q{quarter} {year}
-                  </p>
-                </div>
-                <div className="text-right text-xs text-muted-foreground space-y-0.5">
-                  <p>Ontvangen van klanten: <span className="font-medium text-foreground">€{fmt(data.verkoop_btw)}</span></p>
-                  {data.inkoop_btw > 0 && <p>Terug te vragen: <span className="font-medium text-foreground">€{fmt(data.inkoop_btw)}</span></p>}
-                </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Sales</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2 text-sm">
+                <Row label={`Sales excl. ${taxName}`} value={`${cs}${fmt(data.verkoop_omzet)}`} />
+                <Row label={`${taxName} charged (output tax)`} value={`${cs}${fmt(data.verkoop_btw)}`} strong tone="pay" />
               </CardContent>
             </Card>
-          )}
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Purchases</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2 text-sm">
+                <Row label={`Purchases excl. ${taxName}`} value={`${cs}${fmt(data.inkoop_excl)}`} />
+                <Row label={`${taxName} paid (input tax)`} value={`${cs}${fmt(data.inkoop_btw)}`} strong tone="reclaim" />
+              </CardContent>
+            </Card>
+          </div>
 
-          <p className="text-xs text-muted-foreground">
-            Verkoop-BTW: facturen met status <em>verzonden</em> of <em>betaald</em> in dit kwartaal.
-            Inkoop-BTW: uitgaven geregistreerd in dit kwartaal. Dit overzicht is een hulpmiddel — controleer altijd in het portaal van de Belastingdienst.
+          <Card className={payable ? "border-destructive/40 bg-destructive/5" : "border-success/40 bg-success/5"}>
+            <CardContent className="pt-5 flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">{taxName} balance for Q{quarter} {year}</p>
+                <p className="text-2xl font-bold tabular-nums">{cs}{fmt(Math.abs(data.saldo_btw))}</p>
+                <p className="text-sm text-muted-foreground mt-1">
+                  {payable ? "Set this aside: you owe it to your tax authority." : "You can reclaim this from your tax authority."}
+                </p>
+              </div>
+              <Badge
+                variant="secondary"
+                className={payable ? "bg-destructive/10 text-destructive text-sm px-3 py-1" : "bg-success/10 text-success text-sm px-3 py-1"}
+              >
+                {payable ? "To pay" : "To reclaim"}
+              </Badge>
+            </CardContent>
+          </Card>
+
+          <p className="text-xs text-muted-foreground max-w-prose">
+            Output tax comes from invoices marked sent or paid in this quarter; input tax from expenses recorded in this quarter.
+            Reverse-charge and tax-exempt invoices carry no tax. Filing periods and rules differ per country, so treat this as a
+            working overview and check it against your tax authority's return before you file.
           </p>
         </div>
       )}
@@ -187,10 +142,9 @@ function BtwTab() {
   );
 }
 
-// --- Winst & verlies ---
 function ProfitTab() {
   const { user } = useAuth();
-  const currentYear = new Date().getFullYear();
+  const { taxName, currencySymbol: cs, distanceUnit } = useTaxSettings();
   const [year, setYear] = useState(currentYear);
   const [data, setData] = useState<{
     omzet: number; inkoop_kosten: number; abonnement_kosten: number;
@@ -204,240 +158,58 @@ function ProfitTab() {
     api.getProfitReport(year).then(setData).finally(() => setLoading(false));
   }, [user, year]);
 
-  const years = Array.from({ length: 5 }, (_, i) => currentYear - i);
   const margin = data && data.omzet > 0 ? Math.round((data.winst / data.omzet) * 100) : 0;
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-1.5 w-28">
-        <Label className="text-xs text-muted-foreground">Jaar</Label>
-        <Select value={String(year)} onValueChange={(v) => setYear(Number(v))}>
-          <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            {years.map((y) => <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}
-          </SelectContent>
-        </Select>
-      </div>
+      <YearSelect value={year} onChange={setYear} />
 
-      {loading && <p className="text-sm text-muted-foreground">Laden…</p>}
+      {loading && <p className="text-sm text-muted-foreground">Loading…</p>}
 
       {data && !loading && (
         <div className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <Card>
-              <CardHeader className="pb-1">
-                <CardTitle className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Omzet (betaalde facturen)</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-2xl font-bold tabular-nums">€{fmt(data.omzet)}</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="pb-1">
-                <CardTitle className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Totaal kosten</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-2xl font-bold tabular-nums">€{fmt(data.totaal_kosten)}</p>
-              </CardContent>
-            </Card>
+            {[
+              { label: "Revenue (paid invoices)", value: data.omzet },
+              { label: "Total costs", value: data.totaal_kosten },
+            ].map((k) => (
+              <Card key={k.label}>
+                <CardHeader className="pb-1">
+                  <CardTitle className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{k.label}</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-2xl font-bold tabular-nums">{cs}{fmt(k.value)}</p>
+                </CardContent>
+              </Card>
+            ))}
             <Card className={data.winst >= 0 ? "border-success/40" : "border-destructive/40"}>
               <CardHeader className="pb-1">
-                <CardTitle className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Winst voor belasting</CardTitle>
+                <CardTitle className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Profit before tax</CardTitle>
               </CardHeader>
               <CardContent>
                 <p className={`text-2xl font-bold tabular-nums ${data.winst >= 0 ? "text-success" : "text-destructive"}`}>
-                  €{fmt(data.winst)}
+                  {cs}{fmt(data.winst)}
                 </p>
-                {data.omzet > 0 && (
-                  <p className="text-xs text-muted-foreground mt-1">{margin}% marge</p>
-                )}
+                {data.omzet > 0 && <p className="text-xs text-muted-foreground mt-1">{margin}% margin</p>}
               </CardContent>
             </Card>
           </div>
 
           <Card>
             <CardContent className="pt-5 space-y-3 text-sm">
-              <div className="flex justify-between py-1">
-                <span className="font-medium">Omzet (excl. BTW)</span>
-                <span className="font-medium tabular-nums">+ €{fmt(data.omzet)}</span>
-              </div>
-              <div className="flex justify-between py-1 text-muted-foreground">
-                <span>Inkoop / uitgaven (excl. BTW)</span>
-                <span className="tabular-nums">− €{fmt(data.inkoop_kosten)}</span>
-              </div>
-              <div className="flex justify-between py-1 text-muted-foreground">
-                <span>Zakelijke abonnementen (betaald)</span>
-                <span className="tabular-nums">− €{fmt(data.abonnement_kosten)}</span>
-              </div>
-              {data.km_kosten > 0 && (
-                <div className="flex justify-between py-1 text-muted-foreground">
-                  <span>Kilometervergoeding (€0,23/km)</span>
-                  <span className="tabular-nums">− €{fmt(data.km_kosten)}</span>
-                </div>
-              )}
-              <div className="flex justify-between py-2 border-t font-bold text-base">
-                <span>Winst voor belasting</span>
-                <span className={`tabular-nums ${data.winst >= 0 ? "text-success" : "text-destructive"}`}>
-                  €{fmt(data.winst)}
-                </span>
-              </div>
+              <Row label={`Revenue (excl. ${taxName})`} value={`+ ${cs}${fmt(data.omzet)}`} />
+              <Row label={`Purchases and expenses (excl. ${taxName})`} value={`− ${cs}${fmt(data.inkoop_kosten)}`} />
+              <Row label="Business subscriptions (paid)" value={`− ${cs}${fmt(data.abonnement_kosten)}`} />
+              {data.km_kosten > 0 && <Row label={`Mileage allowance (business ${distanceUnit})`} value={`− ${cs}${fmt(data.km_kosten)}`} />}
+              <Row label="Profit before tax" value={`${cs}${fmt(data.winst)}`} strong />
             </CardContent>
           </Card>
 
-          <p className="text-xs text-muted-foreground">
-            Omzet = facturen met status <em>betaald</em> in {year}. Kosten = geregistreerde uitgaven + betaalde zakelijke abonnementen in {year}.
-            Privé-abonnementen tellen niet mee als zakelijke kosten.
+          <p className="text-xs text-muted-foreground max-w-prose">
+            Revenue counts invoices marked paid in {year}. Costs are recorded expenses, paid business subscriptions and business
+            mileage at the rate set in Settings. Personal subscriptions and trips are not included.
           </p>
         </div>
-      )}
-    </div>
-  );
-}
-
-// --- Belastingschatting ---
-function TaxEstimateTab() {
-  const { user } = useAuth();
-  const currentYear = new Date().getFullYear();
-  const [winst, setWinst] = useState("");
-  const [jaar, setJaar] = useState(currentYear);
-  const [zelfstandigenaftrek, setZelfstandigenaftrek] = useState("2470");
-  const [startersaftrek, setStartersaftrek] = useState(false);
-  const [startersAftrekBedrag] = useState("2123");
-  const [mkbPct, setMkbPct] = useState("13.31");
-  const [autoLoaded, setAutoLoaded] = useState(false);
-  const years = Array.from({ length: 5 }, (_, i) => currentYear - i);
-
-  useEffect(() => {
-    if (!user || autoLoaded) return;
-    api.getProfitReport(jaar).then((data) => {
-      if (data.winst > 0 && !winst) {
-        setWinst(String(Math.round(data.winst)));
-        setAutoLoaded(true);
-      }
-    }).catch(() => {});
-  }, [user, jaar]);
-
-  const winstNum = parseFloat(winst) || 0;
-  const zelfstandigenNum = parseFloat(zelfstandigenaftrek) || 0;
-  const startersNum = startersaftrek ? (parseFloat(startersAftrekBedrag) || 0) : 0;
-  const mkbPctNum = parseFloat(mkbPct) || 0;
-
-  const winstNaZelfstandigen = Math.max(0, winstNum - zelfstandigenNum - startersNum);
-  const mkbVrijstelling = Math.round(winstNaZelfstandigen * (mkbPctNum / 100) * 100) / 100;
-  const belastbaarInkomen = Math.max(0, winstNaZelfstandigen - mkbVrijstelling);
-  const ibBruto = calcIB(belastbaarInkomen);
-  const ahk = ahk2025(belastbaarInkomen);
-  const ibNetto = Math.max(0, ibBruto - ahk);
-  const effectiefTarief = winstNum > 0 ? Math.round((ibNetto / winstNum) * 1000) / 10 : 0;
-  const opzijZetten = winstNum > 0 ? Math.round((ibNetto / winstNum) * 100) : 0;
-
-  return (
-    <div className="space-y-6 max-w-xl">
-      <p className="text-sm text-muted-foreground">
-        Ruwe schatting voor ZZP / eenmanszaak. Tarieven {jaar}. Geen rekening gehouden met arbeidskorting, heffingskortingen op toeslagen, of box 3 vermogen.
-      </p>
-
-      <div className="grid gap-4">
-        <div className="grid grid-cols-2 gap-4">
-          <div className="grid gap-2">
-            <Label>Winst voor belasting (€)</Label>
-            <Input type="number" step="100" min="0" placeholder="bijv. 45000" value={winst} onChange={(e) => { setWinst(e.target.value); }} />
-            {autoLoaded && <p className="text-xs text-muted-foreground">Automatisch ingevuld vanuit winst &amp; verlies {jaar}</p>}
-          </div>
-          <div className="grid gap-2">
-            <Label>Jaar</Label>
-            <Select value={String(jaar)} onValueChange={(v) => setJaar(Number(v))}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>{years.map((y) => <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}</SelectContent>
-            </Select>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-4">
-          <div className="grid gap-2">
-            <Label>Zelfstandigenaftrek (€)</Label>
-            <Input type="number" step="10" min="0" value={zelfstandigenaftrek} onChange={(e) => setZelfstandigenaftrek(e.target.value)} />
-            <p className="text-xs text-muted-foreground">€2.470 in 2025 (afgebouwd t/m 2027)</p>
-          </div>
-          <div className="grid gap-2">
-            <Label>MKB-winstvrijstelling (%)</Label>
-            <Input type="number" step="0.01" min="0" max="100" value={mkbPct} onChange={(e) => setMkbPct(e.target.value)} />
-            <p className="text-xs text-muted-foreground">13,31% in 2024/2025</p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <Checkbox id="starters" checked={startersaftrek} onCheckedChange={(v) => setStartersaftrek(v === true)} />
-          <Label htmlFor="starters" className="cursor-pointer">
-            Startersaftrek toepassen (€{parseInt(startersAftrekBedrag).toLocaleString("nl-NL")} — alleen eerste 3 jaar)
-          </Label>
-        </div>
-      </div>
-
-      {winstNum > 0 && (
-        <Card>
-          <CardContent className="pt-5 space-y-2 text-sm">
-            <div className="flex justify-between py-1">
-              <span className="text-muted-foreground">Winst voor belasting</span>
-              <span className="tabular-nums">€{fmt(winstNum)}</span>
-            </div>
-            <div className="flex justify-between py-1 text-muted-foreground">
-              <span>Zelfstandigenaftrek</span>
-              <span className="tabular-nums">− €{fmt(zelfstandigenNum)}</span>
-            </div>
-            {startersaftrek && (
-              <div className="flex justify-between py-1 text-muted-foreground">
-                <span>Startersaftrek</span>
-                <span className="tabular-nums">− €{fmt(startersNum)}</span>
-              </div>
-            )}
-            <div className="flex justify-between py-1 text-muted-foreground">
-              <span>MKB-winstvrijstelling ({mkbPctNum}%)</span>
-              <span className="tabular-nums">− €{fmt(mkbVrijstelling)}</span>
-            </div>
-            <div className="flex justify-between py-2 border-t font-medium">
-              <span>Belastbaar inkomen</span>
-              <span className="tabular-nums">€{fmt(belastbaarInkomen)}</span>
-            </div>
-            <div className="flex justify-between py-1 text-muted-foreground">
-              <span>IB vóór heffingskortingen</span>
-              <span className="tabular-nums">€{fmt(ibBruto)}</span>
-            </div>
-            <div className="flex justify-between py-1 text-muted-foreground">
-              <span>Algemene heffingskorting (schatting)</span>
-              <span className="tabular-nums">− €{fmt(ahk)}</span>
-            </div>
-            <div className="flex justify-between py-2 border-t font-bold text-base">
-              <span>Geschatte inkomstenbelasting</span>
-              <span className="tabular-nums text-destructive/90">€{fmt(ibNetto)}</span>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {winstNum > 0 && (
-        <div className="grid grid-cols-2 gap-4">
-          <Card>
-            <CardContent className="pt-4 pb-4">
-              <p className="text-xs text-muted-foreground mb-1">Effectief tarief op winst</p>
-              <p className="text-2xl font-bold">{effectiefTarief}%</p>
-            </CardContent>
-          </Card>
-          <Card className="border-amber-400/40 bg-amber-50/40 dark:bg-amber-950/20">
-            <CardContent className="pt-4 pb-4">
-              <p className="text-xs text-muted-foreground mb-1">Zet opzij van elke euro winst</p>
-              <p className="text-2xl font-bold text-amber-700 dark:text-amber-400">{opzijZetten}%</p>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
-      {winstNum > 0 && (
-        <p className="text-xs text-muted-foreground">
-          Schijven {jaar}: t/m €38.441 → 36,97% · €38.441–€76.817 → 37,48% · &gt;€76.817 → 49,50%.
-          Arbeidskorting is hier <em>niet</em> meegenomen — die verlaagt de IB verder.
-          Raadpleeg een boekhouder voor je definitieve aangifte.
-        </p>
       )}
     </div>
   );
@@ -446,16 +218,14 @@ function TaxEstimateTab() {
 export default function Tax() {
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-semibold">Belasting</h1>
-      <Tabs defaultValue="btw">
+      <h1 className="text-xl font-semibold">Tax</h1>
+      <Tabs defaultValue="summary">
         <TabsList>
-          <TabsTrigger value="btw">BTW-aangifte</TabsTrigger>
-          <TabsTrigger value="wv">Winst &amp; verlies</TabsTrigger>
-          <TabsTrigger value="ib">Belastingschatting</TabsTrigger>
+          <TabsTrigger value="summary">Tax summary</TabsTrigger>
+          <TabsTrigger value="profit">Profit &amp; loss</TabsTrigger>
         </TabsList>
-        <TabsContent value="btw" className="mt-6"><BtwTab /></TabsContent>
-        <TabsContent value="wv" className="mt-6"><ProfitTab /></TabsContent>
-        <TabsContent value="ib" className="mt-6"><TaxEstimateTab /></TabsContent>
+        <TabsContent value="summary" className="mt-6"><TaxSummaryTab /></TabsContent>
+        <TabsContent value="profit" className="mt-6"><ProfitTab /></TabsContent>
       </Tabs>
     </div>
   );

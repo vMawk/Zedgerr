@@ -1,203 +1,199 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import type { BusinessSettings, Company, Invoice, InvoiceLine, Quote, QuoteLine } from "@/lib/db-types";
+import { currencySymbol } from "@/lib/tax";
+import { REVERSE_CHARGE_NOTE, presetFor, bankAccountLabel } from "@/lib/tax-presets";
 
-function invoiceAdvancePdfLabels(invoice: Invoice): { received: string; after: string } {
-  const mode = invoice.advance_label === "voorschot" ? "voorschot" : "krediet";
-  if (mode === "voorschot") {
-    return { received: "Reeds ontvangen voorschot:", after: "Te ontvangen na voorschot:" };
-  }
-  return { received: "Reeds verrekend krediet:", after: "Te ontvangen na krediet:" };
+// jsPDF's built-in fonts only cover WinAnsi, so symbols like ₹ fall back to the ISO code.
+const PDF_SAFE_SYMBOLS = new Set(["€", "$", "£", "¥", "A$", "C$", "NZ$", "S$", "HK$", "R$", "CHF", "kr", "R"]);
+
+function moneyFormatter(settings: BusinessSettings | null) {
+  const code = settings?.currency || "EUR";
+  const symbol = currencySymbol(code);
+  const prefix = PDF_SAFE_SYMBOLS.has(symbol) ? symbol : `${code} `;
+  return (n: number) =>
+    `${prefix}${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-/** Zedgerr wordmark — same asset as in the app (`public/zedgerr-logo.png`). */
-async function loadInvoiceLogo(): Promise<{ dataUrl: string; wMm: number; hMm: number } | null> {
-  try {
-    const res = await fetch("/zedgerr-logo.png");
-    if (!res.ok) return null;
-    const blob = await res.blob();
-    const dataUrl = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result as string);
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
-    const dims = await new Promise<{ w: number; h: number }>((resolve, reject) => {
-      const img = new Image();
-      img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
-      img.onerror = () => reject(new Error("logo image load failed"));
-      img.src = dataUrl;
-    });
-    const maxW = 48;
-    const maxH = 16;
-    let wMm = maxW;
-    let hMm = (dims.h / dims.w) * maxW;
-    if (hMm > maxH) {
-      hMm = maxH;
-      wMm = (dims.w / dims.h) * maxH;
-    }
-    return { dataUrl, wMm, hMm };
-  } catch {
-    return null;
+function taxLabel(settings: BusinessSettings | null) {
+  return settings?.tax_name && settings.tax_name !== "None" ? settings.tax_name : "Tax";
+}
+
+function fmtDate(d: string) {
+  return new Date(d).toLocaleDateString(undefined);
+}
+
+function advanceLabels(invoice: Invoice): { received: string; after: string } {
+  return invoice.advance_label === "voorschot"
+    ? { received: "Advance already received:", after: "Balance due after advance:" }
+    : { received: "Credit applied:", after: "Balance due after credit:" };
+}
+
+function ownBusinessLines(settings: BusinessSettings | null, tax: string): string[] {
+  return [
+    settings?.street,
+    [settings?.postal_code, settings?.city].filter(Boolean).join(" "),
+    settings?.country,
+    settings?.email,
+    settings?.phone,
+    settings?.kvk_number ? `${presetFor(settings.country_code).companyIdLabel}: ${settings.kvk_number}` : null,
+    settings?.btw_number ? `${presetFor(settings.country_code).taxIdLabel}: ${settings.btw_number}` : null,
+  ].filter((l): l is string => Boolean(l));
+}
+
+function clientLines(company: Company | null, tax: string): string[] {
+  return [
+    company?.name,
+    company?.contact_person ? `Attn: ${company.contact_person}` : null,
+    company?.street,
+    [company?.postal_code, company?.city].filter(Boolean).join(" "),
+    company?.country,
+    company?.btw_number ? `${tax === "VAT" ? "VAT number" : "Tax number"}: ${company.btw_number}` : null,
+  ].filter((l): l is string => Boolean(l));
+}
+
+function drawHeader(doc: jsPDF, name: string | null | undefined, lines: string[]): number {
+  let y = 22;
+  if (name) {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(14);
+    doc.text(name, 20, y);
+    y += 8;
   }
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  lines.forEach((line, i) => doc.text(line, 20, y + i * 4.5));
+  return y + lines.length * 4.5;
 }
 
 export async function generateInvoicePDF(
   invoice: Invoice,
   lines: InvoiceLine[],
   settings: BusinessSettings | null,
-  company: Company | null
+  company: Company | null,
 ) {
   const doc = new jsPDF();
   const pageWidth = doc.internal.pageSize.getWidth();
-
+  const money = moneyFormatter(settings);
+  const tax = taxLabel(settings);
   const isPrivate = invoice.invoice_type === "private";
-  const logo = isPrivate ? null : await loadInvoiceLogo();
-  const ownInfo = isPrivate
-    ? [
-        settings?.private_name,
+  const isReverseCharge = invoice.invoice_type === "reverse_charge";
+  const isCreditNote = Boolean(invoice.is_credit_note);
+
+  const headerEnd = isPrivate
+    ? drawHeader(doc, settings?.private_name, [
         settings?.private_street,
         [settings?.private_postal_code, settings?.private_city].filter(Boolean).join(" "),
         settings?.private_country,
-      ].filter(Boolean)
-    : [
-        settings?.street,
-        [settings?.postal_code, settings?.city].filter(Boolean).join(" "),
-        settings?.email,
-        settings?.phone,
-        settings?.kvk_number ? `KvK: ${settings.kvk_number}` : null,
-        settings?.btw_number ? `BTW: ${settings.btw_number}` : null,
-      ].filter(Boolean);
+      ].filter((l): l is string => Boolean(l)))
+    : drawHeader(doc, settings?.company_name, ownBusinessLines(settings, tax));
 
-  // Header — logo + own business info (geen merk-/bedrijfsnaamtekst)
-  const logoTop = 14;
-  if (logo) {
-    doc.addImage(logo.dataUrl, "PNG", 20, logoTop, logo.wMm, logo.hMm);
-  }
-
-  doc.setFontSize(9);
-  doc.setFont("helvetica", "normal");
-  const yOwnStart = logo ? logoTop + (logo?.hMm ?? 0) + 10 : 30;
-  ownInfo.forEach((line, i) => doc.text(line as string, 20, yOwnStart + i * 4.5));
-
-  // Invoice title
-  const isCreditNote = Boolean(invoice.is_credit_note);
   doc.setFontSize(24);
   doc.setFont("helvetica", "bold");
-  doc.text(isCreditNote ? "CREDITNOTA" : "FACTUUR", pageWidth - 20, 30, { align: "right" });
+  doc.text(isCreditNote ? "CREDIT NOTE" : "INVOICE", pageWidth - 20, 30, { align: "right" });
 
   doc.setFontSize(10);
   doc.setFont("helvetica", "normal");
-  doc.text(`${isCreditNote ? "Creditnotanummer" : "Factuurnummer"}: ${invoice.invoice_number}`, pageWidth - 20, 40, { align: "right" });
-  doc.text(`Datum: ${new Date(invoice.invoice_date).toLocaleDateString("nl-NL")}`, pageWidth - 20, 46, { align: "right" });
+  doc.text(`${isCreditNote ? "Credit note no." : "Invoice no."}: ${invoice.invoice_number}`, pageWidth - 20, 40, { align: "right" });
+  doc.text(`Date: ${fmtDate(invoice.invoice_date)}`, pageWidth - 20, 46, { align: "right" });
   if (invoice.due_date) {
-    doc.text(`Vervaldatum: ${new Date(invoice.due_date).toLocaleDateString("nl-NL")}`, pageWidth - 20, 52, { align: "right" });
+    doc.text(`Due date: ${fmtDate(invoice.due_date)}`, pageWidth - 20, 52, { align: "right" });
   }
   if (invoice.status === "betaald") {
     doc.setFont("helvetica", "bold");
     doc.setFontSize(14);
-    doc.text("BETAALD", pageWidth - 20, 60, { align: "right" });
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(10);
+    doc.text("PAID", pageWidth - 20, 60, { align: "right" });
   }
 
-  // Client info
-  const clientY = yOwnStart + ownInfo.length * 4.5 + 15;
+  const clientY = Math.max(headerEnd, 60) + 12;
+  const client = clientLines(company, tax);
   doc.setFontSize(10);
   doc.setFont("helvetica", "bold");
-  doc.text(isCreditNote ? "Creditnota aan:" : "Factuur aan:", 20, clientY);
+  doc.text(isCreditNote ? "Credit note to:" : "Bill to:", 20, clientY);
   doc.setFont("helvetica", "normal");
-  const clientInfo = [
-    company?.name,
-    company?.contact_person ? `t.a.v. ${company.contact_person}` : null,
-    company?.street,
-    [company?.postal_code, company?.city].filter(Boolean).join(" "),
-    company?.btw_number ? `BTW: ${company.btw_number}` : null,
-  ].filter(Boolean);
-  clientInfo.forEach((line, i) => doc.text(line as string, 20, clientY + 6 + i * 5));
-
-  // Table
-  const tableData = lines.map((line) => [
-    line.date ? new Date(line.date).toLocaleDateString("nl-NL") : "",
-    line.description,
-    line.hours ? Number(line.hours).toFixed(2) : "",
-    line.hourly_rate ? `€${Number(line.hourly_rate).toFixed(2)}` : "",
-    `€${Number(line.amount).toFixed(2)}`,
-  ]);
+  client.forEach((line, i) => doc.text(line, 20, clientY + 6 + i * 5));
 
   autoTable(doc, {
-    startY: clientY + 6 + clientInfo.length * 5 + 10,
-    head: [["Datum", "Omschrijving", "Uren", "Tarief", "Bedrag"]],
-    body: tableData,
+    startY: clientY + 6 + client.length * 5 + 10,
+    head: [["Date", "Description", "Hours", "Rate", "Amount"]],
+    body: lines.map((line) => [
+      line.date ? fmtDate(line.date) : "",
+      line.description,
+      line.hours ? Number(line.hours).toFixed(2) : "",
+      line.hourly_rate ? money(Number(line.hourly_rate)) : "",
+      money(Number(line.amount)),
+    ]),
     theme: "plain",
     headStyles: { fillColor: [245, 245, 245], textColor: [60, 60, 60], fontStyle: "bold", fontSize: 9 },
     bodyStyles: { fontSize: 9 },
     columnStyles: {
       0: { cellWidth: 25 },
       2: { cellWidth: 20, halign: "right" },
-      3: { cellWidth: 25, halign: "right" },
-      4: { cellWidth: 25, halign: "right" },
+      3: { cellWidth: 28, halign: "right" },
+      4: { cellWidth: 28, halign: "right" },
     },
   });
 
-  // Totals (sequentieel opgebouwd om overlap te voorkomen)
-  const finalY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 10;
   const rightX = pageWidth - 20;
-  const labelX = rightX - 70;
+  const labelX = rightX - 75;
   const lineHeight = 6;
-  let totalsY = finalY;
+  let y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 10;
 
   doc.setFontSize(10);
   doc.setFont("helvetica", "normal");
   if (!isPrivate) {
-    doc.text("Subtotaal:", labelX, totalsY);
-    doc.text(`€${Number(invoice.subtotal).toFixed(2)}`, rightX, totalsY, { align: "right" });
-    totalsY += lineHeight;
-    doc.text(`BTW (${Number(invoice.btw_percentage)}%):`, labelX, totalsY);
-    doc.text(`€${Number(invoice.btw_amount).toFixed(2)}`, rightX, totalsY, { align: "right" });
-    totalsY += lineHeight + 2;
+    doc.text("Subtotal:", labelX, y);
+    doc.text(money(Number(invoice.subtotal)), rightX, y, { align: "right" });
+    y += lineHeight;
+    doc.text(isReverseCharge ? `${tax} (reverse charge):` : `${tax} (${Number(invoice.btw_percentage)}%):`, labelX, y);
+    doc.text(money(Number(invoice.btw_amount)), rightX, y, { align: "right" });
+    y += lineHeight + 2;
   }
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(12);
-  doc.text(isPrivate ? "Totaal (all-in):" : "Totaal:", labelX, totalsY);
-  doc.text(`€${Number(invoice.total).toFixed(2)}`, rightX, totalsY, { align: "right" });
-  totalsY += lineHeight + 2;
+  doc.text("Total:", labelX, y);
+  doc.text(money(Number(invoice.total)), rightX, y, { align: "right" });
+  y += lineHeight + 2;
 
   if (isPrivate) {
     doc.setFont("helvetica", "normal");
     doc.setFontSize(9);
-    doc.text("Vrijgesteld van BTW (particulier)", rightX, totalsY, { align: "right" });
-    totalsY += lineHeight;
+    doc.text(`${tax} exempt (private individual)`, rightX, y, { align: "right" });
+    y += lineHeight;
   }
 
-  const rawAdvance = Math.max(0, Number(invoice.advance_payment ?? 0));
-  const safeAdvance = Math.min(rawAdvance, Number(invoice.total));
-  if (safeAdvance > 0) {
-    const rest = Math.max(0, Number(invoice.total) - safeAdvance);
-    const advLabels = invoiceAdvancePdfLabels(invoice);
-    totalsY += 2;
+  if (isReverseCharge) {
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    const wrapped = doc.splitTextToSize(REVERSE_CHARGE_NOTE, pageWidth - 40);
+    doc.text(wrapped, 20, y + 2);
+    y += wrapped.length * 4.5 + 2;
+  }
+
+  const advance = Math.min(Math.max(0, Number(invoice.advance_payment ?? 0)), Number(invoice.total));
+  if (advance > 0) {
+    const labels = advanceLabels(invoice);
+    y += 2;
     doc.setFont("helvetica", "normal");
     doc.setFontSize(10);
-    doc.text(advLabels.received, labelX, totalsY);
-    doc.text(`€${safeAdvance.toFixed(2)}`, rightX, totalsY, { align: "right" });
-    totalsY += lineHeight;
+    doc.text(labels.received, labelX, y);
+    doc.text(money(advance), rightX, y, { align: "right" });
+    y += lineHeight;
     doc.setFont("helvetica", "bold");
-    doc.text(advLabels.after, labelX, totalsY);
-    doc.text(`€${rest.toFixed(2)}`, rightX, totalsY, { align: "right" });
-    totalsY += lineHeight;
+    doc.text(labels.after, labelX, y);
+    doc.text(money(Math.max(0, Number(invoice.total) - advance)), rightX, y, { align: "right" });
+    y += lineHeight;
   }
 
-  const paymentBlockY = totalsY + 8;
-
-  // Payment info
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
+  y += 8;
   if (invoice.payment_method === "contant") {
-    doc.text("Betaalwijze: Contant", 20, paymentBlockY);
+    doc.text("Payment method: cash", 20, y);
   } else if (settings?.iban) {
-    doc.text(`Gelieve te betalen op IBAN: ${settings.iban}`, 20, paymentBlockY);
-    doc.text(`o.v.v. factuurnummer ${invoice.invoice_number}`, 20, paymentBlockY + 5);
+    doc.text(`Please pay to ${bankAccountLabel(settings.country_code).label === "IBAN" ? "IBAN" : "account"}: ${settings.iban}`, 20, y);
+    doc.text(`Reference: ${invoice.invoice_number}`, 20, y + 5);
   }
 
   doc.save(`${invoice.invoice_number}.pdf`);
@@ -211,100 +207,72 @@ export async function generateQuotePDF(
 ) {
   const doc = new jsPDF();
   const pageWidth = doc.internal.pageSize.getWidth();
+  const money = moneyFormatter(settings);
+  const tax = taxLabel(settings);
 
-  const logo = await loadInvoiceLogo();
-
-  const ownInfo = [
-    settings?.street,
-    [settings?.postal_code, settings?.city].filter(Boolean).join(" "),
-    settings?.email,
-    settings?.phone,
-    settings?.kvk_number ? `KvK: ${settings.kvk_number}` : null,
-    settings?.btw_number ? `BTW: ${settings.btw_number}` : null,
-  ].filter(Boolean);
-
-  const logoTop = 14;
-  if (logo) {
-    doc.addImage(logo.dataUrl, "PNG", 20, logoTop, logo.wMm, logo.hMm);
-  }
-
-  doc.setFontSize(9);
-  doc.setFont("helvetica", "normal");
-  const yOwnStart = logo ? logoTop + (logo?.hMm ?? 0) + 10 : 30;
-  ownInfo.forEach((line, i) => doc.text(line as string, 20, yOwnStart + i * 4.5));
+  const headerEnd = drawHeader(doc, settings?.company_name, ownBusinessLines(settings, tax));
 
   doc.setFontSize(24);
   doc.setFont("helvetica", "bold");
-  doc.text("OFFERTE", pageWidth - 20, 30, { align: "right" });
+  doc.text("QUOTE", pageWidth - 20, 30, { align: "right" });
 
   doc.setFontSize(10);
   doc.setFont("helvetica", "normal");
-  doc.text(`Offertenummer: ${quote.quote_number}`, pageWidth - 20, 40, { align: "right" });
-  doc.text(`Datum: ${new Date(quote.quote_date).toLocaleDateString("nl-NL")}`, pageWidth - 20, 46, { align: "right" });
+  doc.text(`Quote no.: ${quote.quote_number}`, pageWidth - 20, 40, { align: "right" });
+  doc.text(`Date: ${fmtDate(quote.quote_date)}`, pageWidth - 20, 46, { align: "right" });
   if (quote.valid_until) {
-    doc.text(`Geldig t/m: ${new Date(quote.valid_until).toLocaleDateString("nl-NL")}`, pageWidth - 20, 52, { align: "right" });
+    doc.text(`Valid until: ${fmtDate(quote.valid_until)}`, pageWidth - 20, 52, { align: "right" });
   }
 
-  const clientY = yOwnStart + ownInfo.length * 4.5 + 15;
-  doc.setFontSize(10);
+  const clientY = Math.max(headerEnd, 60) + 12;
+  const client = clientLines(company, tax);
   doc.setFont("helvetica", "bold");
-  doc.text("Offerte aan:", 20, clientY);
+  doc.text("Quote for:", 20, clientY);
   doc.setFont("helvetica", "normal");
-  const clientInfo = [
-    company?.name,
-    company?.contact_person ? `t.a.v. ${company.contact_person}` : null,
-    company?.street,
-    [company?.postal_code, company?.city].filter(Boolean).join(" "),
-    company?.btw_number ? `BTW: ${company.btw_number}` : null,
-  ].filter(Boolean);
-  clientInfo.forEach((line, i) => doc.text(line as string, 20, clientY + 6 + i * 5));
-
-  const tableData = lines.map((line) => [
-    line.description,
-    line.hours != null ? Number(line.hours).toFixed(2) : "",
-    line.hourly_rate != null ? `€${Number(line.hourly_rate).toFixed(2)}` : "",
-    `€${Number(line.amount).toFixed(2)}`,
-  ]);
+  client.forEach((line, i) => doc.text(line, 20, clientY + 6 + i * 5));
 
   autoTable(doc, {
-    startY: clientY + 6 + clientInfo.length * 5 + 10,
-    head: [["Omschrijving", "Uren", "Tarief", "Bedrag"]],
-    body: tableData,
+    startY: clientY + 6 + client.length * 5 + 10,
+    head: [["Description", "Hours", "Rate", "Amount"]],
+    body: lines.map((line) => [
+      line.description,
+      line.hours != null ? Number(line.hours).toFixed(2) : "",
+      line.hourly_rate != null ? money(Number(line.hourly_rate)) : "",
+      money(Number(line.amount)),
+    ]),
     theme: "plain",
     headStyles: { fillColor: [245, 245, 245], textColor: [60, 60, 60], fontStyle: "bold", fontSize: 9 },
     bodyStyles: { fontSize: 9 },
     columnStyles: {
       1: { cellWidth: 20, halign: "right" },
-      2: { cellWidth: 25, halign: "right" },
-      3: { cellWidth: 25, halign: "right" },
+      2: { cellWidth: 28, halign: "right" },
+      3: { cellWidth: 28, halign: "right" },
     },
   });
 
-  const finalY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 10;
   const rightX = pageWidth - 20;
+  const labelX = rightX - 60;
+  const y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 10;
 
   doc.setFontSize(10);
   doc.setFont("helvetica", "normal");
-  doc.text("Subtotaal:", rightX - 40, finalY);
-  doc.text(`€${Number(quote.subtotal).toFixed(2)}`, rightX, finalY, { align: "right" });
-
-  doc.text(`BTW (${Number(quote.btw_percentage)}%):`, rightX - 40, finalY + 6);
-  doc.text(`€${Number(quote.btw_amount).toFixed(2)}`, rightX, finalY + 6, { align: "right" });
+  doc.text("Subtotal:", labelX, y);
+  doc.text(money(Number(quote.subtotal)), rightX, y, { align: "right" });
+  doc.text(`${tax} (${Number(quote.btw_percentage)}%):`, labelX, y + 6);
+  doc.text(money(Number(quote.btw_amount)), rightX, y + 6, { align: "right" });
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(12);
-  doc.text("Totaal:", rightX - 40, finalY + 14);
-  doc.text(`€${Number(quote.total).toFixed(2)}`, rightX, finalY + 14, { align: "right" });
+  doc.text("Total:", labelX, y + 14);
+  doc.text(money(Number(quote.total)), rightX, y + 14, { align: "right" });
 
   if (quote.notes) {
-    const y = finalY + 30;
     doc.setFont("helvetica", "bold");
     doc.setFontSize(10);
-    doc.text("Notities", 20, y);
+    doc.text("Notes", 20, y + 30);
     doc.setFont("helvetica", "normal");
     doc.setFontSize(9);
-    const wrapped = doc.splitTextToSize(String(quote.notes), pageWidth - 40);
-    doc.text(wrapped, 20, y + 6);
+    doc.text(doc.splitTextToSize(String(quote.notes), pageWidth - 40), 20, y + 36);
   }
 
   doc.save(`${quote.quote_number}.pdf`);

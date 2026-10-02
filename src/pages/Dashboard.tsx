@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { Link } from "react-router-dom";
 import {
-  Building2, Clock, Euro, FileText, Landmark, Loader2, Receipt,
+  Building2, Clock, Banknote, FileText, Landmark, Loader2, Receipt,
   TrendingUp, TrendingDown, AlertCircle, ChevronRight,
 } from "lucide-react";
 import type { Company, Invoice, TimeEntry } from "@/lib/db-types";
@@ -13,6 +13,8 @@ import {
   Area, AreaChart, Bar, BarChart, CartesianGrid, XAxis, YAxis,
 } from "recharts";
 import { cn } from "@/lib/utils";
+import { motion } from "framer-motion";
+import { FadeList, FadeItem } from "@/components/PageTransition";
 
 type PeriodPreset = "30d" | "90d" | "ytd" | "12m";
 type InvoiceWithCompany = Invoice & { companies: { name: string | null } | null };
@@ -30,12 +32,12 @@ const STATUS_LABELS: Record<string, string> = {
   concept: "Draft",
   verzonden: "Sent",
   betaald: "Paid",
-  vervallen: "Overdue",
+  vervallen: "Void",
   gesplitst: "Split",
 };
 
 function invoiceStatusForDashboard(inv: Invoice): string {
-  if (inv.status === "vervallen" && (inv.notes ?? "").toLowerCase().includes("gesplitst")) return "gesplitst";
+  if (inv.status === "vervallen" && /gesplitst|split into/i.test(inv.notes ?? "")) return "gesplitst";
   return inv.status;
 }
 
@@ -75,7 +77,7 @@ function getPeriodRange(period: PeriodPreset) {
 
 // Compact KPI card in Sypher style
 function KpiCard({
-  label, value, sub, icon: Icon, trend, positive,
+  label, value, sub, icon: Icon, trend, positive, delay = 0,
 }: {
   label: string;
   value: string;
@@ -83,26 +85,46 @@ function KpiCard({
   icon: React.ElementType;
   trend?: number | null;
   positive?: boolean;
+  delay?: number;
 }) {
   const trendUp = trend !== undefined && trend !== null && trend > 0;
   const trendDown = trend !== undefined && trend !== null && trend < 0;
+  const prevValue = useRef(value);
+  const [key, setKey] = useState(0);
+  useEffect(() => {
+    if (prevValue.current !== value) {
+      setKey((k) => k + 1);
+      prevValue.current = value;
+    }
+  }, [value]);
+
   return (
-    <div className="bg-card border border-border rounded-lg p-4 flex flex-col gap-2">
+    <motion.div
+      className="bg-card border border-border rounded-lg p-4 flex flex-col gap-2 card-lift cursor-default"
+      initial={{ opacity: 0, y: 18, scale: 0.97 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={{ duration: 0.32, ease: [0.25, 0.46, 0.45, 0.94], delay }}
+    >
       <div className="flex items-center justify-between">
         <span className="text-[11px] font-semibold tracking-wider text-muted-foreground uppercase">{label}</span>
         <Icon className="h-3.5 w-3.5 text-muted-foreground" />
       </div>
       <div className="flex items-end gap-2">
-        <span className="text-2xl font-bold tabular-nums leading-none">{value}</span>
+        <span key={key} className="text-2xl font-bold tabular-nums leading-none count-up">{value}</span>
         {trend !== null && trend !== undefined && (
-          <span className={cn("flex items-center gap-0.5 text-xs font-medium mb-0.5", trendUp ? (positive !== false ? "text-success" : "text-cost") : trendDown ? (positive !== false ? "text-cost" : "text-success") : "text-muted-foreground")}>
+          <motion.span
+            className={cn("flex items-center gap-0.5 text-xs font-medium mb-0.5", trendUp ? (positive !== false ? "text-success" : "text-cost") : trendDown ? (positive !== false ? "text-cost" : "text-success") : "text-muted-foreground")}
+            initial={{ opacity: 0, x: -6 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: delay + 0.25, duration: 0.2 }}
+          >
             {trendUp ? <TrendingUp className="h-3 w-3" /> : trendDown ? <TrendingDown className="h-3 w-3" /> : null}
             {Math.abs(trend).toFixed(1)}%
-          </span>
+          </motion.span>
         )}
       </div>
       {sub && <p className="text-xs text-muted-foreground">{sub}</p>}
-    </div>
+    </motion.div>
   );
 }
 
@@ -234,7 +256,7 @@ export default function Dashboard() {
   }, [reportRows]);
 
   const revenueChartConfig: ChartConfig = {
-    betaald: { label: "Paid", color: "hsl(162 100% 13%)" },
+    betaald: { label: "Paid", color: "hsl(var(--primary))" },
     open: { label: "Outstanding", color: "hsl(39 90% 65%)" },
   };
   const hoursChartConfig: ChartConfig = {
@@ -288,43 +310,12 @@ export default function Dashboard() {
 
       {/* KPI row */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        <KpiCard
-          label="Revenue received"
-          value={fmt(kpis.paidAmount)}
-          sub={`${kpis.paidCount} invoices`}
-          icon={Euro}
-          positive
-        />
-        <KpiCard
-          label="Outstanding"
-          value={fmt(kpis.openAmount)}
-          sub={`${kpis.openCount} invoices`}
-          icon={FileText}
-          positive={false}
-        />
-        <KpiCard
-          label="Bank balance"
-          value={bankSaldo !== null ? (bankSaldo < 0 ? `−${fmt(Math.abs(bankSaldo))}` : fmt(bankSaldo)) : "—"}
-          icon={Landmark}
-          positive={bankSaldo === null || bankSaldo >= 0}
-        />
-        <KpiCard
-          label="Hours (period)"
-          value={kpis.hours.toFixed(1)}
-          icon={Clock}
-        />
-        <KpiCard
-          label="Clients"
-          value={String(companies.length)}
-          icon={Building2}
-        />
-        <KpiCard
-          label={`Tax Q${Math.ceil((new Date().getMonth() + 1) / 3)}`}
-          value={btwQuarter !== null ? fmt(Math.max(0, btwQuarter.saldo_btw)) : "—"}
-          sub={btwQuarter?.inkoop_btw ? `−${fmt(btwQuarter.inkoop_btw)} input credit` : "Current quarter"}
-          icon={Receipt}
-          positive={false}
-        />
+        <KpiCard delay={0}    label="Revenue received" value={fmt(kpis.paidAmount)} sub={`${kpis.paidCount} invoices`} icon={Banknote} positive />
+        <KpiCard delay={0.05} label="Outstanding" value={fmt(kpis.openAmount)} sub={`${kpis.openCount} invoices`} icon={FileText} positive={false} />
+        <KpiCard delay={0.1}  label="Bank balance" value={bankSaldo !== null ? (bankSaldo < 0 ? `−${fmt(Math.abs(bankSaldo))}` : fmt(bankSaldo)) : "—"} icon={Landmark} positive={bankSaldo === null || bankSaldo >= 0} />
+        <KpiCard delay={0.15} label="Hours (period)" value={kpis.hours.toFixed(1)} icon={Clock} />
+        <KpiCard delay={0.2}  label="Clients" value={String(companies.length)} icon={Building2} />
+        <KpiCard delay={0.25} label={`Tax Q${Math.ceil((new Date().getMonth() + 1) / 3)}`} value={btwQuarter !== null ? fmt(Math.max(0, btwQuarter.saldo_btw)) : "—"} sub={btwQuarter?.inkoop_btw ? `−${fmt(btwQuarter.inkoop_btw)} input credit` : "Current quarter"} icon={Receipt} positive={false} />
       </div>
 
       {/* Main two-column layout */}
@@ -351,8 +342,8 @@ export default function Dashboard() {
                 <AreaChart data={revenueByMonth} margin={{ top: 4, right: 0, bottom: 0, left: 0 }}>
                   <defs>
                     <linearGradient id="gradBetaald" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="hsl(162 100% 13%)" stopOpacity={0.2} />
-                      <stop offset="95%" stopColor="hsl(162 100% 13%)" stopOpacity={0} />
+                      <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.2} />
+                      <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
                     </linearGradient>
                     <linearGradient id="gradOpen" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="hsl(39 90% 65%)" stopOpacity={0.15} />
@@ -363,7 +354,7 @@ export default function Dashboard() {
                   <XAxis dataKey="label" tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
                   <YAxis tickLine={false} axisLine={false} width={60} tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} tickFormatter={fmt} />
                   <ChartTooltip content={<ChartTooltipContent formatter={(v) => fmtFull(Number(v))} />} />
-                  <Area dataKey="betaald" stroke="hsl(162 100% 13%)" strokeWidth={2} fill="url(#gradBetaald)" dot={false} />
+                  <Area dataKey="betaald" stroke="hsl(var(--primary))" strokeWidth={2} fill="url(#gradBetaald)" dot={false} />
                   <Area dataKey="open" stroke="hsl(39 90% 65%)" strokeWidth={2} fill="url(#gradOpen)" dot={false} />
                 </AreaChart>
               </ChartContainer>
@@ -385,7 +376,7 @@ export default function Dashboard() {
                     <XAxis dataKey="label" tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
                     <YAxis tickLine={false} axisLine={false} width={32} tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
                     <ChartTooltip content={<ChartTooltipContent />} />
-                    <Bar dataKey="hours" fill="hsl(var(--muted-foreground))" radius={[3, 3, 0, 0]} opacity={0.6} />
+                    <Bar dataKey="hours" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} opacity={0.85} />
                   </BarChart>
                 </ChartContainer>
               )}
@@ -413,7 +404,12 @@ export default function Dashboard() {
                           <span className="text-muted-foreground tabular-nums">{fmtFull(c.revenue)}</span>
                         </div>
                         <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-                          <div className="h-full bg-success rounded-full" style={{ width: `${pct}%` }} />
+                          <motion.div
+                            className="h-full bg-success rounded-full"
+                            initial={{ width: 0 }}
+                            animate={{ width: `${pct}%` }}
+                            transition={{ duration: 0.6, ease: "easeOut", delay: 0.1 }}
+                          />
                         </div>
                       </div>
                     );
@@ -447,8 +443,8 @@ export default function Dashboard() {
             {/* Progress bar */}
             {kpis.total > 0 && (
               <div className="h-1.5 bg-muted rounded-full overflow-hidden flex">
-                <div className="h-full bg-success" style={{ width: `${(kpis.paidAmount / kpis.total) * 100}%` }} />
-                <div className="h-full bg-warning" style={{ width: `${(kpis.openAmount / kpis.total) * 100}%` }} />
+                <motion.div className="h-full bg-success" initial={{ width: 0 }} animate={{ width: `${(kpis.paidAmount / kpis.total) * 100}%` }} transition={{ duration: 0.7, ease: "easeOut" }} />
+                <motion.div className="h-full bg-warning" initial={{ width: 0 }} animate={{ width: `${(kpis.openAmount / kpis.total) * 100}%` }} transition={{ duration: 0.7, ease: "easeOut", delay: 0.1 }} />
               </div>
             )}
           </div>
@@ -488,14 +484,20 @@ export default function Dashboard() {
                   </tr>
                 </thead>
                 <tbody>
-                  {invoiceTableRows.map((inv) => {
+                  {invoiceTableRows.map((inv, i) => {
                     const status = invoiceStatusForDashboard(inv);
                     const color = STATUS_COLORS[status] ?? "#94a3b8";
                     const net = Math.max(0, Number(inv.total) - Number(inv.advance_payment ?? 0));
                     const companyName = inv.companies?.name ?? inv.invoice_number;
                     const initials = (companyName ?? "?").slice(0, 2).toUpperCase();
                     return (
-                      <tr key={inv.id} className="border-b border-border/50 hover:bg-muted/30 transition-colors">
+                      <motion.tr
+                        key={inv.id}
+                        className="border-b border-border/50 hover:bg-muted/30 transition-colors"
+                        initial={{ opacity: 0, x: -8 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: i * 0.04, duration: 0.2 }}
+                      >
                         <td className="px-4 py-2.5">
                           <div className="flex items-center gap-2.5 min-w-0">
                             <span
@@ -516,7 +518,7 @@ export default function Dashboard() {
                         <td className="px-4 py-2.5 text-right font-medium tabular-nums whitespace-nowrap">
                           {fmtFull(net)}
                         </td>
-                      </tr>
+                      </motion.tr>
                     );
                   })}
                 </tbody>

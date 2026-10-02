@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useOpenOnNew } from "@/hooks/use-open-on-new";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
 import type { Lead, LeadStatus } from "@/lib/db-types";
@@ -15,13 +16,13 @@ import { useToast } from "@/hooks/use-toast";
 import { Plus, Pencil, Trash2, Users } from "lucide-react";
 
 const STATUS_LABELS: Record<LeadStatus, string> = {
-  new: "Nieuw",
-  emailed: "E-mail gestuurd",
-  received_answer: "Antwoord ontvangen",
-  no_response: "Geen reactie",
-  follow_up: "Opvolging nodig",
-  converted: "Omgezet naar klant",
-  rejected: "Afgewezen",
+  new: "New",
+  emailed: "Emailed",
+  received_answer: "Replied",
+  no_response: "No response",
+  follow_up: "Follow up",
+  converted: "Converted to client",
+  rejected: "Rejected",
 };
 
 const STATUS_COLORS: Record<LeadStatus, string> = {
@@ -47,7 +48,7 @@ const emptyForm: Partial<Lead> = {
 };
 
 function formatDate(d: string): string {
-  return new Date(d).toLocaleDateString("nl-NL", { day: "numeric", month: "short", year: "numeric" });
+  return new Date(d).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
 }
 
 function StatusBadge({ status }: { status: LeadStatus }) {
@@ -65,6 +66,7 @@ export default function Leads() {
   const [form, setForm] = useState<Partial<Lead>>(emptyForm);
   const [editId, setEditId] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
+  useOpenOnNew(setOpen);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | LeadStatus>("all");
 
@@ -103,7 +105,7 @@ export default function Leads() {
 
   const handleSave = async () => {
     if (!user || !form.company_name?.trim()) {
-      toast({ title: "Vul een bedrijfsnaam in", variant: "destructive" });
+      toast({ title: "Enter a company name", variant: "destructive" });
       return;
     }
     try {
@@ -119,17 +121,17 @@ export default function Leads() {
       };
       if (editId) {
         await api.updateLead(editId, payload);
-        toast({ title: "Lead bijgewerkt" });
+        toast({ title: "Lead updated" });
       } else {
         await api.createLead(payload as Partial<Lead> & { company_name: string });
-        toast({ title: "Lead toegevoegd" });
+        toast({ title: "Lead added" });
       }
       setOpen(false);
       setForm(emptyForm);
       setEditId(null);
       fetchLeads();
     } catch (error: unknown) {
-      toast({ title: "Fout", description: error instanceof Error ? error.message : String(error), variant: "destructive" });
+      toast({ title: "Error", description: error instanceof Error ? error.message : String(error), variant: "destructive" });
     }
   };
 
@@ -148,10 +150,10 @@ export default function Leads() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Weet je zeker dat je deze lead wilt verwijderen?")) return;
+    if (!confirm("Delete this lead?")) return;
     await api.deleteLead(id);
     fetchLeads();
-    toast({ title: "Lead verwijderd" });
+    toast({ title: "Lead deleted" });
   };
 
   const handleQuickStatus = async (lead: Lead, status: LeadStatus) => {
@@ -159,7 +161,7 @@ export default function Leads() {
       await api.updateLead(lead.id, { status });
       setLeads((prev) => prev.map((l) => (l.id === lead.id ? { ...l, status } : l)));
     } catch (error: unknown) {
-      toast({ title: "Fout", description: error instanceof Error ? error.message : String(error), variant: "destructive" });
+      toast({ title: "Error", description: error instanceof Error ? error.message : String(error), variant: "destructive" });
     }
   };
 
@@ -180,27 +182,27 @@ export default function Leads() {
           <DialogTrigger asChild>
             <Button>
               <Plus className="mr-2 h-4 w-4" />
-              Lead toevoegen
+              Add lead
             </Button>
           </DialogTrigger>
           <DialogContent className="max-w-lg">
             <DialogHeader>
-              <DialogTitle>{editId ? "Lead bewerken" : "Nieuwe lead"}</DialogTitle>
+              <DialogTitle>{editId ? "Edit lead" : "New lead"}</DialogTitle>
             </DialogHeader>
             <div className="grid gap-4 py-4">
               <div className="grid gap-2">
-                <Label>Bedrijfsnaam *</Label>
+                <Label>Company name *</Label>
                 <Input
-                  placeholder="bijv. Acme BV"
+                  placeholder="e.g. Acme Ltd"
                   value={form.company_name || ""}
                   onChange={(e) => updateField("company_name", e.target.value)}
                 />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">
-                  <Label>Contactpersoon</Label>
+                  <Label>Contact person</Label>
                   <Input
-                    placeholder="Optioneel"
+                    placeholder="Optional"
                     value={form.contact_name || ""}
                     onChange={(e) => updateField("contact_name", e.target.value)}
                   />
@@ -226,18 +228,18 @@ export default function Leads() {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">
-                  <Label>E-mail</Label>
+                  <Label>Email</Label>
                   <Input
                     type="email"
-                    placeholder="Optioneel"
+                    placeholder="Optional"
                     value={form.email || ""}
                     onChange={(e) => updateField("email", e.target.value)}
                   />
                 </div>
                 <div className="grid gap-2">
-                  <Label>Telefoon</Label>
+                  <Label>Phone</Label>
                   <Input
-                    placeholder="Optioneel"
+                    placeholder="Optional"
                     value={form.phone || ""}
                     onChange={(e) => updateField("phone", e.target.value)}
                   />
@@ -246,21 +248,21 @@ export default function Leads() {
               <div className="grid gap-2">
                 <Label>Website</Label>
                 <Input
-                  placeholder="bijv. https://acme.nl"
+                  placeholder="e.g. https://acme.com"
                   value={form.website || ""}
                   onChange={(e) => updateField("website", e.target.value)}
                 />
               </div>
               <div className="grid gap-2">
-                <Label>Notities</Label>
+                <Label>Notes</Label>
                 <Textarea
-                  placeholder="Optioneel"
+                  placeholder="Optional"
                   rows={3}
                   value={form.notes || ""}
                   onChange={(e) => updateField("notes", e.target.value)}
                 />
               </div>
-              <Button onClick={handleSave}>{editId ? "Opslaan" : "Toevoegen"}</Button>
+              <Button onClick={handleSave}>{editId ? "Save" : "Add"}</Button>
             </div>
           </DialogContent>
         </Dialog>
@@ -276,7 +278,7 @@ export default function Leads() {
               : "border-border text-muted-foreground hover:text-foreground"
           }`}
         >
-          Alle ({leads.length})
+          All ({leads.length})
         </button>
         {ALL_STATUSES.filter((s) => counts[s]).map((s) => (
           <button
@@ -297,7 +299,7 @@ export default function Leads() {
       <Card>
         <CardContent className="pt-4 pb-4">
           <Input
-            placeholder="Zoek op bedrijf, contactpersoon, e-mail of notities..."
+            placeholder="Search by company, contact, email or notes…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -308,7 +310,7 @@ export default function Leads() {
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12 text-muted-foreground">
             <Users className="h-12 w-12 mb-4" />
-            <p>Geen leads gevonden</p>
+            <p>No leads found</p>
           </CardContent>
         </Card>
       ) : (
@@ -318,12 +320,12 @@ export default function Leads() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Bedrijf</TableHead>
+                    <TableHead>Company</TableHead>
                     <TableHead>Contact</TableHead>
                     <TableHead>Status</TableHead>
-                    <TableHead>Notities</TableHead>
-                    <TableHead>Toegevoegd</TableHead>
-                    <TableHead className="text-right">Acties</TableHead>
+                    <TableHead>Notes</TableHead>
+                    <TableHead>Added</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>

@@ -1,4 +1,7 @@
 import { useEffect, useState } from "react";
+import { useOpenOnNew } from "@/hooks/use-open-on-new";
+import { rateOptions } from "@/lib/tax-presets";
+import { useTaxSettings } from "@/lib/tax";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
 import type { Expense } from "@/lib/db-types";
@@ -17,13 +20,13 @@ import { useToast } from "@/hooks/use-toast";
 import { AttachmentSection } from "@/components/AttachmentSection";
 
 export const EXPENSE_CATEGORIES: Record<string, string> = {
-  kantoor: "Kantoor",
+  kantoor: "Office",
   hardware: "Hardware",
   software: "Software",
-  vervoer: "Vervoer",
+  vervoer: "Transport",
   marketing: "Marketing",
-  onderhoud: "Onderhoud",
-  overig: "Overig",
+  onderhoud: "Maintenance",
+  overig: "Other",
 };
 
 const categoryColors: Record<string, string> = {
@@ -42,7 +45,7 @@ const emptyForm = {
   description: "",
   category: "overig",
   amount_excl_vat: "",
-  vat_percentage: "21",
+  vat_percentage: "",
   notes: "",
 };
 
@@ -51,6 +54,7 @@ function calcVat(exclVat: number, vatPct: number) {
 }
 
 export default function Expenses() {
+  const { currencySymbol: cs, defaultRate, preset, taxName } = useTaxSettings();
   const { user } = useAuth();
   const { toast } = useToast();
   const [expenses, setExpenses] = useState<Expense[]>([]);
@@ -61,6 +65,7 @@ export default function Expenses() {
   });
   const [filterTo, setFilterTo] = useState(new Date().toISOString().split("T")[0]);
   const [open, setOpen] = useState(false);
+  useOpenOnNew(setOpen);
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const [editExpense, setEditExpense] = useState<Expense | null>(null);
@@ -76,7 +81,7 @@ export default function Expenses() {
   useEffect(() => { if (user) fetchExpenses(); }, [user, filterFrom, filterTo, filterCategory]);
 
   const resetForm = () => {
-    setForm(emptyForm);
+    setForm({ ...emptyForm, vat_percentage: String(defaultRate) });
     setEditExpense(null);
     setPendingId(crypto.randomUUID());
   };
@@ -115,16 +120,16 @@ export default function Expenses() {
     try {
       if (editExpense) {
         await api.updateExpense(editExpense.id, body);
-        toast({ title: "Uitgave bijgewerkt" });
+        toast({ title: "Expense updated" });
       } else {
         await api.createExpense({ id: pendingId, ...body });
-        toast({ title: "Uitgave toegevoegd" });
+        toast({ title: "Expense added" });
       }
       setOpen(false);
       resetForm();
       fetchExpenses();
     } catch (e: unknown) {
-      toast({ title: "Fout", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
+      toast({ title: "Error", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
     } finally {
       setSaving(false);
     }
@@ -137,9 +142,9 @@ export default function Expenses() {
       await api.deleteExpense(deleteTarget.id);
       setDeleteTarget(null);
       fetchExpenses();
-      toast({ title: "Uitgave verwijderd" });
+      toast({ title: "Expense deleted" });
     } catch (e: unknown) {
-      toast({ title: "Fout", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
+      toast({ title: "Error", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
     } finally {
       setDeleting(false);
     }
@@ -157,23 +162,23 @@ export default function Expenses() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Uitgaven</h1>
+        <h1 className="text-xl font-semibold">Expenses</h1>
         <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) resetForm(); }}>
           <DialogTrigger asChild>
-            <Button><Plus className="mr-2 h-4 w-4" />Uitgave toevoegen</Button>
+            <Button><Plus className="mr-2 h-4 w-4" />Add expense</Button>
           </DialogTrigger>
           <DialogContent className="max-w-xl">
             <DialogHeader>
-              <DialogTitle>{editExpense ? "Uitgave bewerken" : "Nieuwe uitgave"}</DialogTitle>
+              <DialogTitle>{editExpense ? "Edit expense" : "New expense"}</DialogTitle>
             </DialogHeader>
             <div className="grid gap-4 py-2">
               <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">
-                  <Label>Datum *</Label>
+                  <Label>Date *</Label>
                   <Input type="date" value={form.date} onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))} />
                 </div>
                 <div className="grid gap-2">
-                  <Label>Categorie</Label>
+                  <Label>Category</Label>
                   <Select value={form.category} onValueChange={(v) => setForm((f) => ({ ...f, category: v }))}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
@@ -185,47 +190,45 @@ export default function Expenses() {
                 </div>
               </div>
               <div className="grid gap-2">
-                <Label>Leverancier</Label>
-                <Input placeholder="Bijv. Coolblue, NS, Adobe…" value={form.supplier} onChange={(e) => setForm((f) => ({ ...f, supplier: e.target.value }))} />
+                <Label>Supplier</Label>
+                <Input placeholder="e.g. Amazon, Apple, Adobe…" value={form.supplier} onChange={(e) => setForm((f) => ({ ...f, supplier: e.target.value }))} />
               </div>
               <div className="grid gap-2">
-                <Label>Omschrijving *</Label>
-                <Input placeholder="Bijv. Externe monitor, treinreis, licentie…" value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} />
+                <Label>Description *</Label>
+                <Input placeholder="e.g. External monitor, train ticket, license…" value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} />
               </div>
               <div className="grid grid-cols-3 gap-3">
                 <div className="grid gap-2">
-                  <Label>Excl. BTW (€) *</Label>
+                  <Label>Excl. tax *</Label>
                   <Input type="number" step="0.01" min="0" placeholder="0.00" value={form.amount_excl_vat} onChange={(e) => setForm((f) => ({ ...f, amount_excl_vat: e.target.value }))} />
                 </div>
                 <div className="grid gap-2">
-                  <Label>BTW %</Label>
+                  <Label>Tax rate (%)</Label>
                   <Select value={form.vat_percentage} onValueChange={(v) => setForm((f) => ({ ...f, vat_percentage: v }))}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="21">21%</SelectItem>
-                      <SelectItem value="9">9%</SelectItem>
-                      <SelectItem value="0">0% / vrijgesteld</SelectItem>
+                      {rateOptions(preset, Number(form.vat_percentage)).map((r) => <SelectItem key={r} value={String(r)}>{r}%</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
                 <div className="grid gap-2">
-                  <Label>Incl. BTW</Label>
+                  <Label>Incl. tax</Label>
                   <div className="h-9 flex items-center px-3 rounded-md border bg-muted/40 text-sm font-medium tabular-nums">
-                    €{inclPreview.toLocaleString("nl-NL", { minimumFractionDigits: 2 })}
+                    {cs}{inclPreview.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                   </div>
                 </div>
               </div>
               {exclPreview > 0 && vatPctPreview > 0 && (
                 <p className="text-xs text-muted-foreground">
-                  BTW-bedrag: €{vatPreview.toLocaleString("nl-NL", { minimumFractionDigits: 2 })} — terugvorderbaar via BTW-aangifte
+                  {taxName} amount: {cs}{vatPreview.toLocaleString(undefined, { minimumFractionDigits: 2 })}, reclaimable through your tax return
                 </p>
               )}
               <div className="grid gap-2">
-                <Label>Notities</Label>
+                <Label>Notes</Label>
                 <Textarea rows={2} value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} />
               </div>
               <Button onClick={handleSave} disabled={saving || !form.description.trim() || !form.amount_excl_vat || !form.date}>
-                {saving ? "Bezig…" : editExpense ? "Opslaan" : "Toevoegen"}
+                {saving ? "Saving…" : editExpense ? "Save" : "Add"}
               </Button>
               <div className="border-t pt-4 mt-2">
                 <AttachmentSection entityType="expense" entityId={editExpense?.id ?? pendingId} />
@@ -238,19 +241,19 @@ export default function Expenses() {
       {/* Filters */}
       <div className="flex flex-wrap gap-4">
         <div className="grid gap-1.5">
-          <Label className="text-xs text-muted-foreground">Van</Label>
+          <Label className="text-xs text-muted-foreground">From</Label>
           <Input type="date" value={filterFrom} onChange={(e) => setFilterFrom(e.target.value)} className="h-8 text-sm" />
         </div>
         <div className="grid gap-1.5">
-          <Label className="text-xs text-muted-foreground">Tot</Label>
+          <Label className="text-xs text-muted-foreground">To</Label>
           <Input type="date" value={filterTo} onChange={(e) => setFilterTo(e.target.value)} className="h-8 text-sm" />
         </div>
         <div className="grid gap-1.5">
-          <Label className="text-xs text-muted-foreground">Categorie</Label>
+          <Label className="text-xs text-muted-foreground">Category</Label>
           <Select value={filterCategory} onValueChange={setFilterCategory}>
             <SelectTrigger className="w-40 h-8 text-sm"><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">Alle categorieën</SelectItem>
+              <SelectItem value="all">All categories</SelectItem>
               {Object.entries(EXPENSE_CATEGORIES).map(([k, v]) => (
                 <SelectItem key={k} value={k}>{v}</SelectItem>
               ))}
@@ -263,7 +266,7 @@ export default function Expenses() {
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12 text-muted-foreground">
             <Receipt className="h-12 w-12 mb-4" />
-            <p>Geen uitgaven gevonden</p>
+            <p>No expenses found</p>
           </CardContent>
         </Card>
       ) : (
@@ -272,20 +275,20 @@ export default function Expenses() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Datum</TableHead>
-                  <TableHead>Leverancier</TableHead>
-                  <TableHead>Omschrijving</TableHead>
-                  <TableHead>Categorie</TableHead>
-                  <TableHead className="text-right">Excl. BTW</TableHead>
-                  <TableHead className="text-right">BTW</TableHead>
-                  <TableHead className="text-right">Incl. BTW</TableHead>
-                  <TableHead className="w-20 text-right">Acties</TableHead>
+                  <TableHead>Date</TableHead>
+                  <TableHead>Supplier</TableHead>
+                  <TableHead>Description</TableHead>
+                  <TableHead>Category</TableHead>
+                  <TableHead className="text-right">Excl. tax</TableHead>
+                  <TableHead className="text-right">{taxName}</TableHead>
+                  <TableHead className="text-right">Incl. tax</TableHead>
+                  <TableHead className="w-20 text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {expenses.map((e) => (
                   <TableRow key={e.id}>
-                    <TableCell className="whitespace-nowrap text-sm">{new Date(e.date).toLocaleDateString("nl-NL")}</TableCell>
+                    <TableCell className="whitespace-nowrap text-sm">{new Date(e.date).toLocaleDateString(undefined)}</TableCell>
                     <TableCell className="text-sm text-muted-foreground">{e.supplier || "—"}</TableCell>
                     <TableCell className="text-sm">{e.description}</TableCell>
                     <TableCell>
@@ -294,22 +297,22 @@ export default function Expenses() {
                       </Badge>
                     </TableCell>
                     <TableCell className="text-right font-medium tabular-nums text-sm">
-                      €{Number(e.amount_excl_vat).toLocaleString("nl-NL", { minimumFractionDigits: 2 })}
+                      {cs}{Number(e.amount_excl_vat).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                     </TableCell>
                     <TableCell className="text-right text-sm text-muted-foreground tabular-nums">
                       {Number(e.vat_percentage) > 0
-                        ? `€${Number(e.vat_amount).toLocaleString("nl-NL", { minimumFractionDigits: 2 })}`
+                        ? `${cs}${Number(e.vat_amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}`
                         : "—"}
                     </TableCell>
                     <TableCell className="text-right font-medium tabular-nums text-sm">
-                      €{Number(e.amount_incl_vat).toLocaleString("nl-NL", { minimumFractionDigits: 2 })}
+                      {cs}{Number(e.amount_incl_vat).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-1">
-                        <Button variant="ghost" size="icon" onClick={() => openEdit(e)} title="Bewerken">
+                        <Button variant="ghost" size="icon" onClick={() => openEdit(e)} title="Edit">
                           <Pencil className="h-4 w-4" />
                         </Button>
-                        <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => setDeleteTarget(e)} title="Verwijderen">
+                        <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => setDeleteTarget(e)} title="Delete">
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>
@@ -324,16 +327,16 @@ export default function Expenses() {
           <div className="flex justify-end">
             <div className="rounded-lg border bg-muted/30 px-5 py-3 text-sm space-y-1 min-w-64">
               <div className="flex justify-between gap-8">
-                <span className="text-muted-foreground">Totaal excl. BTW</span>
-                <span className="font-medium tabular-nums">€{totalExcl.toLocaleString("nl-NL", { minimumFractionDigits: 2 })}</span>
+                <span className="text-muted-foreground">Total excl. tax</span>
+                <span className="font-medium tabular-nums">{cs}{totalExcl.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
               </div>
               <div className="flex justify-between gap-8">
-                <span className="text-muted-foreground">Totaal BTW (aftrekbaar)</span>
-                <span className="font-medium tabular-nums">€{totalVat.toLocaleString("nl-NL", { minimumFractionDigits: 2 })}</span>
+                <span className="text-muted-foreground">Total {taxName} (reclaimable)</span>
+                <span className="font-medium tabular-nums">{cs}{totalVat.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
               </div>
               <div className="flex justify-between gap-8 border-t pt-1 mt-1">
-                <span className="font-medium">Totaal incl. BTW</span>
-                <span className="font-bold tabular-nums">€{totalIncl.toLocaleString("nl-NL", { minimumFractionDigits: 2 })}</span>
+                <span className="font-medium">Total incl. tax</span>
+                <span className="font-bold tabular-nums">{cs}{totalIncl.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
               </div>
             </div>
           </div>
@@ -343,15 +346,15 @@ export default function Expenses() {
       <AlertDialog open={!!deleteTarget} onOpenChange={(v) => { if (!v) setDeleteTarget(null); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Uitgave verwijderen?</AlertDialogTitle>
+            <AlertDialogTitle>Delete expense?</AlertDialogTitle>
             <AlertDialogDescription>
-              <span className="font-medium text-foreground">{deleteTarget?.description}</span> wordt permanent verwijderd.
+              <span className="font-medium text-foreground">{deleteTarget?.description}</span> will be permanently deleted.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting}>Annuleren</AlertDialogCancel>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
             <Button variant="destructive" onClick={handleDelete} disabled={deleting}>
-              {deleting ? "Bezig…" : "Verwijderen"}
+              {deleting ? "Deleting…" : "Delete"}
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>

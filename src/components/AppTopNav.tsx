@@ -1,14 +1,17 @@
 import { useState, useRef, useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   LayoutDashboard, Building2, Clock, FileText, FileCheck, BarChart3,
   Settings, LogOut, NotebookPen, RepeatIcon, Users, Package, Receipt,
-  Calculator, Car, Landmark, BookOpen, PieChart, ChevronDown, Menu, X,
+  Calculator, Car, Landmark, BookOpen, PieChart, ChevronDown, Menu, X, Compass, Search,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
+import { useOnboarding } from "./OnboardingProvider";
 import { cn } from "@/lib/utils";
-
-const LOGO_SRC = "/zedgerr-logo.png";
+import { ZedgerrLogo } from "./ZedgerrLogo";
+import { ThemeToggle } from "./ThemeToggle";
+import { openCommandPalette, isMac } from "./CommandPalette";
 
 type NavItem = { title: string; url: string; icon: React.ElementType };
 
@@ -42,6 +45,7 @@ function isActive(url: string, pathname: string) {
 export function AppTopNav() {
   const location = useLocation();
   const { signOut, user } = useAuth();
+  const { startTour } = useOnboarding();
   const [moreOpen, setMoreOpen] = useState(false);
   const [userOpen, setUserOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -71,7 +75,7 @@ export function AppTopNav() {
       <header className="h-14 bg-[hsl(var(--nav-bg))] border-b border-[hsl(var(--nav-border))] flex items-center px-4 gap-4 sticky top-0 z-40">
         {/* Logo */}
         <Link to="/" className="flex items-center gap-2 shrink-0 mr-2">
-          <img src={LOGO_SRC} alt="Zedgerr" className="h-7 w-auto object-contain" />
+          <ZedgerrLogo size="sm" />
         </Link>
 
         {/* Desktop nav */}
@@ -82,6 +86,7 @@ export function AppTopNav() {
               <Link
                 key={item.url}
                 to={item.url}
+                data-tour={`nav-${item.title.toLowerCase()}`}
                 className={cn(
                   "relative px-3 py-1.5 text-sm rounded-md transition-colors whitespace-nowrap",
                   active
@@ -91,7 +96,11 @@ export function AppTopNav() {
               >
                 {item.title}
                 {active && (
-                  <span className="absolute bottom-0 left-3 right-3 h-0.5 bg-[hsl(var(--nav-indicator))] rounded-full" />
+                  <motion.span
+                    layoutId="nav-indicator"
+                    className="absolute bottom-0 left-3 right-3 h-0.5 bg-[hsl(var(--nav-indicator))] rounded-full"
+                    transition={{ type: "spring", stiffness: 500, damping: 35 }}
+                  />
                 )}
               </Link>
             );
@@ -101,8 +110,9 @@ export function AppTopNav() {
           <div ref={moreRef} className="relative">
             <button
               onClick={() => setMoreOpen((v) => !v)}
+              data-tour="nav-more"
               className={cn(
-                "flex items-center gap-1 px-3 py-1.5 text-sm rounded-md transition-colors whitespace-nowrap",
+                "relative flex items-center gap-1 px-3 py-1.5 text-sm rounded-md transition-colors whitespace-nowrap",
                 activeInMore || moreOpen
                   ? "text-[hsl(var(--nav-fg-active))] font-medium bg-[hsl(var(--secondary))]"
                   : "text-[hsl(var(--nav-fg))] hover:text-[hsl(var(--nav-fg-active))] hover:bg-[hsl(var(--secondary))]",
@@ -115,8 +125,15 @@ export function AppTopNav() {
               )}
             </button>
 
+            <AnimatePresence>
             {moreOpen && (
-              <div className="absolute left-0 top-full mt-1.5 w-48 bg-card border border-[hsl(var(--border))] rounded-lg shadow-md py-1 z-50">
+              <motion.div
+                className="absolute left-0 top-full mt-1.5 w-48 bg-card border border-[hsl(var(--border))] rounded-lg shadow-md py-1 z-50"
+                initial={{ opacity: 0, y: -8, scale: 0.96 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -6, scale: 0.97 }}
+                transition={{ duration: 0.15, ease: "easeOut" }}
+              >
                 {moreNav.map((item) => {
                   const active = isActive(item.url, location.pathname);
                   return (
@@ -136,8 +153,9 @@ export function AppTopNav() {
                     </Link>
                   );
                 })}
-              </div>
+              </motion.div>
             )}
+            </AnimatePresence>
           </div>
         </nav>
 
@@ -146,9 +164,20 @@ export function AppTopNav() {
 
         {/* Right side */}
         <div className="flex items-center gap-2 shrink-0">
+          <button
+            onClick={openCommandPalette}
+            className="hidden md:flex items-center gap-2 h-8 rounded-md border border-[hsl(var(--border))] px-2.5 text-xs text-[hsl(var(--nav-fg))] hover:text-[hsl(var(--nav-fg-active))] hover:bg-[hsl(var(--secondary))] transition-colors"
+            aria-label="Open command palette"
+          >
+            <Search className="h-3.5 w-3.5" />
+            Search
+            <kbd className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px]">{isMac ? "⌘" : "Ctrl"} K</kbd>
+          </button>
+          <ThemeToggle />
           {/* Settings */}
           <Link
             to="/settings"
+            data-tour="nav-settings"
             className={cn(
               "hidden md:flex items-center gap-1 px-3 py-1.5 text-sm rounded-md transition-colors",
               isActive("/settings", location.pathname)
@@ -173,6 +202,13 @@ export function AppTopNav() {
                 <div className="px-3 py-2 border-b border-[hsl(var(--border))]">
                   <p className="text-xs text-muted-foreground truncate">{email}</p>
                 </div>
+                <button
+                  onClick={() => { setUserOpen(false); startTour(); }}
+                  className="flex items-center gap-2.5 w-full px-3 py-2 text-sm hover:bg-[hsl(var(--secondary))] transition-colors"
+                >
+                  <Compass className="h-4 w-4" />
+                  Take the tour
+                </button>
                 <button
                   onClick={() => { setUserOpen(false); signOut(); }}
                   className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-destructive hover:bg-destructive/8 transition-colors"
@@ -229,6 +265,13 @@ export function AppTopNav() {
                 <Settings className="h-4 w-4" />
                 Settings
               </Link>
+              <button
+                onClick={() => { setMobileOpen(false); startTour(); }}
+                className="flex items-center gap-3 w-full px-3 py-2.5 rounded-md text-sm hover:bg-[hsl(var(--secondary))] transition-colors"
+              >
+                <Compass className="h-4 w-4" />
+                Take the tour
+              </button>
               <button
                 onClick={signOut}
                 className="flex items-center gap-3 w-full px-3 py-2.5 rounded-md text-sm text-destructive hover:bg-destructive/10 transition-colors"

@@ -1,9 +1,9 @@
 import type { AppEnv, D1PreparedStatement } from "./types.js";
+import { generateTotpSecret, verifyTotp, otpauthUrl, generateRecoveryCodes, hashRecoveryCode } from "./totp.js";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { hashPassword, verifyPassword } from "./auth-crypto.js";
 import { signPortalToken, signUserToken, verifyPortalToken, verifyUserToken } from "./jwt.js";
-import { seedInvoice2026IfNeeded } from "./seed-d1.js";
 
 export type Env = AppEnv;
 
@@ -106,14 +106,53 @@ api.use("*", async (c, next) => {
   }
 });
 
-api.use(
-  "/api/*",
-  cors({
-    origin: "*",
+// The frontend is served from the same origin; cross-origin access is opt-in.
+api.use("/api/*", async (c, next) => {
+  const origin = c.env.CORS_ORIGIN;
+  if (!origin) return next();
+  return cors({
+    origin: origin.split(",").map((o) => o.trim()),
     allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowHeaders: ["Content-Type", "Authorization"],
-  }),
-);
+  })(c, next);
+});
+
+const RATE_LIMITED_PATHS = new Set([
+  "/api/auth/login", "/api/auth/register", "/api/portal/login", "/api/org/invite/accept",
+  "/api/auth/2fa/enable", "/api/auth/2fa/disable", "/api/auth/2fa/recovery-codes",
+]);
+const RATE_LIMIT_MAX = 10;
+const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
+const attempts = new Map<string, { count: number; resetAt: number }>();
+
+api.use("/api/*", async (c, next) => {
+  const path = new URL(c.req.url).pathname;
+  if (c.req.method !== "POST" || !RATE_LIMITED_PATHS.has(path)) return next();
+
+  const body = await c.req.json<{ email?: unknown }>().catch(() => ({} as { email?: unknown }));
+  const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+  const key = `${path}|${c.env.CLIENT_IP ?? "unknown"}|${email}`;
+  const now = Date.now();
+
+  if (attempts.size > 10_000) {
+    for (const [k, v] of attempts) if (v.resetAt <= now) attempts.delete(k);
+  }
+  const entry = attempts.get(key);
+  if (entry && entry.resetAt > now && entry.count >= RATE_LIMIT_MAX) {
+    c.header("Retry-After", String(Math.ceil((entry.resetAt - now) / 1000)));
+    return c.json({ error: "Too many attempts. Please try again in a few minutes." }, 429);
+  }
+
+  await next();
+
+  if (c.res.status >= 400) {
+    const current = entry && entry.resetAt > now ? entry : { count: 0, resetAt: now + RATE_LIMIT_WINDOW_MS };
+    current.count += 1;
+    attempts.set(key, current);
+  } else {
+    attempts.delete(key);
+  }
+});
 
 api.use("/api/*", async (c, next) => {
   const path = new URL(c.req.url).pathname;
@@ -164,7 +203,7 @@ api.get("/api/auth/registration-status", async (c) => {
   return c.json({
     canRegister: false,
     reason: "registration_disabled",
-    message: "Registratie is uitgeschakeld.",
+    message: "Registration is disabled. Ask the administrator for an invitation.",
   });
 });
 
@@ -182,7 +221,7 @@ api.post("/api/auth/register", async (c) => {
   const emailRaw = (body.email ?? "").trim().toLowerCase();
   const password = body.password ?? "";
   if (!emailRaw || !emailRaw.includes("@")) return c.json({ error: "Invalid email" }, 400);
-  if (password.length < 6) return c.json({ error: "Password must be at least 6 characters" }, 400);
+  if (password.length < 8) return c.json({ error: "Password must be at least 8 characters" }, 400);
 
   const countRow = await c.env.DB.prepare("SELECT COUNT(*) as c FROM users").first<{ c: number }>();
   const count = countRow?.c ?? 0;
@@ -197,14 +236,6 @@ api.post("/api/auth/register", async (c) => {
   const id = crypto.randomUUID();
   const hash = await hashPassword(password);
   await c.env.DB.prepare("INSERT INTO users (id, email, password_hash) VALUES (?, ?, ?)").bind(id, emailRaw, hash).run();
-
-  if (count === 0) {
-    try {
-      await seedInvoice2026IfNeeded(c.env.DB, id);
-    } catch (e) {
-      console.error("seedInvoice2026IfNeeded:", e);
-    }
-  }
 
   try {
     await seedDefaultChartOfAccounts(c.env.DB, id);
@@ -231,7 +262,7 @@ api.post("/api/auth/login", async (c) => {
   if (!secret || secret.length < 16) {
     return c.json({ error: "Server misconfigured: JWT_SECRET required (min 16 chars)" }, 500);
   }
-  let body: { email?: string; password?: string };
+  let body: { email?: string; password?: string; code?: string };
   try {
     body = await c.req.json();
   } catch {
@@ -239,26 +270,135 @@ api.post("/api/auth/login", async (c) => {
   }
   const emailRaw = (body.email ?? "").trim().toLowerCase();
   const password = body.password ?? "";
-  const row = await c.env.DB.prepare("SELECT id, email, password_hash FROM users WHERE email = ?").bind(emailRaw).first<{
-    id: string;
-    email: string;
-    password_hash: string;
-  }>();
+  const row = await c.env.DB
+    .prepare("SELECT id, email, password_hash, totp_enabled FROM users WHERE email = ?")
+    .bind(emailRaw)
+    .first<{ id: string; email: string; password_hash: string; totp_enabled: number }>();
   if (!row || !(await verifyPassword(password, row.password_hash))) {
     return c.json({ error: "Invalid email or password" }, 401);
   }
 
-  // Look up org membership â€” primary org is the one they own, else first member
+  if (row.totp_enabled) {
+    if (!body.code) return c.json({ requires_2fa: true });
+    if (!(await consumeSecondFactor(c.env.DB, row.id, body.code))) {
+      return c.json({ error: "Invalid authentication code", requires_2fa: true }, 401);
+    }
+  }
+
+  // Look up org membership: primary org is the one they own, else first member
   const member = await c.env.DB
     .prepare("SELECT org_id, role FROM organization_members WHERE user_id = ? ORDER BY CASE role WHEN 'owner' THEN 0 ELSE 1 END, joined_at ASC LIMIT 1")
     .bind(row.id)
     .first<{ org_id: string; role: string }>();
-  // Backward compat: no org yet (old user) â†’ org_id = user_id
+  // Backward compat: no org yet (old user), so org_id = user_id
   const orgId   = member?.org_id  ?? row.id;
   const orgRole = member?.role     ?? "owner";
 
   const token = await signUserToken(secret, row.id, row.email, orgId, orgRole as "owner" | "admin" | "member" | "viewer");
   return c.json({ token, user: { id: row.id, email: row.email, org_id: orgId, org_role: orgRole } });
+});
+
+async function consumeSecondFactor(db: Env["DB"], userId: string, code: string): Promise<boolean> {
+  const user = await db
+    .prepare("SELECT totp_secret, totp_last_step, totp_recovery_codes FROM users WHERE id = ?")
+    .bind(userId)
+    .first<{ totp_secret: string | null; totp_last_step: number | null; totp_recovery_codes: string | null }>();
+  if (!user?.totp_secret) return false;
+
+  const step = await verifyTotp(user.totp_secret, code);
+  if (step !== null) {
+    if (user.totp_last_step !== null && step <= user.totp_last_step) return false;
+    await db.prepare("UPDATE users SET totp_last_step = ? WHERE id = ?").bind(step, userId).run();
+    return true;
+  }
+
+  const hashes: string[] = user.totp_recovery_codes ? JSON.parse(user.totp_recovery_codes) : [];
+  const hash = await hashRecoveryCode(code);
+  if (!hashes.includes(hash)) return false;
+  await db
+    .prepare("UPDATE users SET totp_recovery_codes = ? WHERE id = ?")
+    .bind(JSON.stringify(hashes.filter((h) => h !== hash)), userId)
+    .run();
+  return true;
+}
+
+async function issueRecoveryCodes(db: Env["DB"], userId: string): Promise<string[]> {
+  const codes = generateRecoveryCodes();
+  const hashes = await Promise.all(codes.map(hashRecoveryCode));
+  await db.prepare("UPDATE users SET totp_recovery_codes = ? WHERE id = ?").bind(JSON.stringify(hashes), userId).run();
+  return codes;
+}
+
+api.get("/api/auth/2fa", async (c) => {
+  const userId = c.get("ownUserId") ?? c.get("userId")!;
+  const row = await c.env.DB
+    .prepare("SELECT totp_enabled, totp_recovery_codes FROM users WHERE id = ?")
+    .bind(userId)
+    .first<{ totp_enabled: number; totp_recovery_codes: string | null }>();
+  const remaining = row?.totp_recovery_codes ? (JSON.parse(row.totp_recovery_codes) as string[]).length : 0;
+  return c.json({ enabled: Boolean(row?.totp_enabled), recovery_codes_remaining: remaining });
+});
+
+api.post("/api/auth/2fa/setup", async (c) => {
+  const userId = c.get("ownUserId") ?? c.get("userId")!;
+  const user = await c.env.DB
+    .prepare("SELECT email, totp_enabled FROM users WHERE id = ?")
+    .bind(userId)
+    .first<{ email: string; totp_enabled: number }>();
+  if (!user) return c.json({ error: "User not found" }, 404);
+  if (user.totp_enabled) return c.json({ error: "Two-factor authentication is already enabled" }, 400);
+
+  const secret = generateTotpSecret();
+  await c.env.DB.prepare("UPDATE users SET totp_secret = ?, totp_last_step = NULL WHERE id = ?").bind(secret, userId).run();
+  return c.json({ secret, otpauth_url: otpauthUrl("Zedgerr", user.email, secret) });
+});
+
+api.post("/api/auth/2fa/enable", async (c) => {
+  const userId = c.get("ownUserId") ?? c.get("userId")!;
+  const { code } = await c.req.json<{ code?: string }>().catch(() => ({ code: undefined }));
+  const user = await c.env.DB
+    .prepare("SELECT totp_secret, totp_enabled FROM users WHERE id = ?")
+    .bind(userId)
+    .first<{ totp_secret: string | null; totp_enabled: number }>();
+  if (!user?.totp_secret) return c.json({ error: "Start the setup first" }, 400);
+  if (user.totp_enabled) return c.json({ error: "Two-factor authentication is already enabled" }, 400);
+
+  const step = code ? await verifyTotp(user.totp_secret, code) : null;
+  if (step === null) return c.json({ error: "That code is not valid. Check the time on your phone and try again." }, 400);
+
+  await c.env.DB.prepare("UPDATE users SET totp_enabled = 1, totp_last_step = ? WHERE id = ?").bind(step, userId).run();
+  const recoveryCodes = await issueRecoveryCodes(c.env.DB, userId);
+  return c.json({ enabled: true, recovery_codes: recoveryCodes });
+});
+
+api.post("/api/auth/2fa/disable", async (c) => {
+  const userId = c.get("ownUserId") ?? c.get("userId")!;
+  const body = await c.req.json<{ password?: string; code?: string }>().catch(() => ({} as { password?: string; code?: string }));
+  const user = await c.env.DB
+    .prepare("SELECT password_hash, totp_enabled FROM users WHERE id = ?")
+    .bind(userId)
+    .first<{ password_hash: string; totp_enabled: number }>();
+  if (!user?.totp_enabled) return c.json({ error: "Two-factor authentication is not enabled" }, 400);
+  if (!body.password || !(await verifyPassword(body.password, user.password_hash))) {
+    return c.json({ error: "Password is incorrect" }, 400);
+  }
+  if (!body.code || !(await consumeSecondFactor(c.env.DB, userId, body.code))) {
+    return c.json({ error: "Invalid authentication code" }, 400);
+  }
+  await c.env.DB
+    .prepare("UPDATE users SET totp_enabled = 0, totp_secret = NULL, totp_last_step = NULL, totp_recovery_codes = NULL WHERE id = ?")
+    .bind(userId)
+    .run();
+  return c.json({ enabled: false });
+});
+
+api.post("/api/auth/2fa/recovery-codes", async (c) => {
+  const userId = c.get("ownUserId") ?? c.get("userId")!;
+  const { code } = await c.req.json<{ code?: string }>().catch(() => ({ code: undefined }));
+  if (!code || !(await consumeSecondFactor(c.env.DB, userId, code))) {
+    return c.json({ error: "Invalid authentication code" }, 400);
+  }
+  return c.json({ recovery_codes: await issueRecoveryCodes(c.env.DB, userId) });
 });
 
 api.get("/api/auth/me", async (c) => {
@@ -273,7 +413,7 @@ api.get("/api/auth/me", async (c) => {
 });
 
 api.patch("/api/auth/password", async (c) => {
-  const userId = c.get("userId")!;
+  const userId = c.get("ownUserId") ?? c.get("userId")!;
   let body: { current_password?: string; new_password?: string };
   try {
     body = await c.req.json();
@@ -283,10 +423,10 @@ api.patch("/api/auth/password", async (c) => {
   const currentPassword = body.current_password ?? "";
   const newPassword = body.new_password ?? "";
   if (!currentPassword || !newPassword) {
-    return c.json({ error: "Huidig en nieuw wachtwoord zijn verplicht" }, 400);
+    return c.json({ error: "Current and new password are required" }, 400);
   }
-  if (newPassword.length < 6) {
-    return c.json({ error: "Nieuw wachtwoord moet minimaal 6 tekens zijn" }, 400);
+  if (newPassword.length < 8) {
+    return c.json({ error: "New password must be at least 8 characters" }, 400);
   }
 
   const user = await c.env.DB
@@ -295,7 +435,7 @@ api.patch("/api/auth/password", async (c) => {
     .first<{ id: string; password_hash: string }>();
   if (!user) return c.json({ error: "User not found" }, 404);
   if (!(await verifyPassword(currentPassword, user.password_hash))) {
-    return c.json({ error: "Huidig wachtwoord is onjuist" }, 400);
+    return c.json({ error: "Current password is incorrect" }, 400);
   }
 
   const nextHash = await hashPassword(newPassword);
@@ -347,7 +487,7 @@ api.get("/api/portal/me", async (c) => {
     )
     .bind(companyId)
     .first<{ id: string; name: string; portal_email: string }>();
-  if (!row) return c.json({ error: "Bedrijf niet gevonden" }, 404);
+  if (!row) return c.json({ error: "Company not found" }, 404);
   return c.json(row);
 });
 
@@ -362,19 +502,19 @@ api.patch("/api/portal/password", async (c) => {
   const current = body.current_password ?? "";
   const newPass = body.new_password ?? "";
   if (!current || !newPass) {
-    return c.json({ error: "Huidig en nieuw wachtwoord zijn verplicht" }, 400);
+    return c.json({ error: "Current and new password are required" }, 400);
   }
-  if (newPass.length < 6) {
-    return c.json({ error: "Nieuw wachtwoord moet minimaal 6 tekens zijn" }, 400);
+  if (newPass.length < 8) {
+    return c.json({ error: "New password must be at least 8 characters" }, 400);
   }
 
   const row = await c.env.DB
     .prepare("SELECT password_hash FROM company_portal_users WHERE company_id = ?")
     .bind(companyId)
     .first<{ password_hash: string }>();
-  if (!row) return c.json({ error: "Portaalaccount niet gevonden" }, 404);
+  if (!row) return c.json({ error: "Portal account not found" }, 404);
   if (!(await verifyPassword(current, row.password_hash))) {
-    return c.json({ error: "Huidig wachtwoord is onjuist" }, 400);
+    return c.json({ error: "Current password is incorrect" }, 400);
   }
 
   const hash = await hashPassword(newPass);
@@ -428,7 +568,13 @@ api.get("/api/portal/dashboard", async (c) => {
     .bind(companyId)
     .all<Record<string, unknown>>();
 
+  const settings = await c.env.DB
+    .prepare("SELECT bs.currency FROM business_settings bs JOIN companies co ON co.user_id = bs.user_id WHERE co.id = ?")
+    .bind(companyId)
+    .first<{ currency: string | null }>();
+
   return c.json({
+    currency: settings?.currency ?? "EUR",
     totalHours: Number(hoursRow?.h ?? 0),
     timeEntries: (te.results ?? []).map((row) => ({
       id: row.id,
@@ -451,7 +597,7 @@ api.get("/api/portal/invoices/:id/pdf-data", async (c) => {
     )
     .bind(id, companyId)
     .first<Record<string, unknown>>();
-  if (!invoice) return c.json({ error: "Factuur niet gevonden" }, 404);
+  if (!invoice) return c.json({ error: "Invoice not found" }, 404);
 
   const { results: lines } = await c.env.DB
     .prepare("SELECT * FROM invoice_lines WHERE invoice_id = ? ORDER BY date")
@@ -629,7 +775,7 @@ api.put("/api/companies/:id/portal", async (c) => {
       await c.env.DB.prepare("UPDATE company_portal_users SET email = ? WHERE company_id = ?").bind(emailRaw, id).run();
     }
   } else {
-    if (password.length < 6) return c.json({ error: "Password must be at least 6 characters for new portal access" }, 400);
+    if (password.length < 8) return c.json({ error: "Password must be at least 8 characters for new portal access" }, 400);
     const hash = await hashPassword(password);
     const pid = crypto.randomUUID();
     await c.env.DB
@@ -679,7 +825,7 @@ api.post("/api/companies/:id/products", async (c) => {
   const now = new Date().toISOString();
   await c.env.DB
     .prepare("INSERT INTO company_products (id, user_id, company_id, name, sale_price, cost_price, serial_number, url, internal_notes, price_includes_vat, vat_percentage, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-    .bind(productId, userId, id, req.name, req.sale_price, req.cost_price ?? null, req.serial_number ?? null, req.url ?? null, req.internal_notes ?? null, req.price_includes_vat ? 1 : 0, req.vat_percentage ?? 21, now, now)
+    .bind(productId, userId, id, req.name, req.sale_price, req.cost_price ?? null, req.serial_number ?? null, req.url ?? null, req.internal_notes ?? null, req.price_includes_vat ? 1 : 0, req.vat_percentage ?? 0, now, now)
     .run();
   const row = await c.env.DB.prepare("SELECT * FROM company_products WHERE id = ?").bind(productId).first();
   return c.json(row);
@@ -697,7 +843,7 @@ api.patch("/api/companies/:id/products/:productId", async (c) => {
   const now = new Date().toISOString();
   await c.env.DB
     .prepare("UPDATE company_products SET name = ?, sale_price = ?, cost_price = ?, serial_number = ?, url = ?, internal_notes = ?, price_includes_vat = ?, vat_percentage = ?, updated_at = ? WHERE id = ?")
-    .bind(req.name, req.sale_price, req.cost_price ?? null, req.serial_number ?? null, req.url ?? null, req.internal_notes ?? null, req.price_includes_vat ? 1 : 0, req.vat_percentage ?? 21, now, productId)
+    .bind(req.name, req.sale_price, req.cost_price ?? null, req.serial_number ?? null, req.url ?? null, req.internal_notes ?? null, req.price_includes_vat ? 1 : 0, req.vat_percentage ?? 0, now, productId)
     .run();
   const row = await c.env.DB.prepare("SELECT * FROM company_products WHERE id = ?").bind(productId).first();
   return c.json(row);
@@ -801,15 +947,15 @@ api.post("/api/ai/improve-grammar", async (c) => {
   }
 
   const text = String(body.text ?? "").trim();
-  if (!text) return c.json({ error: "Tekst is verplicht" }, 400);
-  if (text.length > 3000) return c.json({ error: "Tekst is te lang (max 3000 tekens)" }, 400);
+  if (!text) return c.json({ error: "Text is required" }, 400);
+  if (text.length > 3000) return c.json({ error: "Text is too long (max 3000 characters)" }, 400);
 
   const prompt = [
-    "Verbeter de grammatica en spelling van deze Nederlandse tekst.",
-    "Zet de tekst mooi en professioneel neer voor urenregistratie van uitgevoerde werkzaamheden.",
-    "Behoud de exacte inhoud en details van wat er is gedaan.",
-    "Maak de formulering helder en zakelijk, zonder nieuwe informatie toe te voegen.",
-    "Geef uitsluitend de verbeterde tekst terug, zonder uitleg of opsommingstekens.",
+    "Improve the grammar and spelling of this text. Reply in the same language as the text.",
+    "Make it read clearly and professionally as a description of work done, for a timesheet.",
+    "Keep the exact content and details of what was done.",
+    "Use clear, businesslike wording and do not add new information.",
+    "Return only the improved text, without explanation or bullet points.",
     "",
     text,
   ].join("\n");
@@ -819,7 +965,7 @@ api.post("/api/ai/improve-grammar", async (c) => {
       {
         role: "system",
         content:
-          "Je bent een redacteur voor Nederlandse urenregistraties. Verbeter grammatica en formulering, houd de tekst professioneel en zakelijk, en wijzig de inhoud niet.",
+          "You edit timesheet entries. Improve grammar and wording, keep the text professional and businesslike, keep the original language, and do not change the content.",
       },
       { role: "user", content: prompt },
     ],
@@ -828,7 +974,7 @@ api.post("/api/ai/improve-grammar", async (c) => {
   });
 
   const improved = typeof result === "object" && result && "response" in result ? String(result.response ?? "").trim() : "";
-  if (!improved) return c.json({ error: "AI gaf geen bruikbaar antwoord" }, 502);
+  if (!improved) return c.json({ error: "The AI did not return a usable answer" }, 502);
   return c.json({ text: improved });
 });
 
@@ -926,90 +1072,59 @@ api.get("/api/business-settings", async (c) => {
   return c.json(row ?? null);
 });
 
+const BUSINESS_SETTINGS_FIELDS = [
+  "company_name", "contact_person", "email", "phone", "street", "postal_code", "city", "country",
+  "kvk_number", "btw_number", "iban",
+  "private_name", "private_street", "private_postal_code", "private_city", "private_country",
+  "tax_name", "default_tax_rate", "currency", "country_code", "mileage_rate", "distance_unit",
+] as const;
+
+const BUSINESS_SETTINGS_DEFAULTS: Partial<Record<(typeof BUSINESS_SETTINGS_FIELDS)[number], unknown>> = {
+  tax_name: "VAT", default_tax_rate: 0, currency: "EUR", mileage_rate: 0, distance_unit: "km",
+};
+
 api.put("/api/business-settings", async (c) => {
   const userId = c.get("userId")!;
   const req = await c.req.json<Record<string, unknown>>();
-  const existing = await c.env.DB.prepare("SELECT id FROM business_settings WHERE user_id = ?").bind(userId).first<{ id: string }>();
+  const existing = await c.env.DB.prepare("SELECT * FROM business_settings WHERE user_id = ?").bind(userId).first<Record<string, unknown>>();
   const now = new Date().toISOString();
+
+  // Only fields present in the request change; omitted fields keep their stored value.
+  const values = BUSINESS_SETTINGS_FIELDS.map(
+    (f) => (f in req ? req[f] : existing?.[f]) ?? BUSINESS_SETTINGS_DEFAULTS[f] ?? null,
+  );
+
   if (existing) {
+    const sets = BUSINESS_SETTINGS_FIELDS.map((f) => `${f} = ?`).join(", ");
     await c.env.DB
-      .prepare(
-        `UPDATE business_settings SET
-          company_name = ?, contact_person = ?, email = ?, phone = ?, street = ?, postal_code = ?, city = ?, country = ?,
-          kvk_number = ?, btw_number = ?, iban = ?,
-          private_name = ?, private_street = ?, private_postal_code = ?, private_city = ?, private_country = ?,
-          tax_name = ?, default_tax_rate = ?, currency = ?,
-          updated_at = ?
-         WHERE id = ?`,
-      )
-      .bind(
-        req.company_name ?? null,
-        req.contact_person ?? null,
-        req.email ?? null,
-        req.phone ?? null,
-        req.street ?? null,
-        req.postal_code ?? null,
-        req.city ?? null,
-        req.country ?? null,
-        req.kvk_number ?? null,
-        req.btw_number ?? null,
-        req.iban ?? null,
-        req.private_name ?? null,
-        req.private_street ?? null,
-        req.private_postal_code ?? null,
-        req.private_city ?? null,
-        req.private_country ?? null,
-        req.tax_name ?? "VAT",
-        req.default_tax_rate ?? 20,
-        req.currency ?? "EUR",
-        now,
-        existing.id,
-      )
+      .prepare(`UPDATE business_settings SET ${sets}, updated_at = ? WHERE id = ?`)
+      .bind(...values, now, existing.id)
       .run();
     const row = await c.env.DB.prepare("SELECT * FROM business_settings WHERE id = ?").bind(existing.id).first();
     return c.json(row);
   }
+
   const id = crypto.randomUUID();
+  const cols = BUSINESS_SETTINGS_FIELDS.join(", ");
+  const marks = BUSINESS_SETTINGS_FIELDS.map(() => "?").join(", ");
   await c.env.DB
-    .prepare(
-      `INSERT INTO business_settings (
-        id, user_id,
-        company_name, contact_person, email, phone, street, postal_code, city, country, kvk_number, btw_number, iban,
-        private_name, private_street, private_postal_code, private_city, private_country,
-        tax_name, default_tax_rate, currency,
-        created_at, updated_at
-      )
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .bind(
-      id,
-      userId,
-      req.company_name ?? null,
-      req.contact_person ?? null,
-      req.email ?? null,
-      req.phone ?? null,
-      req.street ?? null,
-      req.postal_code ?? null,
-      req.city ?? null,
-      req.country ?? null,
-      req.kvk_number ?? null,
-      req.btw_number ?? null,
-      req.iban ?? null,
-      req.private_name ?? null,
-      req.private_street ?? null,
-      req.private_postal_code ?? null,
-      req.private_city ?? null,
-      req.private_country ?? null,
-      req.tax_name ?? "VAT",
-      req.default_tax_rate ?? 20,
-      req.currency ?? "EUR",
-      now,
-      now,
-    )
+    .prepare(`INSERT INTO business_settings (id, user_id, ${cols}, created_at, updated_at) VALUES (?, ?, ${marks}, ?, ?)`)
+    .bind(id, userId, ...values, now, now)
     .run();
   const row = await c.env.DB.prepare("SELECT * FROM business_settings WHERE id = ?").bind(id).first();
   return c.json(row);
 });
+
+type InvoiceType = "business" | "private" | "reverse_charge";
+
+function normalizeInvoiceType(value: unknown): InvoiceType {
+  return value === "private" || value === "reverse_charge" ? value : "business";
+}
+
+// Private (consumer, tax exempt) and EU reverse-charge invoices never carry tax.
+function isTaxFreeType(value: unknown): boolean {
+  return normalizeInvoiceType(value) !== "business";
+}
 
 api.get("/api/invoices", async (c) => {
   const userId = c.get("userId")!;
@@ -1081,16 +1196,16 @@ api.post("/api/invoices", async (c) => {
   const advance = req.advance_payment != null ? Number(req.advance_payment) : 0;
   const advanceLabelRaw = String(req.advance_label ?? "krediet").toLowerCase();
   const advanceLabel = advanceLabelRaw === "voorschot" ? "voorschot" : "krediet";
-  const invoiceType = (req.invoice_type as string) === "private" ? "private" : "business";
-  const btwPct = invoiceType === "private" ? 0 : Number(req.btw_percentage);
+  const invoiceType = normalizeInvoiceType(req.invoice_type);
+  const btwPct = isTaxFreeType(invoiceType) ? 0 : Number(req.btw_percentage);
   const subtotal = toMoney(req.subtotal);
-  const btwAmount = invoiceType === "private" ? 0 : Number(req.btw_amount);
-  const total = invoiceType === "private" ? subtotal : toMoney(req.total);
+  const btwAmount = isTaxFreeType(invoiceType) ? 0 : Number(req.btw_amount);
+  const total = isTaxFreeType(invoiceType) ? subtotal : toMoney(req.total);
   const company = await c.env.DB
     .prepare("SELECT id, advance_balance FROM companies WHERE id = ? AND user_id = ?")
     .bind(req.company_id, userId)
     .first<{ id: string; advance_balance: number }>();
-  if (!company) return c.json({ error: "Bedrijf niet gevonden" }, 404);
+  if (!company) return c.json({ error: "Company not found" }, 404);
 
   const companyAdvanceBalance = Math.max(0, toMoney(company.advance_balance, 0));
   const requestedAdvance = Math.max(0, toMoney(advance, 0));
@@ -1098,10 +1213,10 @@ api.post("/api/invoices", async (c) => {
   const updatedAdvanceBalance = toMoney(companyAdvanceBalance - appliedAdvance, 0);
 
   if (requestedAdvance > companyAdvanceBalance + 0.0001) {
-    return c.json({ error: "Krediet hoger dan beschikbaar klantkrediet" }, 400);
+    return c.json({ error: "Credit exceeds the client's available credit" }, 400);
   }
   if (requestedAdvance > total + 0.0001) {
-    return c.json({ error: "Krediet hoger dan factuurtotaal" }, 400);
+    return c.json({ error: "Credit exceeds the invoice total" }, 400);
   }
 
   await c.env.DB.batch([
@@ -1158,11 +1273,11 @@ api.patch("/api/invoices/:id", async (c) => {
     }>();
   if (!existing) return c.json({ error: "Not found" }, 404);
 
-  const nextType = (req.invoice_type as string) ? (((req.invoice_type as string) === "private") ? "private" : "business") : (existing.invoice_type || "business");
+  const nextType = req.invoice_type ? normalizeInvoiceType(req.invoice_type) : normalizeInvoiceType(existing.invoice_type);
   const nextSubtotal = req.subtotal != null ? Number(req.subtotal) : Number(existing.subtotal);
-  const nextBtwPct = nextType === "private" ? 0 : (req.btw_percentage != null ? Number(req.btw_percentage) : Number(existing.btw_percentage));
-  const nextBtwAmt = nextType === "private" ? 0 : (req.btw_amount != null ? Number(req.btw_amount) : Number(existing.btw_amount));
-  const nextTotal = nextType === "private" ? nextSubtotal : (req.total != null ? Number(req.total) : Number(existing.total));
+  const nextBtwPct = isTaxFreeType(nextType) ? 0 : (req.btw_percentage != null ? Number(req.btw_percentage) : Number(existing.btw_percentage));
+  const nextBtwAmt = isTaxFreeType(nextType) ? 0 : (req.btw_amount != null ? Number(req.btw_amount) : Number(existing.btw_amount));
+  const nextTotal = isTaxFreeType(nextType) ? nextSubtotal : (req.total != null ? Number(req.total) : Number(existing.total));
 
   await c.env.DB
     .prepare(
@@ -1275,13 +1390,13 @@ api.post("/api/invoices/:id/split", async (c) => {
     .prepare("SELECT description FROM invoice_lines WHERE invoice_id = ? ORDER BY created_at LIMIT 1")
     .bind(id)
     .first<{ description: string }>();
-  const origDesc = (origLine?.description ?? "").trim() || `Factuur ${invoice.invoice_number}`;
+  const origDesc = (origLine?.description ?? "").trim() || `Invoice ${invoice.invoice_number}`;
 
   const today = new Date().toISOString().split("T")[0]!;
   const invDate = invoice.invoice_date || today;
   // Vervaldatum termijnen: standaard 30 dagen na factuurdatum, en daarna telkens +30 dagen.
   const baseDue = firstDue ?? addDaysIso(invDate, intervalDays);
-  const isPrivate = invoice.invoice_type === "private";
+  const taxFree = isTaxFreeType(invoice.invoice_type);
   const subtotalParts = splitEqual(Number(invoice.subtotal), parts);
   const year = new Date().getFullYear();
   const now = new Date().toISOString();
@@ -1291,14 +1406,14 @@ api.post("/api/invoices/:id/split", async (c) => {
   for (let i = 0; i < parts; i++) {
     const termInvoiceDate = addDaysIso(invDate, intervalDays * i);
     const sub = subtotalParts[i]!;
-    const btwPct = isPrivate ? 0 : Number(invoice.btw_percentage);
-    const btwAmt = isPrivate ? 0 : round2(sub * (btwPct / 100));
-    const tot = isPrivate ? sub : round2(sub + btwAmt);
+    const btwPct = taxFree ? 0 : Number(invoice.btw_percentage);
+    const btwAmt = taxFree ? 0 : round2(sub * (btwPct / 100));
+    const tot = taxFree ? sub : round2(sub + btwAmt);
     const due = firstDue ? addDaysIso(baseDue, intervalDays * i) : addDaysIso(termInvoiceDate, intervalDays);
     const newId = crypto.randomUUID();
     const newNr = await nextInvoiceNumberForYear(c.env.DB, userId, year, i);
     const termNote = `Termijn ${i + 1}/${parts} (gesplitst vanaf ${invoice.invoice_number})`;
-    const termDesc = `${origDesc} â€” termijn ${i + 1}/${parts}`;
+    const termDesc = `${origDesc} (instalment ${i + 1}/${parts})`;
     const newNotes = [invoice.notes, termNote].filter(Boolean).join("\n");
 
     stmts.push(
@@ -1310,7 +1425,7 @@ api.post("/api/invoices/:id/split", async (c) => {
             created_at, updated_at
           ) VALUES (?, ?, ?, ?, ?, ?, 'concept', ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
         )
-        .bind(newId, userId, invoice.company_id, newNr, termInvoiceDate, due, sub, btwPct, btwAmt, tot, splitAdvanceLabel, newNotes, isPrivate ? "private" : "business", id, now, now),
+        .bind(newId, userId, invoice.company_id, newNr, termInvoiceDate, due, sub, btwPct, btwAmt, tot, splitAdvanceLabel, newNotes, normalizeInvoiceType(invoice.invoice_type), id, now, now),
     );
     stmts.push(
       c.env.DB
@@ -1327,7 +1442,7 @@ api.post("/api/invoices/:id/split", async (c) => {
   stmts.push(
     c.env.DB
       .prepare("UPDATE invoices SET status = 'vervallen', notes = ?, updated_at = ? WHERE id = ? AND user_id = ?")
-      .bind([invoice.notes, `Gesplitst in ${parts} termijnen op ${today}.`].filter(Boolean).join("\n"), now, id, userId),
+      .bind([invoice.notes, `Split into ${parts} instalments on ${today}.`].filter(Boolean).join("\n"), now, id, userId),
   );
 
   await c.env.DB.batch(stmts);
@@ -1416,8 +1531,8 @@ api.post("/api/invoice-lines", async (c) => {
     .run();
   const linesRow = await c.env.DB.prepare("SELECT COALESCE(SUM(amount), 0) as s FROM invoice_lines WHERE invoice_id = ?").bind(invoiceId).first<{ s: number }>();
   const newSubtotal = Math.round((linesRow?.s ?? 0) * 100) / 100;
-  const isPrivate = owns.invoice_type === "private";
-  const newBtw = isPrivate ? 0 : Math.round(newSubtotal * Number(owns.btw_percentage)) / 100;
+  const taxFree = isTaxFreeType(owns.invoice_type);
+  const newBtw = taxFree ? 0 : Math.round(newSubtotal * Number(owns.btw_percentage)) / 100;
   const newTotal = Math.round((newSubtotal + newBtw) * 100) / 100;
   await c.env.DB.prepare("UPDATE invoices SET subtotal = ?, btw_amount = ?, total = ?, updated_at = ? WHERE id = ?").bind(newSubtotal, newBtw, newTotal, now, invoiceId).run();
   const row = await c.env.DB.prepare("SELECT * FROM invoice_lines WHERE id = ?").bind(lineId).first();
@@ -1436,8 +1551,8 @@ api.delete("/api/invoice-lines/:id", async (c) => {
     const now = new Date().toISOString();
     const linesRow = await c.env.DB.prepare("SELECT COALESCE(SUM(amount), 0) as s FROM invoice_lines WHERE invoice_id = ?").bind(invoiceId).first<{ s: number }>();
     const newSubtotal = Math.round((linesRow?.s ?? 0) * 100) / 100;
-    const isPrivate = inv.invoice_type === "private";
-    const newBtw = isPrivate ? 0 : Math.round(newSubtotal * Number(inv.btw_percentage)) / 100;
+    const taxFree = isTaxFreeType(inv.invoice_type);
+    const newBtw = taxFree ? 0 : Math.round(newSubtotal * Number(inv.btw_percentage)) / 100;
     const newTotal = Math.round((newSubtotal + newBtw) * 100) / 100;
     await c.env.DB.prepare("UPDATE invoices SET subtotal = ?, btw_amount = ?, total = ?, updated_at = ? WHERE id = ?").bind(newSubtotal, newBtw, newTotal, now, invoiceId).run();
   }
@@ -1565,13 +1680,13 @@ api.post("/api/quotes/:id/invoice", async (c) => {
       total: number;
       notes: string | null;
     }>();
-  if (!quote) return c.json({ error: "Offerte niet gevonden" }, 404);
+  if (!quote) return c.json({ error: "Quote not found" }, 404);
 
   const company = await c.env.DB
     .prepare("SELECT id FROM companies WHERE id = ? AND user_id = ?")
     .bind(quote.company_id, userId)
     .first<{ id: string }>();
-  if (!company) return c.json({ error: "Bedrijf niet gevonden" }, 404);
+  if (!company) return c.json({ error: "Company not found" }, 404);
 
   const { results: quoteLines } = await c.env.DB
     .prepare("SELECT description, hours, hourly_rate, amount FROM quote_lines WHERE quote_id = ? ORDER BY created_at")
@@ -1588,7 +1703,7 @@ api.post("/api/quotes/:id/invoice", async (c) => {
   const btwPct = Number(quote.btw_percentage);
   const btwAmount = toMoney(quote.btw_amount);
   const total = toMoney(quote.total);
-  const baseNote = `Gebaseerd op offerte ${quote.quote_number}`;
+  const baseNote = `Based on quote ${quote.quote_number}`;
   const notes = quote.notes ? `${quote.notes}\n\n${baseNote}` : baseNote;
   const lineDate = quote.quote_date || today;
 
@@ -1776,7 +1891,7 @@ api.get("/api/leads", async (c) => {
 api.post("/api/leads", async (c) => {
   const userId = c.get("userId")!;
   const req = await c.req.json<Record<string, unknown>>();
-  if (!req.company_name) return c.json({ error: "company_name is verplicht" }, 400);
+  if (!req.company_name) return c.json({ error: "company_name is required" }, 400);
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
   await c.env.DB
@@ -1830,7 +1945,7 @@ api.post("/api/invoices/:id/credit-note", async (c) => {
   const existing = await c.env.DB
     .prepare("SELECT id FROM invoices WHERE credit_note_for_id = ? AND user_id = ? LIMIT 1")
     .bind(id, userId).first();
-  if (existing) return c.json({ error: "Er bestaat al een creditnota voor deze factuur" }, 409);
+  if (existing) return c.json({ error: "A credit note already exists for this invoice" }, 409);
 
   const invoice = await c.env.DB
     .prepare("SELECT * FROM invoices WHERE id = ? AND user_id = ?")
@@ -1841,7 +1956,7 @@ api.post("/api/invoices/:id/credit-note", async (c) => {
       invoice_type: string; is_credit_note: number;
     }>();
   if (!invoice) return c.json({ error: "Not found" }, 404);
-  if (invoice.is_credit_note) return c.json({ error: "Kan geen creditnota maken van een creditnota" }, 400);
+  if (invoice.is_credit_note) return c.json({ error: "Cannot create a credit note for a credit note" }, 400);
 
   const year = new Date().getFullYear();
   const countRow = await c.env.DB
@@ -1862,7 +1977,7 @@ api.post("/api/invoices/:id/credit-note", async (c) => {
       payment_method, is_credit_note, credit_note_for_id, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, NULL, 'concept', ?, ?, ?, ?, 0, 'krediet', ?, ?, 'overboeking', 1, ?, ?, ?)`,
   ).bind(newId, userId, invoice.company_id, cnNumber, today, sub, invoice.btw_percentage, btwAmt, tot,
-    `Creditnota voor factuur ${invoice.invoice_number}`, invoice.invoice_type, id, now, now).run();
+    `Credit note for invoice ${invoice.invoice_number}`, invoice.invoice_type, id, now, now).run();
 
   const { results: lines } = await c.env.DB
     .prepare("SELECT * FROM invoice_lines WHERE invoice_id = ? ORDER BY created_at")
@@ -1902,7 +2017,7 @@ api.post("/api/expenses", async (c) => {
   const req = await c.req.json<Record<string, unknown>>();
   const id = typeof req.id === "string" && req.id ? req.id : crypto.randomUUID();
   const now = new Date().toISOString();
-  const vatPct = Number(req.vat_percentage ?? 21);
+  const vatPct = Number(req.vat_percentage ?? 0);
   const exclVat = toMoney(req.amount_excl_vat);
   const vatAmt = req.vat_amount != null ? toMoney(req.vat_amount) : toMoney(exclVat * vatPct / 100);
   const inclVat = req.amount_incl_vat != null ? toMoney(req.amount_incl_vat) : toMoney(exclVat + vatAmt);
@@ -1931,7 +2046,7 @@ api.patch("/api/expenses/:id", async (c) => {
   if (!existing) return c.json({ error: "Not found" }, 404);
   const req = await c.req.json<Record<string, unknown>>();
   const now = new Date().toISOString();
-  const vatPct = Number(req.vat_percentage ?? 21);
+  const vatPct = Number(req.vat_percentage ?? 0);
   const exclVat = toMoney(req.amount_excl_vat);
   const vatAmt = req.vat_amount != null ? toMoney(req.vat_amount) : toMoney(exclVat * vatPct / 100);
   const inclVat = req.amount_incl_vat != null ? toMoney(req.amount_incl_vat) : toMoney(exclVat + vatAmt);
@@ -2027,9 +2142,10 @@ api.get("/api/reports/profit", async (c) => {
     ).bind(userId, from, to).first<{ kosten: number }>(),
 
     c.env.DB.prepare(
-      `SELECT COALESCE(SUM(distance_km * 0.23), 0) AS kosten FROM mileage_entries
-       WHERE user_id = ? AND date >= ? AND date <= ? AND is_private = 0`,
-    ).bind(userId, from, to).first<{ kosten: number }>(),
+      `SELECT COALESCE(SUM(m.distance_km), 0) * COALESCE((SELECT mileage_rate FROM business_settings WHERE user_id = ?), 0) AS kosten
+       FROM mileage_entries m
+       WHERE m.user_id = ? AND m.date >= ? AND m.date <= ? AND m.is_private = 0`,
+    ).bind(userId, userId, from, to).first<{ kosten: number }>(),
   ]);
 
   const omzet = toMoney(invRow?.omzet ?? 0);
@@ -2064,19 +2180,19 @@ api.get("/api/mileage", async (c) => {
 api.post("/api/mileage", async (c) => {
   const userId = c.get("userId")!;
   const req = await c.req.json<Record<string, unknown>>();
-  if (!req.date || !req.purpose) return c.json({ error: "date en purpose zijn verplicht" }, 400);
+  if (!req.date || !req.purpose) return c.json({ error: "date and purpose are required" }, 400);
   const odoStart = req.odometer_start != null ? Number(req.odometer_start) : null;
   const odoEnd   = req.odometer_end   != null ? Number(req.odometer_end)   : null;
   const distKm = (odoStart != null && odoEnd != null)
     ? Math.max(0, odoEnd - odoStart)
     : (req.distance_km != null ? Number(req.distance_km) : 0);
-  const isPrivate = req.is_private ? 1 : 0;
+  const taxFree = req.is_private ? 1 : 0;
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
   await c.env.DB.prepare(
     `INSERT INTO mileage_entries (id, user_id, date, from_location, to_location, odometer_start, odometer_end, distance_km, purpose, is_private, notes, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).bind(id, userId, req.date, req.from_location ?? null, req.to_location ?? null, odoStart, odoEnd, distKm, req.purpose, isPrivate, req.notes ?? null, now, now).run();
+  ).bind(id, userId, req.date, req.from_location ?? null, req.to_location ?? null, odoStart, odoEnd, distKm, req.purpose, taxFree, req.notes ?? null, now, now).run();
   const row = await c.env.DB.prepare("SELECT * FROM mileage_entries WHERE id = ?").bind(id).first();
   return c.json(row);
 });
@@ -2092,12 +2208,12 @@ api.patch("/api/mileage/:id", async (c) => {
   const distKm = (odoStart != null && odoEnd != null)
     ? Math.max(0, odoEnd - odoStart)
     : (req.distance_km != null ? Number(req.distance_km) : 0);
-  const isPrivate = req.is_private ? 1 : 0;
+  const taxFree = req.is_private ? 1 : 0;
   const now = new Date().toISOString();
   await c.env.DB.prepare(
     `UPDATE mileage_entries SET date = ?, from_location = ?, to_location = ?, odometer_start = ?, odometer_end = ?, distance_km = ?, purpose = ?, is_private = ?, notes = ?, updated_at = ?
      WHERE id = ? AND user_id = ?`,
-  ).bind(req.date, req.from_location ?? null, req.to_location ?? null, odoStart, odoEnd, distKm, req.purpose, isPrivate, req.notes ?? null, now, id, userId).run();
+  ).bind(req.date, req.from_location ?? null, req.to_location ?? null, odoStart, odoEnd, distKm, req.purpose, taxFree, req.notes ?? null, now, id, userId).run();
   const row = await c.env.DB.prepare("SELECT * FROM mileage_entries WHERE id = ?").bind(id).first();
   return c.json(row);
 });
@@ -2146,7 +2262,7 @@ api.get("/api/bank-balance", async (c) => {
 api.post("/api/bank-transactions", async (c) => {
   const userId = c.get("userId")!;
   const req = await c.req.json<Record<string, unknown>>();
-  if (!req.date || !req.description || req.amount == null) return c.json({ error: "date, description en amount zijn verplicht" }, 400);
+  if (!req.date || !req.description || req.amount == null) return c.json({ error: "date, description and amount are required" }, 400);
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
   await c.env.DB.prepare(
@@ -2194,13 +2310,18 @@ api.post("/api/attachments/upload", async (c) => {
   const entityType = formData.get("entity_type");
   const entityId = formData.get("entity_id");
 
-  if (!(file instanceof File)) return c.json({ error: "Geen bestand meegegeven" }, 400);
-  if (!entityType || typeof entityType !== "string") return c.json({ error: "entity_type verplicht" }, 400);
-  if (!entityId || typeof entityId !== "string") return c.json({ error: "entity_id verplicht" }, 400);
-  if (!ALLOWED_TYPES.has(file.type)) return c.json({ error: "Bestandstype niet toegestaan. Gebruik JPEG, PNG, GIF, WebP, HEIC of PDF." }, 400);
-  if (file.size > MAX_SIZE) return c.json({ error: "Bestand te groot (max 10 MB)" }, 400);
+  if (!(file instanceof File)) return c.json({ error: "No file provided" }, 400);
+  if (!entityType || typeof entityType !== "string") return c.json({ error: "entity_type is required" }, 400);
+  if (!entityId || typeof entityId !== "string") return c.json({ error: "entity_id is required" }, 400);
+  if (!ALLOWED_TYPES.has(file.type)) return c.json({ error: "File type not allowed. Use JPEG, PNG, GIF, WebP, HEIC or PDF." }, 400);
+  if (file.size > MAX_SIZE) return c.json({ error: "File too large (max 10 MB)" }, 400);
 
-  const ext = file.name.split(".").pop()?.toLowerCase() ?? "bin";
+  if (!/^[a-z_]{1,32}$/.test(entityType) || !/^[A-Za-z0-9-]{1,64}$/.test(entityId)) {
+    return c.json({ error: "Invalid entity_type or entity_id" }, 400);
+  }
+
+  const rawExt = file.name.includes(".") ? file.name.split(".").pop()!.toLowerCase() : "";
+  const ext = /^[a-z0-9]{1,8}$/.test(rawExt) ? rawExt : "bin";
   const id = crypto.randomUUID();
   const r2Key = `${userId}/${entityType}/${entityId}/${id}.${ext}`;
 
@@ -2224,7 +2345,7 @@ api.get("/api/attachments", async (c) => {
   const userId = c.get("userId")!;
   const entityType = c.req.query("entity_type");
   const entityId = c.req.query("entity_id");
-  if (!entityType || !entityId) return c.json({ error: "entity_type en entity_id verplicht" }, 400);
+  if (!entityType || !entityId) return c.json({ error: "entity_type en entity_id is required" }, 400);
   const rows = await c.env.DB
     .prepare("SELECT * FROM attachments WHERE user_id = ? AND entity_type = ? AND entity_id = ? ORDER BY created_at ASC")
     .bind(userId, entityType, entityId)
@@ -2239,10 +2360,10 @@ api.get("/api/attachments/:id/download", async (c) => {
     .prepare("SELECT * FROM attachments WHERE id = ? AND user_id = ?")
     .bind(id, userId)
     .first<{ r2_key: string; filename: string; content_type: string | null }>();
-  if (!row) return c.json({ error: "Niet gevonden" }, 404);
+  if (!row) return c.json({ error: "Not found" }, 404);
 
   const obj = await c.env.FILES.get(row.r2_key);
-  if (!obj) return c.json({ error: "Bestand niet gevonden in opslag" }, 404);
+  if (!obj) return c.json({ error: "File not found in storage" }, 404);
 
   const headers = new Headers();
   headers.set("Content-Type", row.content_type ?? "application/octet-stream");
@@ -2258,7 +2379,7 @@ api.delete("/api/attachments/:id", async (c) => {
     .prepare("SELECT r2_key FROM attachments WHERE id = ? AND user_id = ?")
     .bind(id, userId)
     .first<{ r2_key: string }>();
-  if (!row) return c.json({ error: "Niet gevonden" }, 404);
+  if (!row) return c.json({ error: "Not found" }, 404);
   await c.env.FILES.delete(row.r2_key);
   await c.env.DB.prepare("DELETE FROM attachments WHERE id = ? AND user_id = ?").bind(id, userId).run();
   return c.body(null, 204);
@@ -2273,37 +2394,37 @@ const DEFAULT_ACCOUNTS: Array<{
   type: "assets" | "liabilities" | "equity" | "revenue" | "expenses";
   description?: string;
 }> = [
-  // Activa
-  { number: "1000", name: "Kas", type: "assets" },
+  // Assets
+  { number: "1000", name: "Cash", type: "assets" },
   { number: "1100", name: "Bank", type: "assets" },
-  { number: "1200", name: "Spaarrekening", type: "assets" },
-  { number: "1300", name: "Debiteuren", type: "assets", description: "Te ontvangen van klanten" },
-  { number: "1400", name: "BTW vordering", type: "assets", description: "Voorbelasting" },
-  { number: "1500", name: "Overige vorderingen", type: "assets" },
-  // Passiva / schulden
-  { number: "4000", name: "Crediteuren", type: "liabilities" },
-  { number: "4800", name: "BTW te betalen", type: "liabilities", description: "Verschuldigde omzetbelasting" },
-  { number: "4900", name: "Overige schulden", type: "liabilities" },
-  // Eigen vermogen
-  { number: "2000", name: "Eigen vermogen", type: "equity" },
-  { number: "2100", name: "PrivÃ©onttrekkingen", type: "equity" },
-  { number: "2200", name: "PrivÃ©stortingen", type: "equity" },
-  { number: "2900", name: "Resultaat lopend jaar", type: "equity" },
-  // Opbrengsten
-  { number: "8000", name: "Omzet diensten", type: "revenue" },
-  { number: "8100", name: "Omzet producten", type: "revenue" },
-  { number: "8900", name: "Overige opbrengsten", type: "revenue" },
-  // Kosten
-  { number: "9000", name: "Inkoopkosten", type: "expenses" },
-  { number: "9100", name: "Personeelskosten", type: "expenses" },
-  { number: "9200", name: "Huisvestingskosten", type: "expenses" },
-  { number: "9300", name: "Vervoerskosten", type: "expenses" },
-  { number: "9400", name: "Marketing & reclame", type: "expenses" },
-  { number: "9500", name: "ICT & software", type: "expenses" },
-  { number: "9600", name: "Kantoorkosten", type: "expenses" },
-  { number: "9700", name: "Telefoon & internet", type: "expenses" },
-  { number: "9800", name: "FinanciÃ«le kosten", type: "expenses" },
-  { number: "9900", name: "Overige bedrijfskosten", type: "expenses" },
+  { number: "1200", name: "Savings account", type: "assets" },
+  { number: "1300", name: "Accounts receivable", type: "assets", description: "Owed by clients" },
+  { number: "1400", name: "Tax receivable", type: "assets", description: "Input tax" },
+  { number: "1500", name: "Other receivables", type: "assets" },
+  // Liabilities
+  { number: "4000", name: "Accounts payable", type: "liabilities" },
+  { number: "4800", name: "Tax payable", type: "liabilities", description: "Output tax owed" },
+  { number: "4900", name: "Other liabilities", type: "liabilities" },
+  // Equity
+  { number: "2000", name: "Owner's equity", type: "equity" },
+  { number: "2100", name: "Owner withdrawals", type: "equity" },
+  { number: "2200", name: "Owner contributions", type: "equity" },
+  { number: "2900", name: "Current year earnings", type: "equity" },
+  // Revenue
+  { number: "8000", name: "Service revenue", type: "revenue" },
+  { number: "8100", name: "Product revenue", type: "revenue" },
+  { number: "8900", name: "Other income", type: "revenue" },
+  // Expenses
+  { number: "9000", name: "Cost of goods sold", type: "expenses" },
+  { number: "9100", name: "Staff costs", type: "expenses" },
+  { number: "9200", name: "Rent and premises", type: "expenses" },
+  { number: "9300", name: "Travel and transport", type: "expenses" },
+  { number: "9400", name: "Marketing and advertising", type: "expenses" },
+  { number: "9500", name: "IT and software", type: "expenses" },
+  { number: "9600", name: "Office costs", type: "expenses" },
+  { number: "9700", name: "Phone and internet", type: "expenses" },
+  { number: "9800", name: "Bank and finance charges", type: "expenses" },
+  { number: "9900", name: "Other business expenses", type: "expenses" },
 ];
 
 async function seedDefaultChartOfAccounts(db: Env["DB"], userId: string): Promise<void> {
@@ -2429,7 +2550,7 @@ api.get("/api/accounts", async (c) => {
 api.post("/api/accounts", async (c) => {
   const userId = c.get("userId")!;
   const req = await c.req.json<Record<string, unknown>>();
-  if (!req.account_number || !req.name || !req.account_type) return c.json({ error: "account_number, name en account_type zijn verplicht" }, 400);
+  if (!req.account_number || !req.name || !req.account_type) return c.json({ error: "account_number, name and account_type are required" }, 400);
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
   await c.env.DB
@@ -2457,7 +2578,7 @@ api.delete("/api/accounts/:id", async (c) => {
   const { id } = c.req.param();
   const acct = await c.env.DB.prepare("SELECT is_system FROM chart_of_accounts WHERE id = ? AND user_id = ?").bind(id, userId).first<{ is_system: number }>();
   if (!acct) return c.json({ error: "Not found" }, 404);
-  if (acct.is_system) return c.json({ error: "Systeemrekening kan niet worden verwijderd" }, 400);
+  if (acct.is_system) return c.json({ error: "System accounts cannot be deleted" }, 400);
   await c.env.DB.prepare("DELETE FROM chart_of_accounts WHERE id = ? AND user_id = ?").bind(id, userId).run();
   return c.body(null, 204);
 });
@@ -2480,7 +2601,7 @@ api.post("/api/periods", async (c) => {
   const year = Number(req.year);
   const period = Number(req.period);
   const type = (req.period_type as string) === "quarter" ? "quarter" : "month";
-  if (!year || !period) return c.json({ error: "year en period zijn verplicht" }, 400);
+  if (!year || !period) return c.json({ error: "year and period are required" }, 400);
   const { starts_on, ends_on } = periodStartEnd(year, period, type);
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
@@ -2496,7 +2617,7 @@ api.patch("/api/periods/:id", async (c) => {
   const userId = c.get("userId")!;
   const { id } = c.req.param();
   const req = await c.req.json<Record<string, unknown>>();
-  if (!["open", "locked"].includes(req.status as string)) return c.json({ error: "status moet 'open' of 'locked' zijn" }, 400);
+  if (!["open", "locked"].includes(req.status as string)) return c.json({ error: "status must be 'open' or 'locked'" }, 400);
   await c.env.DB.prepare("UPDATE accounting_periods SET status = ? WHERE id = ? AND user_id = ?").bind(req.status, id, userId).run();
   const row = await c.env.DB.prepare("SELECT * FROM accounting_periods WHERE id = ? AND user_id = ?").bind(id, userId).first();
   return c.json(row);
@@ -2539,12 +2660,12 @@ api.post("/api/journal-entries", async (c) => {
   const req = await c.req.json<Record<string, unknown>>();
   const lines = req.lines as Array<{ account_number: string; debit_cents: number; credit_cents: number; description?: string }>;
   if (!req.entry_date || !req.description || !Array.isArray(lines) || lines.length < 2) {
-    return c.json({ error: "entry_date, description en minimaal 2 regels zijn verplicht" }, 400);
+    return c.json({ error: "entry_date, description and at least 2 lines are required" }, 400);
   }
   const totalDebit  = lines.reduce((s, l) => s + (l.debit_cents  ?? 0), 0);
   const totalCredit = lines.reduce((s, l) => s + (l.credit_cents ?? 0), 0);
   if (totalDebit !== totalCredit) {
-    return c.json({ error: `Journaalpost niet gesaldeerd: debet ${totalDebit} â‰  credit ${totalCredit} (in centen)` }, 400);
+    return c.json({ error: `Journal entry does not balance: debit ${totalDebit}, credit ${totalCredit} (in cents)` }, 400);
   }
   const entryId = await createJournalEntry(
     c.env.DB, userId,
@@ -2554,7 +2675,7 @@ api.post("/api/journal-entries", async (c) => {
     (req.reference_type as string) ?? null,
     lines.map((l) => ({ accountNumber: l.account_number, debitCents: l.debit_cents, creditCents: l.credit_cents, description: l.description })),
   );
-  if (!entryId) return c.json({ error: "EÃ©n of meer rekeningnummers niet gevonden" }, 400);
+  if (!entryId) return c.json({ error: "One or more account numbers not found" }, 400);
   return c.json({ id: entryId }, 201);
 });
 
@@ -2603,7 +2724,7 @@ api.get("/api/trial-balance", async (c) => {
 
 // â”€â”€ CSV-import (ING / Rabobank / ABN AMRO / generiek) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function parseAmount(raw: string): number {
-  // Handle European decimal notation: 1.234,56 â†’ 1234.56
+  // Handle European decimal notation: 1.234,56 becomes 1234.56
   const cleaned = raw.trim().replace(/\./g, "").replace(",", ".");
   return parseFloat(cleaned) || 0;
 }
@@ -2681,11 +2802,11 @@ api.post("/api/bank-transactions/import-csv", async (c) => {
   const userId = c.get("userId")!;
   const formData = await c.req.formData();
   const file = formData.get("file") as File | null;
-  if (!file) return c.json({ error: "Geen bestand meegestuurd (field: file)" }, 400);
+  if (!file) return c.json({ error: "No file provided (field: file)" }, 400);
 
   const text = await file.text();
   const parsed = detectAndParseCSV(text);
-  if (!parsed.length) return c.json({ error: "Geen geldige transacties gevonden in CSV" }, 400);
+  if (!parsed.length) return c.json({ error: "No valid transactions found in the CSV file" }, 400);
 
   const now = new Date().toISOString();
   let imported = 0;
@@ -2752,7 +2873,7 @@ api.get("/api/bank-transactions/:id/suggestions", async (c) => {
   if (!txn) return c.json({ error: "Not found" }, 404);
 
   const amount = txn.amount;
-  // Â±1 cent tolerance, Â±30 dagen
+  // Match within 1 cent and 30 days
   const dateParsed = new Date(txn.date);
   const fromDate = new Date(dateParsed.getTime() - 30 * 86400_000).toISOString().split("T")[0]!;
   const toDate   = new Date(dateParsed.getTime() + 30 * 86400_000).toISOString().split("T")[0]!;
@@ -2762,7 +2883,7 @@ api.get("/api/bank-transactions/:id/suggestions", async (c) => {
   if (txn.type === "inkomst") {
     const { results: invoices } = await c.env.DB
       .prepare(`SELECT id, invoice_number, total, status FROM invoices
-                WHERE user_id = ? AND ABS(total - ?) < 0.02 AND status != 'paid'
+                WHERE user_id = ? AND ABS(total - ?) < 0.02 AND status NOT IN ('betaald', 'vervallen')
                   AND (invoice_date BETWEEN ? AND ? OR due_date BETWEEN ? AND ?) LIMIT 5`)
       .bind(userId, amount, fromDate, toDate, fromDate, toDate)
       .all();
@@ -2836,7 +2957,7 @@ api.get("/api/reports/pnl", async (c) => {
     if (fromDate) { invWhere += " AND invoice_date >= ?"; invParams.push(fromDate); }
     if (toDate)   { invWhere += " AND invoice_date <= ?"; invParams.push(toDate); }
     const { results: invRows } = await c.env.DB
-      .prepare(`SELECT COALESCE(SUM(total_cents), CAST(ROUND(SUM(total)*100) AS INTEGER)) AS total_cents FROM invoices WHERE user_id = ? AND status IN ('sent','paid')${invWhere}`)
+      .prepare(`SELECT COALESCE(SUM(total_cents), CAST(ROUND(SUM(total)*100) AS INTEGER)) AS total_cents FROM invoices WHERE user_id = ? AND status IN ('verzonden','betaald')${invWhere}`)
       .bind(...invParams)
       .all<{ total_cents: number }>();
 
@@ -2937,7 +3058,7 @@ api.get("/api/reports/vat", async (c) => {
         COALESCE(SUM(subtotal_cents), CAST(ROUND(SUM(subtotal)*100) AS INTEGER))    AS subtotal_cents,
         COALESCE(SUM(btw_amount_cents), CAST(ROUND(SUM(btw_amount)*100) AS INTEGER)) AS btw_cents
       FROM invoices
-      WHERE user_id = ? AND status IN ('sent','paid')
+      WHERE user_id = ? AND status IN ('verzonden','betaald')
         AND invoice_date BETWEEN ? AND ?
       GROUP BY btw_percentage
     `)
@@ -2977,7 +3098,7 @@ api.get("/api/reports/vat", async (c) => {
 api.get("/api/org", async (c) => {
   const orgId = c.get("userId")!;
   const org = await c.env.DB.prepare("SELECT * FROM organizations WHERE id = ?").bind(orgId).first();
-  if (!org) return c.json({ error: "Organisatie niet gevonden" }, 404);
+  if (!org) return c.json({ error: "Organization not found" }, 404);
   const { results: members } = await c.env.DB
     .prepare(`SELECT m.id, m.user_id, m.role, m.joined_at, u.email
               FROM organization_members m
@@ -2995,7 +3116,7 @@ api.get("/api/org", async (c) => {
 api.patch("/api/org", async (c) => {
   const orgId   = c.get("userId")!;
   const orgRole = c.get("orgRole") ?? "member";
-  if (!["owner", "admin"].includes(orgRole)) return c.json({ error: "Geen toegang" }, 403);
+  if (!["owner", "admin"].includes(orgRole)) return c.json({ error: "Access denied" }, 403);
   const req = await c.req.json<{ name?: string; plan?: string }>();
   const now = new Date().toISOString();
   await c.env.DB
@@ -3010,11 +3131,11 @@ api.post("/api/org/invite", async (c) => {
   const orgId      = c.get("userId")!;
   const ownUserId  = c.get("ownUserId") ?? orgId;
   const orgRole    = c.get("orgRole") ?? "member";
-  if (!["owner", "admin"].includes(orgRole)) return c.json({ error: "Geen toegang" }, 403);
+  if (!["owner", "admin"].includes(orgRole)) return c.json({ error: "Access denied" }, 403);
 
   const req = await c.req.json<{ email?: string; role?: string }>();
   const email = (req.email ?? "").trim().toLowerCase();
-  if (!email) return c.json({ error: "Email is verplicht" }, 400);
+  if (!email) return c.json({ error: "Email is required" }, 400);
   const role = (["admin", "member", "viewer"].includes(req.role ?? "") ? req.role : "member") as string;
 
   const token = crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
@@ -3039,14 +3160,14 @@ api.post("/api/org/invite", async (c) => {
 // â”€â”€ Accept invite (new or existing user) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 api.get("/api/org/invite/info", async (c) => {
   const { token } = c.req.query();
-  if (!token) return c.json({ error: "Token verplicht" }, 400);
+  if (!token) return c.json({ error: "Token is required" }, 400);
   const invite = await c.env.DB
     .prepare(`SELECT i.email, i.role, i.expires_at, o.name as org_name
               FROM org_invites i JOIN organizations o ON o.id = i.org_id
               WHERE i.token = ? AND i.accepted_at IS NULL AND i.expires_at > datetime('now')`)
     .bind(token)
     .first<{ email: string; role: string; expires_at: string; org_name: string }>();
-  if (!invite) return c.json({ error: "Uitnodiging niet gevonden of verlopen" }, 404);
+  if (!invite) return c.json({ error: "Invitation not found or expired" }, 404);
   return c.json(invite);
 });
 
@@ -3054,13 +3175,13 @@ api.post("/api/org/invite/accept", async (c) => {
   const secret = c.env.JWT_SECRET;
   const req = await c.req.json<{ token?: string; email?: string; password?: string; name?: string }>();
   const inviteToken = req.token ?? "";
-  if (!inviteToken) return c.json({ error: "Token verplicht" }, 400);
+  if (!inviteToken) return c.json({ error: "Token is required" }, 400);
 
   const invite = await c.env.DB
     .prepare("SELECT * FROM org_invites WHERE token = ? AND accepted_at IS NULL AND expires_at > datetime('now')")
     .bind(inviteToken)
     .first<{ id: string; org_id: string; email: string; role: string; invited_by: string }>();
-  if (!invite) return c.json({ error: "Uitnodiging niet gevonden of verlopen" }, 404);
+  if (!invite) return c.json({ error: "Invitation not found or expired" }, 404);
 
   const email   = (req.email ?? invite.email).trim().toLowerCase();
   const password = req.password ?? "";
@@ -3068,13 +3189,13 @@ api.post("/api/org/invite/accept", async (c) => {
 
   // Check if user exists already
   let userId: string;
-  let existingUser = await c.env.DB.prepare("SELECT id FROM users WHERE email = ?").bind(email).first<{ id: string }>();
+  const existingUser = await c.env.DB.prepare("SELECT id FROM users WHERE email = ?").bind(email).first<{ id: string }>();
 
   if (existingUser) {
     userId = existingUser.id;
   } else {
     // Register new user
-    if (password.length < 6) return c.json({ error: "Wachtwoord minimaal 6 tekens" }, 400);
+    if (password.length < 8) return c.json({ error: "Password must be at least 8 characters" }, 400);
     const hash = await hashPassword(password);
     userId = crypto.randomUUID();
     await c.env.DB.prepare("INSERT INTO users (id, email, password_hash, created_at) VALUES (?, ?, ?, ?)")
@@ -3108,15 +3229,15 @@ api.post("/api/org/invite/accept", async (c) => {
 api.delete("/api/org/members/:memberId", async (c) => {
   const orgId   = c.get("userId")!;
   const orgRole = c.get("orgRole") ?? "member";
-  if (!["owner", "admin"].includes(orgRole)) return c.json({ error: "Geen toegang" }, 403);
+  if (!["owner", "admin"].includes(orgRole)) return c.json({ error: "Access denied" }, 403);
   const { memberId } = c.req.param();
   // Cannot remove org owner
   const m = await c.env.DB
     .prepare("SELECT role FROM organization_members WHERE id = ? AND org_id = ?")
     .bind(memberId, orgId)
     .first<{ role: string }>();
-  if (!m) return c.json({ error: "Lid niet gevonden" }, 404);
-  if (m.role === "owner") return c.json({ error: "Eigenaar kan niet worden verwijderd" }, 400);
+  if (!m) return c.json({ error: "Member not found" }, 404);
+  if (m.role === "owner") return c.json({ error: "The owner cannot be removed" }, 400);
   await c.env.DB.prepare("DELETE FROM organization_members WHERE id = ? AND org_id = ?").bind(memberId, orgId).run();
   return c.body(null, 204);
 });
@@ -3125,7 +3246,7 @@ api.delete("/api/org/members/:memberId", async (c) => {
 api.patch("/api/org/members/:memberId", async (c) => {
   const orgId   = c.get("userId")!;
   const orgRole = c.get("orgRole") ?? "member";
-  if (orgRole !== "owner") return c.json({ error: "Alleen eigenaar kan rollen wijzigen" }, 403);
+  if (orgRole !== "owner") return c.json({ error: "Only the owner can change roles" }, 403);
   const { memberId } = c.req.param();
   const req = await c.req.json<{ role?: string }>();
   if (!["admin", "member", "viewer"].includes(req.role ?? "")) return c.json({ error: "Ongeldige rol" }, 400);
@@ -3140,7 +3261,7 @@ api.patch("/api/org/members/:memberId", async (c) => {
 api.delete("/api/org/invites/:inviteId", async (c) => {
   const orgId   = c.get("userId")!;
   const orgRole = c.get("orgRole") ?? "member";
-  if (!["owner", "admin"].includes(orgRole)) return c.json({ error: "Geen toegang" }, 403);
+  if (!["owner", "admin"].includes(orgRole)) return c.json({ error: "Access denied" }, 403);
   const { inviteId } = c.req.param();
   await c.env.DB.prepare("DELETE FROM org_invites WHERE id = ? AND org_id = ?").bind(inviteId, orgId).run();
   return c.body(null, 204);
@@ -3153,13 +3274,13 @@ api.post("/api/org/switch", async (c) => {
   const email      = c.get("email") ?? "";
   const req        = await c.req.json<{ org_id?: string }>();
   const targetOrgId = req.org_id;
-  if (!targetOrgId) return c.json({ error: "org_id verplicht" }, 400);
+  if (!targetOrgId) return c.json({ error: "org_id is required" }, 400);
 
   const member = await c.env.DB
     .prepare("SELECT role FROM organization_members WHERE org_id = ? AND user_id = ?")
     .bind(targetOrgId, ownUserId)
     .first<{ role: string }>();
-  if (!member) return c.json({ error: "Geen toegang tot deze organisatie" }, 403);
+  if (!member) return c.json({ error: "No access to this organization" }, 403);
 
   const token = await signUserToken(secret, ownUserId, email, targetOrgId, member.role as "owner" | "admin" | "member" | "viewer");
   return c.json({ token, org_id: targetOrgId, org_role: member.role });
@@ -3186,7 +3307,7 @@ api.onError((err, c) => {
     return c.json(
       {
         error:
-          "Database niet klaar: D1-migraties ontbreken. Voer uit: npm run db:migrate:remote (productie) of npm run db:migrate:local (lokaal).",
+          "Database not ready: migrations have not been applied. Restart the server so it can run them.",
       },
       503,
     );
@@ -3228,18 +3349,18 @@ async function getUpcomingPayments(env: Env): Promise<UpcomingPaymentRow[]> {
 
 function buildUpcomingPaymentsMessage(results: UpcomingPaymentRow[]): string {
   const lines = results.map((s) => {
-    const method = s.payment_method ?? "onbekend";
-    const cat = s.category === "zakelijk" ? "Zakelijk" : "PrivÃ©";
-    const date = new Date(s.next_payment_date).toLocaleDateString("nl-NL", { day: "numeric", month: "long" });
-    return `â€¢ <b>${s.name}</b> â€” â‚¬${Number(s.amount).toFixed(2)} (${method}) â€” ${date} [${cat}]`;
+    const method = s.payment_method ?? "unknown";
+    const cat = s.category === "zakelijk" ? "Business" : "Personal";
+    const date = new Date(s.next_payment_date).toLocaleDateString("en-GB", { day: "numeric", month: "long" });
+    return `• <b>${s.name}</b>, €${Number(s.amount).toFixed(2)} (${method}), ${date} [${cat}]`;
   });
 
   const total = results.reduce((sum, s) => sum + Number(s.amount), 0);
 
   return (
-    `ðŸ’° <b>Komende betalingen</b>\n\n` +
+    `💰 <b>Upcoming payments</b>\n\n` +
     lines.join("\n") +
-    `\n\n<b>Totaal: â‚¬${total.toFixed(2)}</b>\n\nZorg dat je saldo/creditcard op orde is!`
+    `\n\n<b>Total: €${total.toFixed(2)}</b>\n\nMake sure your account has enough balance.`
   );
 }
 
@@ -3253,17 +3374,17 @@ async function checkUpcomingPayments(env: Env): Promise<number> {
 api.post("/api/telegram/test", async (c) => {
   if (!c.env.TELEGRAM_BOT_TOKEN || !c.env.TELEGRAM_CHAT_ID) {
     return c.json(
-      { error: "Telegram is niet geconfigureerd. Voeg TELEGRAM_BOT_TOKEN en TELEGRAM_CHAT_ID toe." },
+      { error: "Telegram is not configured. Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID." },
       400,
     );
   }
-  const email = c.get("email") ?? "onbekend";
-  const now = new Date().toLocaleString("nl-NL", { dateStyle: "medium", timeStyle: "short" });
+  const email = c.get("email") ?? "unknown";
+  const now = new Date().toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" });
   const text =
-    `ðŸ§ª <b>Telegram testbericht</b>\n` +
-    `Verzonden vanuit de app-instellingen.\n` +
-    `Gebruiker: <code>${email}</code>\n` +
-    `Tijd: ${now}`;
+    `🧪 <b>Telegram test message</b>\n` +
+    `Sent from the app settings.\n` +
+    `User: <code>${email}</code>\n` +
+    `Time: ${now}`;
   await sendTelegramMessage(c.env, text);
   return c.json({ ok: true });
 });
@@ -3271,7 +3392,7 @@ api.post("/api/telegram/test", async (c) => {
 api.post("/api/telegram/test-upcoming-payments", async (c) => {
   if (!c.env.TELEGRAM_BOT_TOKEN || !c.env.TELEGRAM_CHAT_ID) {
     return c.json(
-      { error: "Telegram is niet geconfigureerd. Voeg TELEGRAM_BOT_TOKEN en TELEGRAM_CHAT_ID toe." },
+      { error: "Telegram is not configured. Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID." },
       400,
     );
   }
@@ -3280,7 +3401,7 @@ api.post("/api/telegram/test-upcoming-payments", async (c) => {
   if (results.length === 0) {
     await sendTelegramMessage(
       c.env,
-      "ðŸ’° <b>Komende betalingen</b>\n\nGeen betalingen gepland in de komende 2 dagen.",
+      "💰 <b>Upcoming payments</b>\n\nNo payments due in the next 2 days.",
     );
     return c.json({ ok: true, count: 0 });
   }

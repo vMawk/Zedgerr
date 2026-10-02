@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTaxSettings } from "@/lib/tax";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "../lib/api";
 import { Card, CardContent } from "../components/ui/card";
@@ -53,25 +54,23 @@ interface TrialBalance {
 }
 
 const ACCOUNT_TYPE_LABELS: Record<string, string> = {
-  assets: "Activa",
-  liabilities: "Passiva",
-  equity: "Eigen vermogen",
-  revenue: "Opbrengsten",
-  expenses: "Kosten",
+  assets: "Assets",
+  liabilities: "Liabilities",
+  equity: "Equity",
+  revenue: "Revenue",
+  expenses: "Expenses",
 };
 
 const ACCOUNT_TYPE_ORDER = ["assets", "liabilities", "equity", "revenue", "expenses"];
 
 const MONTH_NAMES = [
-  "", "jan", "feb", "mrt", "apr", "mei", "jun",
-  "jul", "aug", "sep", "okt", "nov", "dec",
+  "", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ];
 
-function formatCents(cents: number): string {
-  return new Intl.NumberFormat("nl-NL", { style: "currency", currency: "EUR" }).format(cents / 100);
-}
-
 export default function Boekhouding() {
+  const { currency } = useTaxSettings();
+  const formatCents = (cents: number) => new Intl.NumberFormat(undefined, { style: "currency", currency }).format(cents / 100);
   const [activeTab, setActiveTab] = useState("rekeningschema");
 
   const { data: accounts = [] } = useQuery<Account[]>({
@@ -104,17 +103,17 @@ export default function Boekhouding() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-semibold">Boekhouding</h1>
+      <h1 className="text-xl font-semibold">Accounting</h1>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
-          <TabsTrigger value="rekeningschema">Rekeningschema</TabsTrigger>
-          <TabsTrigger value="journaal">Journaalposten</TabsTrigger>
-          <TabsTrigger value="perioden">Perioden</TabsTrigger>
-          <TabsTrigger value="saldibalans">Saldibalans</TabsTrigger>
+          <TabsTrigger value="rekeningschema">Chart of accounts</TabsTrigger>
+          <TabsTrigger value="journaal">Journal entries</TabsTrigger>
+          <TabsTrigger value="perioden">Periods</TabsTrigger>
+          <TabsTrigger value="saldibalans">Trial balance</TabsTrigger>
         </TabsList>
 
-        {/* ── Rekeningschema ─────────────────────────────────────────────── */}
+        {/* Chart of accounts */}
         <TabsContent value="rekeningschema" className="mt-4">
           <Card>
             <CardContent className="p-0">
@@ -141,7 +140,7 @@ export default function Boekhouding() {
                             </TableCell>
                             <TableCell className="text-right">
                               {acct.is_system ? (
-                                <Badge variant="secondary" className="text-xs">systeem</Badge>
+                                <Badge variant="secondary" className="text-xs">system</Badge>
                               ) : null}
                             </TableCell>
                           </TableRow>
@@ -153,23 +152,23 @@ export default function Boekhouding() {
               })}
               {accounts.length === 0 && (
                 <p className="p-6 text-sm text-muted-foreground text-center">
-                  Geen rekeningen gevonden. Maak een account aan om het standaard rekeningschema te laden.
+                  No accounts found. Create an account to load the default chart of accounts.
                 </p>
               )}
             </CardContent>
           </Card>
         </TabsContent>
 
-        {/* ── Journaalposten ─────────────────────────────────────────────── */}
+        {/* Journal entries */}
         <TabsContent value="journaal" className="mt-4">
           <Card>
             <CardContent className="p-0">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Datum</TableHead>
-                    <TableHead>Omschrijving</TableHead>
-                    <TableHead>Referentie</TableHead>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Description</TableHead>
+                    <TableHead>Reference</TableHead>
                     <TableHead>Type</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -193,7 +192,7 @@ export default function Boekhouding() {
                   {entries.length === 0 && (
                     <TableRow>
                       <TableCell colSpan={4} className="text-center text-sm text-muted-foreground py-8">
-                        Nog geen journaalposten
+                        No journal entries yet
                       </TableCell>
                     </TableRow>
                   )}
@@ -203,17 +202,17 @@ export default function Boekhouding() {
           </Card>
         </TabsContent>
 
-        {/* ── Perioden ───────────────────────────────────────────────────── */}
+        {/* Periods */}
         <TabsContent value="perioden" className="mt-4">
           <Card>
             <CardContent className="p-0">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Periode</TableHead>
+                    <TableHead>Period</TableHead>
                     <TableHead>Type</TableHead>
-                    <TableHead>Van</TableHead>
-                    <TableHead>Tot</TableHead>
+                    <TableHead>From</TableHead>
+                    <TableHead>To</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead />
                   </TableRow>
@@ -227,7 +226,7 @@ export default function Boekhouding() {
                           : `Q${p.period} ${p.year}`}
                       </TableCell>
                       <TableCell className="text-muted-foreground text-sm">
-                        {p.period_type === "month" ? "Maand" : "Kwartaal"}
+                        {p.period_type === "month" ? "Month" : "Quarter"}
                       </TableCell>
                       <TableCell className="font-mono text-sm">{p.starts_on}</TableCell>
                       <TableCell className="font-mono text-sm">{p.ends_on}</TableCell>
@@ -236,12 +235,12 @@ export default function Boekhouding() {
                           variant={p.status === "locked" ? "destructive" : "default"}
                           className="text-xs"
                         >
-                          {p.status === "locked" ? "Gesloten" : "Open"}
+                          {p.status === "locked" ? "Locked" : "Open"}
                         </Badge>
                       </TableCell>
                       <TableCell className="text-right">
                         <Button variant="ghost" size="sm" disabled>
-                          {p.status === "open" ? "Sluiten" : "Heropenen"}
+                          {p.status === "open" ? "Close" : "Reopen"}
                         </Button>
                       </TableCell>
                     </TableRow>
@@ -249,7 +248,7 @@ export default function Boekhouding() {
                   {periods.length === 0 && (
                     <TableRow>
                       <TableCell colSpan={6} className="text-center text-sm text-muted-foreground py-8">
-                        Nog geen perioden aangemaakt
+                        No periods created yet
                       </TableCell>
                     </TableRow>
                   )}
@@ -259,18 +258,18 @@ export default function Boekhouding() {
           </Card>
         </TabsContent>
 
-        {/* ── Saldibalans ────────────────────────────────────────────────── */}
+        {/* Trial balance */}
         <TabsContent value="saldibalans" className="mt-4">
           <Card>
             <CardContent className="p-0">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Nummer</TableHead>
-                    <TableHead>Rekening</TableHead>
-                    <TableHead className="text-right">Debet</TableHead>
+                    <TableHead>Number</TableHead>
+                    <TableHead>Account</TableHead>
+                    <TableHead className="text-right">Debit</TableHead>
                     <TableHead className="text-right">Credit</TableHead>
-                    <TableHead className="text-right">Saldo</TableHead>
+                    <TableHead className="text-right">Balance</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -301,7 +300,7 @@ export default function Boekhouding() {
                   ))}
                   {trialBalance.length > 0 && (
                     <TableRow className="border-t-2 font-semibold bg-muted/20">
-                      <TableCell colSpan={2}>Totaal</TableCell>
+                      <TableCell colSpan={2}>Total</TableCell>
                       <TableCell className="text-right font-mono tabular-nums">{formatCents(totalDebit)}</TableCell>
                       <TableCell className="text-right font-mono tabular-nums">{formatCents(totalCredit)}</TableCell>
                       <TableCell
@@ -316,7 +315,7 @@ export default function Boekhouding() {
                   {trialBalance.length === 0 && (
                     <TableRow>
                       <TableCell colSpan={5} className="text-center text-sm text-muted-foreground py-8">
-                        Geen transacties geboekt
+                        No transactions posted
                       </TableCell>
                     </TableRow>
                   )}

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTaxSettings } from "@/lib/tax";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
 import type { BankTransaction, BankTransactionType } from "@/lib/db-types";
@@ -18,12 +19,12 @@ import { apiRequest } from "../lib/api";
 type TxType = BankTransactionType;
 
 const TYPE_LABELS: Record<TxType, string> = {
-  inkomst: "Inkomst",
-  uitgave: "Uitgave",
-  prive_storting: "Privéstorting",
-  prive_onttrekking: "Privéonttrekking",
-  beginstand: "Beginstand",
-  overig: "Overig",
+  inkomst: "Income",
+  uitgave: "Expense",
+  prive_storting: "Private deposit",
+  prive_onttrekking: "Private withdrawal",
+  beginstand: "Opening balance",
+  overig: "Other",
 };
 
 const TYPE_COLORS: Record<TxType, string> = {
@@ -44,7 +45,7 @@ const emptyForm = {
 };
 
 function fmtEur(n: number): string {
-  return n.toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function isPositiveType(type: TxType): boolean {
@@ -52,6 +53,7 @@ function isPositiveType(type: TxType): boolean {
 }
 
 export default function Bankrekening() {
+  const { currencySymbol: cs } = useTaxSettings();
   const { user } = useAuth();
   const { toast } = useToast();
   const currentYear = new Date().getFullYear();
@@ -116,16 +118,16 @@ export default function Bankrekening() {
     try {
       if (editEntry) {
         await api.updateBankTransaction(editEntry.id, body);
-        toast({ title: "Transactie bijgewerkt" });
+        toast({ title: "Transaction updated" });
       } else {
         await api.createBankTransaction(body);
-        toast({ title: "Transactie toegevoegd" });
+        toast({ title: "Transaction added" });
       }
       setOpen(false);
       resetForm();
       fetchData();
     } catch (e: unknown) {
-      toast({ title: "Fout", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
+      toast({ title: "Error", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
     } finally {
       setSaving(false);
     }
@@ -138,9 +140,9 @@ export default function Bankrekening() {
       await api.deleteBankTransaction(deleteTarget.id);
       setDeleteTarget(null);
       fetchData();
-      toast({ title: "Transactie verwijderd" });
+      toast({ title: "Transaction deleted" });
     } catch (e: unknown) {
-      toast({ title: "Fout", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
+      toast({ title: "Error", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
     } finally {
       setDeleting(false);
     }
@@ -153,14 +155,14 @@ export default function Bankrekening() {
     try {
       const formData = new FormData();
       formData.append("file", file);
-      const result = await apiRequest("/api/bank-transactions/import-csv", {
+      const result = await apiRequest<{ imported: number; skipped: number }>("/api/bank-transactions/import-csv", {
         method: "POST",
         body: formData,
       });
-      toast({ title: `CSV geïmporteerd: ${result.imported} nieuw, ${result.skipped} overgeslagen` });
+      toast({ title: `CSV imported: ${result.imported} new, ${result.skipped} skipped` });
       fetchData();
     } catch (err: unknown) {
-      toast({ title: "Import mislukt", description: err instanceof Error ? err.message : String(err), variant: "destructive" });
+      toast({ title: "Import failed", description: err instanceof Error ? err.message : String(err), variant: "destructive" });
     } finally {
       setImporting(false);
       e.target.value = "";
@@ -175,7 +177,7 @@ export default function Bankrekening() {
       });
       fetchData();
     } catch (err: unknown) {
-      toast({ title: "Fout", description: err instanceof Error ? err.message : String(err), variant: "destructive" });
+      toast({ title: "Error", description: err instanceof Error ? err.message : String(err), variant: "destructive" });
     }
   };
 
@@ -189,28 +191,28 @@ export default function Bankrekening() {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Bankrekening</h1>
+        <h1 className="text-xl font-semibold">Bank account</h1>
         <div className="flex gap-2">
           <Label className="cursor-pointer">
             <Button variant="outline" asChild disabled={importing}>
               <span>
                 <Upload className="mr-2 h-4 w-4" />
-                {importing ? "Importeren…" : "CSV importeren"}
+                {importing ? "Importing…" : "Import CSV"}
               </span>
             </Button>
             <input type="file" accept=".csv,.txt" className="sr-only" onChange={handleImportCSV} />
           </Label>
-          <Button variant="outline" onClick={() => openNew("prive_storting")} title="Privéstorting">
+          <Button variant="outline" onClick={() => openNew("prive_storting")} title="Private deposit">
             <ArrowDownToLine className="mr-2 h-4 w-4" />
-            Privéstorting
+            Private deposit
           </Button>
-          <Button variant="outline" onClick={() => openNew("prive_onttrekking")} title="Privéonttrekking">
+          <Button variant="outline" onClick={() => openNew("prive_onttrekking")} title="Private withdrawal">
             <ArrowUpFromLine className="mr-2 h-4 w-4" />
-            Privéonttrekking
+            Private withdrawal
           </Button>
           <Button onClick={() => openNew("inkomst")}>
             <Plus className="mr-2 h-4 w-4" />
-            Transactie
+            Transaction
           </Button>
         </div>
       </div>
@@ -221,9 +223,9 @@ export default function Bankrekening() {
           <div className="flex items-center gap-3">
             <Landmark className={`h-8 w-8 ${saldo >= 0 ? "text-green-600 dark:text-green-400" : "text-red-500"}`} />
             <div>
-              <p className="text-sm text-muted-foreground">Huidig saldo</p>
+              <p className="text-sm text-muted-foreground">Current balance</p>
               <p className={`text-3xl font-bold tabular-nums ${saldo >= 0 ? "text-green-600 dark:text-green-400" : "text-red-500"}`}>
-                {saldo < 0 ? "−" : ""}€{fmtEur(Math.abs(saldo))}
+                {saldo < 0 ? "−" : ""}{cs}{fmtEur(Math.abs(saldo))}
               </p>
             </div>
           </div>
@@ -233,11 +235,11 @@ export default function Bankrekening() {
       {/* Periode filter */}
       <div className="flex flex-wrap gap-4 items-end">
         <div className="grid gap-1.5">
-          <Label className="text-xs text-muted-foreground">Van</Label>
+          <Label className="text-xs text-muted-foreground">From</Label>
           <Input type="date" value={filterFrom} onChange={(e) => setFilterFrom(e.target.value)} className="h-8 text-sm" />
         </div>
         <div className="grid gap-1.5">
-          <Label className="text-xs text-muted-foreground">Tot</Label>
+          <Label className="text-xs text-muted-foreground">To</Label>
           <Input type="date" value={filterTo} onChange={(e) => setFilterTo(e.target.value)} className="h-8 text-sm" />
         </div>
       </div>
@@ -249,8 +251,8 @@ export default function Bankrekening() {
             <CardContent className="pt-4 pb-4 flex items-center gap-3">
               <TrendingUp className="h-6 w-6 text-green-500 shrink-0" />
               <div>
-                <p className="text-xs text-muted-foreground">Inkomsten periode</p>
-                <p className="text-xl font-bold tabular-nums text-green-600 dark:text-green-400">€{fmtEur(periodeIn)}</p>
+                <p className="text-xs text-muted-foreground">Period income</p>
+                <p className="text-xl font-bold tabular-nums text-green-600 dark:text-green-400">{cs}{fmtEur(periodeIn)}</p>
               </div>
             </CardContent>
           </Card>
@@ -258,8 +260,8 @@ export default function Bankrekening() {
             <CardContent className="pt-4 pb-4 flex items-center gap-3">
               <TrendingDown className="h-6 w-6 text-red-500 shrink-0" />
               <div>
-                <p className="text-xs text-muted-foreground">Uitgaven periode</p>
-                <p className="text-xl font-bold tabular-nums text-red-500">€{fmtEur(periodeUit)}</p>
+                <p className="text-xs text-muted-foreground">Period expenses</p>
+                <p className="text-xl font-bold tabular-nums text-red-500">{cs}{fmtEur(periodeUit)}</p>
               </div>
             </CardContent>
           </Card>
@@ -268,8 +270,8 @@ export default function Bankrekening() {
               <CardContent className="pt-4 pb-4 flex items-center gap-3">
                 <ArrowDownToLine className="h-6 w-6 text-blue-500 shrink-0" />
                 <div>
-                  <p className="text-xs text-muted-foreground">Privéstortingen periode</p>
-                  <p className="text-xl font-bold tabular-nums text-blue-600 dark:text-blue-400">€{fmtEur(privestortingen)}</p>
+                  <p className="text-xs text-muted-foreground">Period private deposits</p>
+                  <p className="text-xl font-bold tabular-nums text-blue-600 dark:text-blue-400">{cs}{fmtEur(privestortingen)}</p>
                 </div>
               </CardContent>
             </Card>
@@ -282,10 +284,10 @@ export default function Bankrekening() {
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12 text-muted-foreground">
             <Landmark className="h-12 w-12 mb-4" />
-            <p>Geen transacties gevonden</p>
-            <p className="text-sm mt-1">Voeg je beginstand of eerste transactie toe</p>
+            <p>No transactions found</p>
+            <p className="text-sm mt-1">Add your opening balance or first transaction</p>
             <Button className="mt-4" variant="outline" onClick={() => openNew("beginstand")}>
-              Beginstand instellen
+              Set opening balance
             </Button>
           </CardContent>
         </Card>
@@ -295,19 +297,19 @@ export default function Bankrekening() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="whitespace-nowrap">Datum</TableHead>
-                  <TableHead>Omschrijving</TableHead>
+                  <TableHead className="whitespace-nowrap">Date</TableHead>
+                  <TableHead>Description</TableHead>
                   <TableHead>Type</TableHead>
-                  <TableHead className="text-right">Bedrag</TableHead>
-                  <TableHead className="w-8 text-center hidden sm:table-cell" title="Verwerkt">✓</TableHead>
-                  <TableHead className="w-20 text-right">Acties</TableHead>
+                  <TableHead className="text-right">Amount</TableHead>
+                  <TableHead className="w-8 text-center hidden sm:table-cell" title="Reconciled">✓</TableHead>
+                  <TableHead className="w-20 text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {entries.map((e) => (
                   <TableRow key={e.id}>
                     <TableCell className="whitespace-nowrap text-sm">
-                      {new Date(e.date).toLocaleDateString("nl-NL")}
+                      {new Date(e.date).toLocaleDateString(undefined)}
                     </TableCell>
                     <TableCell className="text-sm max-w-[240px]">
                       <div className="truncate">{e.description}</div>
@@ -319,12 +321,12 @@ export default function Bankrekening() {
                       </span>
                     </TableCell>
                     <TableCell className={`text-right tabular-nums font-semibold text-sm whitespace-nowrap ${e.amount >= 0 ? "text-green-600 dark:text-green-400" : "text-red-500"}`}>
-                      {e.amount >= 0 ? "+" : "−"}€{fmtEur(Math.abs(e.amount))}
+                      {e.amount >= 0 ? "+" : "−"}{cs}{fmtEur(Math.abs(e.amount))}
                     </TableCell>
                     <TableCell className="text-center hidden sm:table-cell">
                       <button
                         onClick={() => handleReconcile(e.id, !!(e as unknown as Record<string,unknown>)["reconciled"])}
-                        title={(e as unknown as Record<string,unknown>)["reconciled"] ? "Markeer als onverwerkt" : "Markeer als verwerkt"}
+                        title={(e as unknown as Record<string,unknown>)["reconciled"] ? "Mark as unreconciled" : "Mark as reconciled"}
                         className="p-1 rounded hover:bg-muted transition-colors"
                       >
                         <CheckCircle2 className={`h-4 w-4 ${(e as unknown as Record<string,unknown>)["reconciled"] ? "text-success" : "text-muted-foreground/30"}`} />
@@ -332,10 +334,10 @@ export default function Bankrekening() {
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-1">
-                        <Button variant="ghost" size="icon" onClick={() => openEdit(e)} title="Bewerken">
+                        <Button variant="ghost" size="icon" onClick={() => openEdit(e)} title="Edit">
                           <Pencil className="h-4 w-4" />
                         </Button>
-                        <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => setDeleteTarget(e)} title="Verwijderen">
+                        <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => setDeleteTarget(e)} title="Delete">
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>
@@ -352,7 +354,7 @@ export default function Bankrekening() {
       <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) resetForm(); }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>{editEntry ? "Transactie bewerken" : "Nieuwe transactie"}</DialogTitle>
+            <DialogTitle>{editEntry ? "Edit transaction" : "New transaction"}</DialogTitle>
           </DialogHeader>
           <div className="grid gap-4 py-2">
 
@@ -374,14 +376,14 @@ export default function Bankrekening() {
             </div>
 
             <div className="grid gap-2">
-              <Label>Datum *</Label>
+              <Label>Date *</Label>
               <Input type="date" value={form.date} onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))} />
             </div>
 
             <div className="grid gap-2">
-              <Label>Omschrijving *</Label>
+              <Label>Description *</Label>
               <Input
-                placeholder={form.type === "prive_storting" ? "Bijv. Privéstorting rekening zakelijk" : form.type === "prive_onttrekking" ? "Bijv. Privéonttrekking voor levensonderhoud" : "Omschrijving"}
+                placeholder={form.type === "prive_storting" ? "e.g. Private deposit to business account" : form.type === "prive_onttrekking" ? "e.g. Private withdrawal for living expenses" : "Description"}
                 value={form.description}
                 onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
               />
@@ -389,9 +391,9 @@ export default function Bankrekening() {
 
             <div className="grid gap-2">
               <Label>
-                Bedrag (€) *
+                Amount ({cs}) *
                 <span className="ml-2 text-xs text-muted-foreground font-normal">
-                  {isPositiveType(form.type) ? "— wordt bijgeschreven" : "— wordt afgeschreven"}
+                  {isPositiveType(form.type) ? "— credited" : "— debited"}
                 </span>
               </Label>
               <Input
@@ -405,12 +407,12 @@ export default function Bankrekening() {
             </div>
 
             <div className="grid gap-2">
-              <Label>Notities</Label>
+              <Label>Notes</Label>
               <Textarea rows={2} value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} />
             </div>
 
             <Button onClick={handleSave} disabled={saving || !canSave}>
-              {saving ? "Bezig…" : editEntry ? "Opslaan" : "Toevoegen"}
+              {saving ? "Saving…" : editEntry ? "Save" : "Add"}
             </Button>
           </div>
         </DialogContent>
@@ -420,16 +422,16 @@ export default function Bankrekening() {
       <AlertDialog open={!!deleteTarget} onOpenChange={(v) => { if (!v) setDeleteTarget(null); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Transactie verwijderen?</AlertDialogTitle>
+            <AlertDialogTitle>Delete transaction?</AlertDialogTitle>
             <AlertDialogDescription>
-              <span className="font-medium text-foreground">{deleteTarget?.description}</span> wordt permanent verwijderd.
-              Dit heeft invloed op het saldo.
+              <span className="font-medium text-foreground">{deleteTarget?.description}</span> will be permanently deleted.
+              This will affect the balance.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting}>Annuleren</AlertDialogCancel>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
             <Button variant="destructive" onClick={handleDelete} disabled={deleting}>
-              {deleting ? "Bezig…" : "Verwijderen"}
+              {deleting ? "Deleting…" : "Delete"}
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>

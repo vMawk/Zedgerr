@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTaxSettings } from "@/lib/tax";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "../lib/api";
 import { Card, CardContent } from "../components/ui/card";
@@ -10,9 +11,6 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "../components/ui/table";
 
-function fmt(cents: number) {
-  return new Intl.NumberFormat("nl-NL", { style: "currency", currency: "EUR" }).format(cents / 100);
-}
 
 const currentYear = new Date().getFullYear();
 const years = Array.from({ length: 5 }, (_, i) => currentYear - i);
@@ -50,6 +48,8 @@ interface VatReport {
 }
 
 export default function FinancieelRapport() {
+  const { taxName, currency } = useTaxSettings();
+  const fmt = (cents: number) => new Intl.NumberFormat(undefined, { style: "currency", currency }).format(cents / 100);
   const [tab, setTab] = useState("pnl");
   const [year, setYear] = useState(String(currentYear));
   const [quarter, setQuarter] = useState("all");
@@ -83,7 +83,7 @@ export default function FinancieelRapport() {
   const Filters = () => (
     <div className="flex flex-wrap gap-4 mb-4">
       <div className="grid gap-1.5">
-        <Label className="text-xs">Jaar</Label>
+        <Label className="text-xs">Year</Label>
         <Select value={year} onValueChange={setYear}>
           <SelectTrigger className="w-28"><SelectValue /></SelectTrigger>
           <SelectContent>
@@ -92,11 +92,11 @@ export default function FinancieelRapport() {
         </Select>
       </div>
       <div className="grid gap-1.5">
-        <Label className="text-xs">Kwartaal</Label>
+        <Label className="text-xs">Quarter</Label>
         <Select value={quarter} onValueChange={setQuarter}>
           <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">Heel jaar</SelectItem>
+            <SelectItem value="all">Full year</SelectItem>
             {quarters.map((q) => <SelectItem key={q} value={String(q)}>Q{q}</SelectItem>)}
           </SelectContent>
         </Select>
@@ -106,16 +106,16 @@ export default function FinancieelRapport() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-semibold">Financieel rapport</h1>
+      <h1 className="text-xl font-semibold">Financial report</h1>
 
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
-          <TabsTrigger value="pnl">Winst & verlies</TabsTrigger>
-          <TabsTrigger value="balance">Balans</TabsTrigger>
-          <TabsTrigger value="vat">BTW-aangifte</TabsTrigger>
+          <TabsTrigger value="pnl">Profit & loss</TabsTrigger>
+          <TabsTrigger value="balance">Balance sheet</TabsTrigger>
+          <TabsTrigger value="vat">{taxName} summary</TabsTrigger>
         </TabsList>
 
-        {/* ── P&L ───────────────────────────────────────────────────────── */}
+        {/* Profit and loss */}
         <TabsContent value="pnl" className="mt-4 space-y-4">
           <Filters />
           {pnl && (
@@ -123,19 +123,19 @@ export default function FinancieelRapport() {
               <div className="grid gap-4 sm:grid-cols-3">
                 <Card>
                   <CardContent className="pt-5 pb-5">
-                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Omzet</p>
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Revenue</p>
                     <p className="text-3xl font-bold tabular-nums text-success">{fmt(pnl.revenue.total_cents)}</p>
                   </CardContent>
                 </Card>
                 <Card>
                   <CardContent className="pt-5 pb-5">
-                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Kosten</p>
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Expenses</p>
                     <p className="text-3xl font-bold tabular-nums text-destructive">{fmt(pnl.expenses.total_cents)}</p>
                   </CardContent>
                 </Card>
                 <Card>
                   <CardContent className="pt-5 pb-5">
-                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Nettoresultaat</p>
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Net result</p>
                     <p className={`text-3xl font-bold tabular-nums ${pnl.net_profit_cents >= 0 ? "text-success" : "text-destructive"}`}>
                       {fmt(pnl.net_profit_cents)}
                     </p>
@@ -145,7 +145,7 @@ export default function FinancieelRapport() {
 
               {pnl.fallback && (
                 <p className="text-xs text-muted-foreground bg-muted/30 rounded-md px-3 py-2">
-                  Gebaseerd op facturen en uitgaven — boek journaalposten voor een volledig dubbel rapport.
+                  Based on invoices and expenses — post journal entries for a full double-entry report.
                 </p>
               )}
 
@@ -153,7 +153,7 @@ export default function FinancieelRapport() {
                 <Card>
                   <CardContent className="p-0">
                     <div className="px-4 py-2 bg-success/10 border-b">
-                      <span className="text-xs font-semibold uppercase tracking-wider text-success">Opbrengsten</span>
+                      <span className="text-xs font-semibold uppercase tracking-wider text-success">Revenue</span>
                     </div>
                     <Table>
                       <TableBody>
@@ -165,14 +165,14 @@ export default function FinancieelRapport() {
                           </TableRow>
                         ))}
                         <TableRow className="border-t-2 font-semibold bg-muted/10">
-                          <TableCell colSpan={2}>Totaal opbrengsten</TableCell>
+                          <TableCell colSpan={2}>Total revenue</TableCell>
                           <TableCell className="text-right font-mono tabular-nums text-success">{fmt(pnl.revenue.total_cents)}</TableCell>
                         </TableRow>
                       </TableBody>
                     </Table>
 
                     <div className="px-4 py-2 bg-destructive/10 border-b border-t">
-                      <span className="text-xs font-semibold uppercase tracking-wider text-destructive">Kosten</span>
+                      <span className="text-xs font-semibold uppercase tracking-wider text-destructive">Expenses</span>
                     </div>
                     <Table>
                       <TableBody>
@@ -184,14 +184,14 @@ export default function FinancieelRapport() {
                           </TableRow>
                         ))}
                         <TableRow className="border-t-2 font-semibold bg-muted/10">
-                          <TableCell colSpan={2}>Totaal kosten</TableCell>
+                          <TableCell colSpan={2}>Total expenses</TableCell>
                           <TableCell className="text-right font-mono tabular-nums text-destructive">{fmt(pnl.expenses.total_cents)}</TableCell>
                         </TableRow>
                       </TableBody>
                     </Table>
 
                     <div className="border-t px-4 py-3 flex justify-between items-center font-bold">
-                      <span>Nettoresultaat</span>
+                      <span>Net result</span>
                       <span className={`font-mono tabular-nums text-lg ${pnl.net_profit_cents >= 0 ? "text-success" : "text-destructive"}`}>
                         {fmt(pnl.net_profit_cents)}
                       </span>
@@ -203,7 +203,7 @@ export default function FinancieelRapport() {
           )}
         </TabsContent>
 
-        {/* ── Balans ────────────────────────────────────────────────────── */}
+        {/* Balance sheet */}
         <TabsContent value="balance" className="mt-4 space-y-4">
           <Filters />
           {balance && (
@@ -211,7 +211,7 @@ export default function FinancieelRapport() {
               <div className="flex items-center gap-2 mb-2">
                 <span className="text-sm text-muted-foreground">Per {balance.as_of}</span>
                 <Badge variant={balance.balanced ? "default" : "destructive"}>
-                  {balance.balanced ? "In balans" : "Niet in balans"}
+                  {balance.balanced ? "Balanced" : "Not balanced"}
                 </Badge>
               </div>
 
@@ -220,7 +220,7 @@ export default function FinancieelRapport() {
                 <Card>
                   <CardContent className="p-0">
                     <div className="px-4 py-2 bg-muted/40 border-b">
-                      <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Activa</span>
+                      <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Assets</span>
                     </div>
                     <Table>
                       <TableBody>
@@ -232,7 +232,7 @@ export default function FinancieelRapport() {
                           </TableRow>
                         ))}
                         <TableRow className="border-t-2 font-semibold bg-muted/10">
-                          <TableCell colSpan={2}>Totaal activa</TableCell>
+                          <TableCell colSpan={2}>Total assets</TableCell>
                           <TableCell className="text-right font-mono tabular-nums">{fmt(balance.assets.total_cents)}</TableCell>
                         </TableRow>
                       </TableBody>
@@ -244,7 +244,7 @@ export default function FinancieelRapport() {
                 <Card>
                   <CardContent className="p-0">
                     <div className="px-4 py-2 bg-muted/40 border-b">
-                      <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Passiva</span>
+                      <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Liabilities</span>
                     </div>
                     <Table>
                       <TableBody>
@@ -256,14 +256,14 @@ export default function FinancieelRapport() {
                           </TableRow>
                         ))}
                         <TableRow className="border-t font-semibold bg-muted/5">
-                          <TableCell colSpan={2}>Subtotaal schulden</TableCell>
+                          <TableCell colSpan={2}>Subtotal liabilities</TableCell>
                           <TableCell className="text-right font-mono tabular-nums">{fmt(balance.liabilities.total_cents)}</TableCell>
                         </TableRow>
                       </TableBody>
                     </Table>
 
                     <div className="px-4 py-2 bg-muted/40 border-y">
-                      <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Eigen vermogen</span>
+                      <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Equity</span>
                     </div>
                     <Table>
                       <TableBody>
@@ -275,7 +275,7 @@ export default function FinancieelRapport() {
                           </TableRow>
                         ))}
                         <TableRow className="border-t-2 font-semibold bg-muted/10">
-                          <TableCell colSpan={2}>Totaal passiva + EV</TableCell>
+                          <TableCell colSpan={2}>Total liabilities + equity</TableCell>
                           <TableCell className="text-right font-mono tabular-nums">
                             {fmt(balance.liabilities.total_cents + balance.equity.total_cents)}
                           </TableCell>
@@ -289,7 +289,7 @@ export default function FinancieelRapport() {
           )}
         </TabsContent>
 
-        {/* ── BTW ───────────────────────────────────────────────────────── */}
+        {/* Tax */}
         <TabsContent value="vat" className="mt-4 space-y-4">
           <Filters />
           {vat && (
@@ -297,26 +297,26 @@ export default function FinancieelRapport() {
               <div className="grid gap-4 sm:grid-cols-3">
                 <Card>
                   <CardContent className="pt-5 pb-5">
-                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">BTW ontvangen</p>
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">{taxName} charged</p>
                     <p className="text-3xl font-bold tabular-nums text-success">{fmt(vat.vat_charged_cents)}</p>
-                    <p className="text-xs text-muted-foreground mt-1">op uitgaande facturen</p>
+                    <p className="text-xs text-muted-foreground mt-1">on outgoing invoices</p>
                   </CardContent>
                 </Card>
                 <Card>
                   <CardContent className="pt-5 pb-5">
-                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">BTW voorbelasting</p>
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">{taxName} paid</p>
                     <p className="text-3xl font-bold tabular-nums">{fmt(vat.vat_recovery_cents)}</p>
-                    <p className="text-xs text-muted-foreground mt-1">op inkomende kosten</p>
+                    <p className="text-xs text-muted-foreground mt-1">on incoming costs</p>
                   </CardContent>
                 </Card>
                 <Card>
                   <CardContent className="pt-5 pb-5">
-                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Te betalen BTW</p>
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">{taxName} payable</p>
                     <p className={`text-3xl font-bold tabular-nums ${vat.vat_payable_cents > 0 ? "text-destructive" : "text-success"}`}>
                       {fmt(vat.vat_payable_cents)}
                     </p>
                     <p className="text-xs text-muted-foreground mt-1">
-                      {vat.period.quarter ? `Q${vat.period.quarter} ${vat.period.year}` : `Heel ${vat.period.year}`}
+                      {vat.period.quarter ? `Q${vat.period.quarter} ${vat.period.year}` : `Full ${vat.period.year}`}
                     </p>
                   </CardContent>
                 </Card>
@@ -326,14 +326,14 @@ export default function FinancieelRapport() {
                 <Card>
                   <CardContent className="p-0">
                     <div className="px-4 py-2 bg-muted/40 border-b">
-                      <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Uitgaande BTW (facturen)</span>
+                      <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Output {taxName} (invoices)</span>
                     </div>
                     <Table>
                       <TableHeader>
                         <TableRow>
-                          <TableHead>Tarief</TableHead>
-                          <TableHead className="text-right">Netto</TableHead>
-                          <TableHead className="text-right">BTW</TableHead>
+                          <TableHead>Rate</TableHead>
+                          <TableHead className="text-right">Net</TableHead>
+                          <TableHead className="text-right">{taxName}</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -345,7 +345,7 @@ export default function FinancieelRapport() {
                           </TableRow>
                         ))}
                         {!vat.invoice_lines.length && (
-                          <TableRow><TableCell colSpan={3} className="text-center text-sm text-muted-foreground py-4">Geen data</TableCell></TableRow>
+                          <TableRow><TableCell colSpan={3} className="text-center text-sm text-muted-foreground py-4">No data</TableCell></TableRow>
                         )}
                       </TableBody>
                     </Table>
@@ -355,14 +355,14 @@ export default function FinancieelRapport() {
                 <Card>
                   <CardContent className="p-0">
                     <div className="px-4 py-2 bg-muted/40 border-b">
-                      <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Inkomende BTW (uitgaven)</span>
+                      <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Input {taxName} (expenses)</span>
                     </div>
                     <Table>
                       <TableHeader>
                         <TableRow>
-                          <TableHead>Tarief</TableHead>
-                          <TableHead className="text-right">Netto</TableHead>
-                          <TableHead className="text-right">BTW</TableHead>
+                          <TableHead>Rate</TableHead>
+                          <TableHead className="text-right">Net</TableHead>
+                          <TableHead className="text-right">Tax</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -374,7 +374,7 @@ export default function FinancieelRapport() {
                           </TableRow>
                         ))}
                         {!vat.expense_lines.length && (
-                          <TableRow><TableCell colSpan={3} className="text-center text-sm text-muted-foreground py-4">Geen data</TableCell></TableRow>
+                          <TableRow><TableCell colSpan={3} className="text-center text-sm text-muted-foreground py-4">No data</TableCell></TableRow>
                         )}
                       </TableBody>
                     </Table>
