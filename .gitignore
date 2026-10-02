@@ -10,23 +10,23 @@ lerna-debug.log*
 node_modules
 dist
 dist-server
-
-# Video reference file (large, not source code)
-*.mp4
-
-# Gebruik package-lock.json voor CI (Cloudflare Pages); oude bun.lockb veroorzaakt frozen-lock failures.
-bun.lockb
-
-# Wrangler local D1 / cache
-.wrangler
-
-# Database-dumps (bevatten echte klantdata — nooit committen)
-.db-dumps/
-
-# Lokale SQLite (Express API)
-data/
 dist-ssr
 *.local
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Local SQLite database, uploads and database dumps (contain real customer data)
+data/
+.db-dumps/
+
+# Large media
+*.mp4
+
+# package-lock.json is the lockfile of record
+bun.lockb
 
 # Editor directories and files
 .vscode/*

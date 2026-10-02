@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, readdirSync, statSync } from "fs";
-import { join, dirname } from "path";
+import { join, dirname, resolve, sep } from "path";
 
 interface R2PutOptions {
   httpMetadata?: { contentType?: string };
@@ -29,12 +29,19 @@ interface R2Objects {
   cursor?: string;
 }
 
+function safePath(base: string, key: string): string {
+  const root = resolve(base);
+  const full = resolve(root, key);
+  if (full !== root && !full.startsWith(root + sep)) throw new Error("Invalid storage key");
+  return full;
+}
+
 function metaPath(key: string, base: string): string {
-  return join(base, key + ".meta.json");
+  return safePath(base, key + ".meta.json");
 }
 
 function filePath(key: string, base: string): string {
-  return join(base, key);
+  return safePath(base, key);
 }
 
 export class NodeR2Bucket {
@@ -42,7 +49,7 @@ export class NodeR2Bucket {
     mkdirSync(base, { recursive: true });
   }
 
-  async put(key: string, value: ReadableStream | ArrayBuffer | string | null, opts: R2PutOptions = {}): Promise<void> {
+  async put(key: string, value: ReadableStream | ArrayBuffer | string | Blob | null, opts: R2PutOptions = {}): Promise<void> {
     const fp = filePath(key, this.base);
     mkdirSync(dirname(fp), { recursive: true });
 
@@ -56,6 +63,8 @@ export class NodeR2Bucket {
         chunks.push(chunk);
       }
       buf = Buffer.concat(chunks);
+    } else if (value instanceof Blob) {
+      buf = Buffer.from(await value.arrayBuffer());
     } else if (value instanceof ArrayBuffer) {
       buf = Buffer.from(value);
     } else if (typeof value === "string") {

@@ -1,44 +1,33 @@
-FROM node:20-slim AS frontend
+FROM node:22-slim AS build
 WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ && rm -rf /var/lib/apt/lists/*
 COPY package*.json ./
 RUN npm ci
 COPY . .
-RUN npm run build
+RUN npm run build && npm run build:server
 
-FROM node:20-slim AS server-build
+FROM node:22-slim AS deps
 WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ && rm -rf /var/lib/apt/lists/*
 COPY package*.json ./
-RUN npm ci
-COPY tsconfig*.json ./
-COPY api/ ./api/
-COPY server/ ./server/
-RUN npx tsc -p tsconfig.server.json --noEmit false
+RUN npm ci --omit=dev
 
-# ── Stage 3: production runtime ───────────────────────────────────────────────
-FROM node:20-slim
+FROM node:22-slim
 WORKDIR /app
+ENV NODE_ENV=production PORT=3000 DATA_DIR=/app/data
 
-# Native deps (better-sqlite3 needs them)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 make g++ \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY package*.json ./
-RUN npm ci --ignore-scripts=false
-
-# Rebuild native modules for this architecture
-RUN npm rebuild better-sqlite3
-
-COPY --from=frontend /app/dist ./dist
-COPY --from=server-build /app/dist-server ./dist-server
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=build /app/dist ./dist
+COPY --from=build /app/dist-server ./dist-server
+COPY package.json ./
 COPY migrations/ ./migrations/
 
-# Data volume: SQLite DB + uploaded files
+RUN mkdir -p /app/data && chown -R node:node /app/data
+USER node
 VOLUME ["/app/data"]
-
-ENV PORT=3000
-ENV NODE_ENV=production
-
 EXPOSE 3000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD node -e "fetch('http://localhost:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
 CMD ["node", "dist-server/server/index.js"]

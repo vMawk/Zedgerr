@@ -1,16 +1,20 @@
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
+import { getConnInfo } from "@hono/node-server/conninfo";
 import { Hono } from "hono";
 import Database from "better-sqlite3";
-import { existsSync, mkdirSync } from "fs";
+import { randomBytes } from "crypto";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join, resolve } from "path";
 
 import { NodeD1Database } from "./adapters/d1.js";
 import { NodeR2Bucket } from "./adapters/r2.js";
 import { NodeAiAdapter } from "./adapters/ai.js";
 import { runMigrations } from "./migrations.js";
+import type { AppEnv } from "../api/types.js";
 
 const ROOT = process.cwd();
+const IS_PRODUCTION = process.env.NODE_ENV === "production";
 
 const DATA_DIR = resolve(process.env.DATA_DIR ?? join(ROOT, "data"));
 const DB_PATH = resolve(process.env.DB_PATH ?? join(DATA_DIR, "app.db"));
@@ -18,8 +22,25 @@ const FILES_DIR = resolve(process.env.FILES_DIR ?? join(DATA_DIR, "files"));
 const MIGRATIONS_DIR = resolve(process.env.MIGRATIONS_DIR ?? join(ROOT, "migrations"));
 const DIST_DIR = resolve(process.env.DIST_DIR ?? join(ROOT, "dist"));
 const PORT = parseInt(process.env.PORT ?? "3000", 10);
+const TRUST_PROXY = process.env.TRUST_PROXY === "true";
+
+function resolveJwtSecret(): string {
+  const secret = process.env.JWT_SECRET;
+  if (secret && secret.length >= 32) return secret;
+  if (IS_PRODUCTION) {
+    console.error("JWT_SECRET must be set to a random string of at least 32 characters. Generate one with: openssl rand -hex 32");
+    process.exit(1);
+  }
+  const devSecretPath = join(DATA_DIR, ".dev-jwt-secret");
+  if (existsSync(devSecretPath)) return readFileSync(devSecretPath, "utf-8").trim();
+  const generated = randomBytes(32).toString("hex");
+  writeFileSync(devSecretPath, generated, { mode: 0o600 });
+  console.warn(`JWT_SECRET is not set; using a development secret stored in ${devSecretPath}.`);
+  return generated;
+}
 
 mkdirSync(DATA_DIR, { recursive: true });
+const JWT_SECRET = resolveJwtSecret();
 const sqlite = new Database(DB_PATH);
 sqlite.pragma("journal_mode = WAL");
 sqlite.pragma("foreign_keys = ON");
@@ -28,42 +49,77 @@ console.log("Running migrations…");
 runMigrations(sqlite, MIGRATIONS_DIR);
 console.log("Migrations done.");
 
-const dbAdapter = new NodeD1Database(sqlite);
-const r2Adapter = new NodeR2Bucket(FILES_DIR);
-const aiAdapter = new NodeAiAdapter();
-
-const env = {
-  DB: dbAdapter,
-  FILES: r2Adapter,
-  AI: aiAdapter,
-  JWT_SECRET: process.env.JWT_SECRET ?? "change-me-in-production",
+const baseEnv: AppEnv = {
+  DB: new NodeD1Database(sqlite),
+  FILES: new NodeR2Bucket(FILES_DIR),
+  AI: new NodeAiAdapter(),
+  JWT_SECRET,
   ALLOW_REGISTRATION: process.env.ALLOW_REGISTRATION,
+  CORS_ORIGIN: process.env.CORS_ORIGIN,
   TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
   TELEGRAM_CHAT_ID: process.env.TELEGRAM_CHAT_ID,
 };
 
-const { api } = await import("../api/index.js") as { api: { fetch: typeof fetch } };
+const { api } = (await import("../api/index.js")) as {
+  api: { fetch(req: Request, env: AppEnv, ctx: unknown): Response | Promise<Response> };
+};
 
 const app = new Hono();
 
-app.all("/api/*", (c) => {
-  return (api as unknown as { fetch(req: Request, env: unknown, ctx: unknown): Promise<Response> })
-    .fetch(c.req.raw, env, { waitUntil: () => {}, passThroughOnException: () => {} });
+app.get("/healthz", (c) => {
+  try {
+    sqlite.prepare("SELECT 1").get();
+    return c.json({ status: "ok" });
+  } catch {
+    return c.json({ status: "error" }, 503);
+  }
 });
 
-if (existsSync(DIST_DIR)) {
-  app.use("/assets/*", serveStatic({ root: DIST_DIR }));
-  app.use("/favicon.ico", serveStatic({ root: DIST_DIR }));
+app.all("/api/*", (c) => {
+  const forwarded = TRUST_PROXY ? c.req.header("x-forwarded-for")?.split(",")[0]?.trim() : undefined;
+  let clientIp = forwarded;
+  if (!clientIp) {
+    try {
+      clientIp = getConnInfo(c).remote.address;
+    } catch {
+      clientIp = undefined;
+    }
+  }
+  return api.fetch(c.req.raw, { ...baseEnv, CLIENT_IP: clientIp }, { waitUntil: () => {}, passThroughOnException: () => {} });
+});
+
+const indexPath = join(DIST_DIR, "index.html");
+const indexHtml = existsSync(indexPath) ? readFileSync(indexPath, "utf-8") : null;
+
+if (indexHtml) {
+  app.use(
+    "/assets/*",
+    serveStatic({
+      root: DIST_DIR,
+      onFound: (_path, c) => c.header("Cache-Control", "public, max-age=31536000, immutable"),
+    }),
+  );
+  app.use("*", serveStatic({ root: DIST_DIR }));
 }
 
-app.use("*", async (c) => {
-  const indexPath = join(DIST_DIR, "index.html");
-  if (!existsSync(indexPath)) {
-    return c.text("Frontend not built. Run: npm run build", 404);
-  }
-  const { readFileSync } = await import("fs");
-  return c.html(readFileSync(indexPath, "utf-8"));
+app.get("*", (c) => {
+  if (!indexHtml) return c.text("Frontend not built. Run: npm run build", 404);
+  c.header("Cache-Control", "no-cache");
+  return c.html(indexHtml);
 });
 
-console.log(`Zedgerr running on http://localhost:${PORT}`);
-serve({ fetch: app.fetch, port: PORT });
+const server = serve({ fetch: app.fetch, port: PORT }, () => {
+  console.log(`Zedgerr running on http://localhost:${PORT}`);
+});
+
+function shutdown(signal: string) {
+  console.log(`${signal} received, shutting down…`);
+  server.close(() => {
+    sqlite.close();
+    process.exit(0);
+  });
+  setTimeout(() => process.exit(1), 10_000).unref();
+}
+
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));

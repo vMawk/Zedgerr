@@ -10,6 +10,7 @@
     "dev:vite": "vite",
     "build": "vite build",
     "build:server": "tsc -p tsconfig.server.json",
+    "reset-password": "tsx server/reset-password.ts",
     "start": "npm run build && npm run build:server && node dist-server/server/index.js",
     "docker:build": "docker compose build",
     "docker:up": "docker compose up",
@@ -55,6 +56,7 @@
     "cmdk": "^1.1.1",
     "date-fns": "^3.6.0",
     "embla-carousel-react": "^8.6.0",
+    "framer-motion": "^14.0.0",
     "hono": "^4.7.4",
     "input-otp": "^1.4.2",
     "jose": "^5.10.0",
@@ -62,6 +64,7 @@
     "jspdf-autotable": "^5.0.7",
     "lucide-react": "^0.462.0",
     "next-themes": "^0.3.0",
+    "qrcode.react": "^4.2.0",
     "react": "^18.3.1",
     "react-day-picker": "^8.10.1",
     "react-dom": "^18.3.1",
@@ -92,13 +95,12 @@
     "eslint-plugin-react-refresh": "^0.4.20",
     "globals": "^15.15.0",
     "jsdom": "^20.0.3",
-    "lovable-tagger": "^1.1.13",
     "postcss": "^8.5.6",
     "tailwindcss": "^3.4.17",
+    "tsx": "^4.19.0",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.38.0",
     "vite": "^5.4.19",
-    "tsx": "^4.19.0",
     "vitest": "^3.2.4"
   }
 }
