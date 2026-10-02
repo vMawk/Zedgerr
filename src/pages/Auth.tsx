@@ -82,15 +82,7 @@ export default function Auth() {
 
   return (
     <div className="min-h-screen grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] bg-background">
-      <aside className="relative hidden lg:flex flex-col justify-between overflow-hidden bg-[#004030] p-12 text-white">
-        <div
-          aria-hidden
-          className="pointer-events-none absolute -right-32 -top-32 h-[28rem] w-[28rem] rounded-full bg-[#39FF14]/20 blur-3xl"
-        />
-        <div
-          aria-hidden
-          className="pointer-events-none absolute -bottom-40 -left-24 h-[24rem] w-[24rem] rounded-full bg-[#39FF14]/10 blur-3xl"
-        />
+      <aside className="hidden lg:flex flex-col justify-between overflow-hidden bg-[#004030] p-12 text-white">
         <div className="relative flex items-center gap-3">
           <ZedgerrIcon className="h-9 w-9" />
           <span className="text-2xl font-extrabold tracking-tight">Zedgerr</span>
