@@ -87,10 +87,8 @@ Your country isn't listed? Choose **Other country** and set your own tax name an
 ### Docker Compose (recommended)
 
 ```bash
-git clone https://github.com/vMawk/client-flow.git
-cd client-flow
-cp .env.example .env
-echo "JWT_SECRET=$(openssl rand -hex 32)" >> .env
+git clone https://github.com/vMawk/zedgerr.git
+cd zedgerr
 docker compose up -d
 ```
 
