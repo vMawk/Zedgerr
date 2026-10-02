@@ -1,4 +1,3 @@
-# ── Stage 1: build frontend ──────────────────────────────────────────────────
 FROM node:20-slim AS frontend
 WORKDIR /app
 COPY package*.json ./
@@ -6,14 +5,12 @@ RUN npm ci
 COPY . .
 RUN npm run build
 
-# ── Stage 2: compile server TypeScript ───────────────────────────────────────
 FROM node:20-slim AS server-build
 WORKDIR /app
 COPY package*.json ./
-# Install all deps (including devDeps for tsc)
 RUN npm ci
 COPY tsconfig*.json ./
-COPY worker/ ./worker/
+COPY api/ ./api/
 COPY server/ ./server/
 RUN npx tsc -p tsconfig.server.json --noEmit false
 
@@ -44,4 +41,4 @@ ENV NODE_ENV=production
 
 EXPOSE 3000
 
-CMD ["node", "--experimental-vm-modules", "dist-server/server/index.js"]
+CMD ["node", "dist-server/server/index.js"]

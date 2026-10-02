@@ -10,10 +10,10 @@ function invoiceAdvancePdfLabels(invoice: Invoice): { received: string; after: s
   return { received: "Reeds verrekend krediet:", after: "Te ontvangen na krediet:" };
 }
 
-/** Gibby.it wordmark — same asset as in the app (`public/gibby-logo.png`). */
+/** Zedgerr wordmark — same asset as in the app (`public/zedgerr-logo.png`). */
 async function loadInvoiceLogo(): Promise<{ dataUrl: string; wMm: number; hMm: number } | null> {
   try {
-    const res = await fetch("/gibby-logo.png");
+    const res = await fetch("/zedgerr-logo.png");
     if (!res.ok) return null;
     const blob = await res.blob();
     const dataUrl = await new Promise<string>((resolve, reject) => {

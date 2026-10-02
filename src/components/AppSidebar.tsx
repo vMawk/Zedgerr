@@ -1,4 +1,4 @@
-import { LayoutDashboard, Building2, Clock, FileText, FileCheck, BarChart3, Settings, LogOut, MonitorSmartphone, NotebookPen, RepeatIcon, Users, Package, Receipt, Calculator, Car, Landmark } from "lucide-react";
+import { LayoutDashboard, Building2, Clock, FileText, FileCheck, BarChart3, Settings, LogOut, MonitorSmartphone, NotebookPen, RepeatIcon, Users, Package, Receipt, Calculator, Car, Landmark, BookOpen, PieChart } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
@@ -17,27 +17,29 @@ import {
 
 const mainItems = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard },
-  { title: "Bedrijven", url: "/bedrijven", icon: Building2 },
-  { title: "Uren", url: "/uren", icon: Clock },
-  { title: "Facturen", url: "/facturen", icon: FileText },
-  { title: "Offertes", url: "/offertes", icon: FileCheck },
-  { title: "Overzichten", url: "/overzichten", icon: BarChart3 },
-  { title: "Notities", url: "/notities", icon: NotebookPen },
-  { title: "Abonnementen", url: "/abonnementen", icon: RepeatIcon },
+  { title: "Companies", url: "/companies", icon: Building2 },
+  { title: "Time", url: "/time", icon: Clock },
+  { title: "Invoices", url: "/invoices", icon: FileText },
+  { title: "Quotes", url: "/quotes", icon: FileCheck },
+  { title: "Reports", url: "/reports", icon: BarChart3 },
+  { title: "Notes", url: "/notes", icon: NotebookPen },
+  { title: "Subscriptions", url: "/subscriptions", icon: RepeatIcon },
   { title: "Leads", url: "/leads", icon: Users },
-  { title: "Producten", url: "/producten", icon: Package },
-  { title: "Uitgaven", url: "/uitgaven", icon: Receipt },
-  { title: "Kilometers", url: "/kilometers", icon: Car },
-  { title: "Bankrekening", url: "/bankrekening", icon: Landmark },
-  { title: "Belasting", url: "/belasting", icon: Calculator },
+  { title: "Products", url: "/products", icon: Package },
+  { title: "Expenses", url: "/expenses", icon: Receipt },
+  { title: "Mileage", url: "/mileage", icon: Car },
+  { title: "Bank", url: "/bank", icon: Landmark },
+  { title: "Accounting", url: "/accounting", icon: BookOpen },
+  { title: "Financial Reports", url: "/financial", icon: PieChart },
+  { title: "Tax", url: "/tax", icon: Calculator },
 ];
 
 const settingsItems = [
-  { title: "Instellingen", url: "/instellingen", icon: Settings },
-  { title: "Klantenportaal", url: "/klantenportaal", icon: MonitorSmartphone },
+  { title: "Settings", url: "/settings", icon: Settings },
+  { title: "Client Portal", url: "/portal", icon: MonitorSmartphone },
 ];
 
-const LOGO_SRC = "/gibby-logo.png";
+const LOGO_SRC = "/zedgerr-logo.png";
 
 export function AppSidebar() {
   const { state } = useSidebar();
@@ -52,7 +54,7 @@ export function AppSidebar() {
             <div className={cn("flex items-center", collapsed ? "justify-center" : "justify-start")}>
               <img
                 src={LOGO_SRC}
-                alt="gibby.it"
+                alt="Zedgerr"
                 className={cn(
                   "h-auto w-auto max-w-full object-contain object-left",
                   collapsed ? "h-7 max-w-[1.75rem]" : "h-9",
@@ -99,7 +101,7 @@ export function AppSidebar() {
           <SidebarMenuItem>
             <SidebarMenuButton onClick={signOut} className="hover:bg-destructive/10 hover:text-destructive">
               <LogOut className="mr-2 h-4 w-4" />
-              {!collapsed && <span>Uitloggen</span>}
+              {!collapsed && <span>Sign out</span>}
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>

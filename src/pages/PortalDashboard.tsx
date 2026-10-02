@@ -264,7 +264,7 @@ export default function PortalDashboard() {
       <header className="border-b bg-card">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-4">
           <div className="flex items-center gap-3">
-            <img src="/gibby-logo.png" alt="" className="h-8 w-auto" />
+            <img src="/zedgerr-logo.png" alt="Zedgerr" className="h-8 w-auto" />
             <div>
               <p className="font-semibold">Klantenportaal</p>
               <p className="text-sm text-muted-foreground">{company?.name}</p>

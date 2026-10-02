@@ -18,10 +18,6 @@ import type {
   TimeEntry,
 } from "@/lib/db-types";
 
-/**
- * Worker-API (D1 + auth). Leeg = zelfde origin (`npm run dev` → Vite proxy naar Wrangler).
- * Cloudflare Pages: zet `VITE_API_ORIGIN=https://api.gibby.it` (Worker-route staat in wrangler.toml).
- */
 export function apiOrigin(): string {
   const v = import.meta.env.VITE_API_ORIGIN as string | undefined;
   if (v && typeof v === "string" && v.trim()) return v.trim().replace(/\/$/, "");
@@ -71,6 +67,40 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
     } catch {
       /* plain text */
     }
+    throw new Error(msg);
+  }
+  if (r.status === 204) return undefined as T;
+  const text = await r.text();
+  return (text ? JSON.parse(text) : undefined) as T;
+}
+
+/**
+ * Generic fetch helper for endpoints not covered by the `api` object.
+ * Supports JSON bodies and FormData. Automatically adds Authorization header.
+ */
+export async function apiRequest<T = unknown>(
+  path: string,
+  options: RequestInit = {},
+): Promise<T> {
+  const token = getStoredToken();
+  const isFormData = options.body instanceof FormData;
+  const headers: Record<string, string> = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  if (!isFormData && options.body && typeof options.body === "string") {
+    headers["Content-Type"] = "application/json";
+  }
+  const r = await fetch(apiUrl(path), {
+    ...options,
+    headers: { ...headers, ...(options.headers as Record<string, string> ?? {}) },
+  });
+  if (r.status === 401) {
+    setStoredToken(null);
+    throw new Error("Sessie verlopen. Log opnieuw in.");
+  }
+  if (!r.ok) {
+    const text = await r.text();
+    let msg = text || r.statusText;
+    try { const j = JSON.parse(text) as { error?: string }; if (j?.error) msg = j.error; } catch { /**/ }
     throw new Error(msg);
   }
   if (r.status === 204) return undefined as T;

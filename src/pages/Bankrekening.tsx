@@ -11,8 +11,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Pencil, Trash2, Landmark, TrendingUp, TrendingDown, ArrowDownToLine, ArrowUpFromLine } from "lucide-react";
+import { Plus, Pencil, Trash2, Landmark, TrendingUp, TrendingDown, ArrowDownToLine, ArrowUpFromLine, Upload, CheckCircle2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { apiRequest } from "../lib/api";
 
 type TxType = BankTransactionType;
 
@@ -65,6 +66,7 @@ export default function Bankrekening() {
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<BankTransaction | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [importing, setImporting] = useState(false);
 
   const fetchData = async () => {
     const [txs, bal] = await Promise.all([
@@ -144,6 +146,39 @@ export default function Bankrekening() {
     }
   };
 
+  const handleImportCSV = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImporting(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const result = await apiRequest("/api/bank-transactions/import-csv", {
+        method: "POST",
+        body: formData,
+      });
+      toast({ title: `CSV geïmporteerd: ${result.imported} nieuw, ${result.skipped} overgeslagen` });
+      fetchData();
+    } catch (err: unknown) {
+      toast({ title: "Import mislukt", description: err instanceof Error ? err.message : String(err), variant: "destructive" });
+    } finally {
+      setImporting(false);
+      e.target.value = "";
+    }
+  };
+
+  const handleReconcile = async (txId: string, reconciled: boolean) => {
+    try {
+      await apiRequest(`/api/bank-transactions/${txId}/${reconciled ? "unreconcile" : "reconcile"}`, {
+        method: "POST",
+        body: JSON.stringify({ type: "manual" }),
+      });
+      fetchData();
+    } catch (err: unknown) {
+      toast({ title: "Fout", description: err instanceof Error ? err.message : String(err), variant: "destructive" });
+    }
+  };
+
   const periodeIn = entries.filter((e) => e.amount > 0).reduce((s, e) => s + e.amount, 0);
   const periodeUit = entries.filter((e) => e.amount < 0).reduce((s, e) => s + Math.abs(e.amount), 0);
   const privestortingen = entries.filter((e) => e.type === "prive_storting").reduce((s, e) => s + e.amount, 0);
@@ -156,6 +191,15 @@ export default function Bankrekening() {
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">Bankrekening</h1>
         <div className="flex gap-2">
+          <Label className="cursor-pointer">
+            <Button variant="outline" asChild disabled={importing}>
+              <span>
+                <Upload className="mr-2 h-4 w-4" />
+                {importing ? "Importeren…" : "CSV importeren"}
+              </span>
+            </Button>
+            <input type="file" accept=".csv,.txt" className="sr-only" onChange={handleImportCSV} />
+          </Label>
           <Button variant="outline" onClick={() => openNew("prive_storting")} title="Privéstorting">
             <ArrowDownToLine className="mr-2 h-4 w-4" />
             Privéstorting
@@ -255,6 +299,7 @@ export default function Bankrekening() {
                   <TableHead>Omschrijving</TableHead>
                   <TableHead>Type</TableHead>
                   <TableHead className="text-right">Bedrag</TableHead>
+                  <TableHead className="w-8 text-center hidden sm:table-cell" title="Verwerkt">✓</TableHead>
                   <TableHead className="w-20 text-right">Acties</TableHead>
                 </TableRow>
               </TableHeader>
@@ -275,6 +320,15 @@ export default function Bankrekening() {
                     </TableCell>
                     <TableCell className={`text-right tabular-nums font-semibold text-sm whitespace-nowrap ${e.amount >= 0 ? "text-green-600 dark:text-green-400" : "text-red-500"}`}>
                       {e.amount >= 0 ? "+" : "−"}€{fmtEur(Math.abs(e.amount))}
+                    </TableCell>
+                    <TableCell className="text-center hidden sm:table-cell">
+                      <button
+                        onClick={() => handleReconcile(e.id, !!(e as unknown as Record<string,unknown>)["reconciled"])}
+                        title={(e as unknown as Record<string,unknown>)["reconciled"] ? "Markeer als onverwerkt" : "Markeer als verwerkt"}
+                        className="p-1 rounded hover:bg-muted transition-colors"
+                      >
+                        <CheckCircle2 className={`h-4 w-4 ${(e as unknown as Record<string,unknown>)["reconciled"] ? "text-success" : "text-muted-foreground/30"}`} />
+                      </button>
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-1">

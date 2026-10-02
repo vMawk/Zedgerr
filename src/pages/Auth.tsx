@@ -19,8 +19,8 @@ export default function Auth() {
     try {
       await signIn(email, password);
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : "Inloggen mislukt";
-      toast({ title: "Fout", description: message, variant: "destructive" });
+      const message = error instanceof Error ? error.message : "Sign in failed";
+      toast({ title: "Error", description: message, variant: "destructive" });
     } finally {
       setLoading(false);
     }
@@ -31,23 +31,23 @@ export default function Auth() {
       <Card className="w-full max-w-md">
         <CardHeader className="text-center space-y-2">
           <div className="mx-auto mb-3 flex justify-center">
-            <img src="/gibby-logo.png" alt="gibby.it" className="h-10 w-auto max-w-[200px] object-contain" />
+            <img src="/zedgerr-logo.png" alt="Zedgerr" className="h-10 w-auto max-w-[200px] object-contain" />
           </div>
-          <CardTitle className="text-2xl font-semibold">Welkom terug</CardTitle>
-          <CardDescription>Log in om verder te gaan</CardDescription>
+          <CardTitle className="text-2xl font-semibold">Welcome back</CardTitle>
+          <CardDescription>Sign in to continue</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="email">E-mailadres</Label>
-              <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="naam@voorbeeld.nl" required />
+              <Label htmlFor="email">Email address</Label>
+              <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" required />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="password">Wachtwoord</Label>
+              <Label htmlFor="password">Password</Label>
               <Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" required minLength={6} />
             </div>
             <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? "Laden..." : "Inloggen"}
+              {loading ? "Signing in…" : "Sign in"}
             </Button>
           </form>
         </CardContent>

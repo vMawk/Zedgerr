@@ -21,6 +21,9 @@ import Expenses from "./pages/Expenses";
 import Tax from "./pages/Tax";
 import Mileage from "./pages/Mileage";
 import Bankrekening from "./pages/Bankrekening";
+import Boekhouding from "./pages/Boekhouding";
+import FinancieelRapport from "./pages/FinancieelRapport";
+import InviteAccept from "./pages/InviteAccept";
 import NotFound from "./pages/NotFound";
 import Auth from "./pages/Auth";
 import { PortalProvider, usePortalAuth } from "@/lib/portal-auth";
@@ -34,7 +37,7 @@ function ProtectedRoutes() {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background text-muted-foreground">
-        Laden…
+        Loading…
       </div>
     );
   }
@@ -47,7 +50,7 @@ function AuthRoute() {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background text-muted-foreground">
-        Laden…
+        Loading…
       </div>
     );
   }
@@ -68,7 +71,7 @@ function PortalShell() {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background text-muted-foreground">
-        Laden…
+        Loading…
       </div>
     );
   }
@@ -85,24 +88,27 @@ const App = () => (
         <AuthProvider>
           <Routes>
             <Route path="/auth" element={<AuthRoute />} />
-            <Route path="/klantenportaal" element={<KlantenportaalPage />} />
+            <Route path="/invite" element={<InviteAccept />} />
+            <Route path="/portal" element={<KlantenportaalPage />} />
             <Route element={<ProtectedRoutes />}>
               <Route path="/" element={<Dashboard />} />
-              <Route path="/bedrijven" element={<Companies />} />
-              <Route path="/bedrijven/:id" element={<CompanyDetail />} />
-              <Route path="/uren" element={<TimeEntries />} />
-              <Route path="/facturen" element={<Invoices />} />
-              <Route path="/offertes" element={<Quotes />} />
-              <Route path="/overzichten" element={<Reports />} />
-              <Route path="/notities" element={<Notes />} />
-              <Route path="/abonnementen" element={<Subscriptions />} />
+              <Route path="/companies" element={<Companies />} />
+              <Route path="/companies/:id" element={<CompanyDetail />} />
+              <Route path="/time" element={<TimeEntries />} />
+              <Route path="/invoices" element={<Invoices />} />
+              <Route path="/quotes" element={<Quotes />} />
+              <Route path="/reports" element={<Reports />} />
+              <Route path="/notes" element={<Notes />} />
+              <Route path="/subscriptions" element={<Subscriptions />} />
               <Route path="/leads" element={<Leads />} />
-              <Route path="/producten" element={<Products />} />
-              <Route path="/uitgaven" element={<Expenses />} />
-              <Route path="/belasting" element={<Tax />} />
-              <Route path="/kilometers" element={<Mileage />} />
-              <Route path="/bankrekening" element={<Bankrekening />} />
-              <Route path="/instellingen" element={<Settings />} />
+              <Route path="/products" element={<Products />} />
+              <Route path="/expenses" element={<Expenses />} />
+              <Route path="/tax" element={<Tax />} />
+              <Route path="/mileage" element={<Mileage />} />
+              <Route path="/bank" element={<Bankrekening />} />
+              <Route path="/accounting" element={<Boekhouding />} />
+              <Route path="/financial" element={<FinancieelRapport />} />
+              <Route path="/settings" element={<Settings />} />
             </Route>
             <Route path="*" element={<NotFound />} />
           </Routes>

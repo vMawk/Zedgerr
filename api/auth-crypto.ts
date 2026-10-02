@@ -1,4 +1,4 @@
-/** PBKDF2-SHA-256 (Web Crypto) — werkt in Cloudflare Workers en browsers. */
+/** PBKDF2-SHA-256 via Web Crypto API. */
 /** Workers cap `deriveBits` PBKDF2 iterations (ca. 100k); hoger geeft een exception → 500 op register/login. */
 const ITERATIONS = 100_000;
 const SALT_BYTES = 16;

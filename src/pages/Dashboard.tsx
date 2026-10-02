@@ -27,11 +27,11 @@ const STATUS_COLORS: Record<string, string> = {
   gesplitst: "#6366f1",
 };
 const STATUS_LABELS: Record<string, string> = {
-  concept: "Concept",
-  verzonden: "Verzonden",
-  betaald: "Betaald",
-  vervallen: "Vervallen",
-  gesplitst: "Gesplitst",
+  concept: "Draft",
+  verzonden: "Sent",
+  betaald: "Paid",
+  vervallen: "Overdue",
+  gesplitst: "Split",
 };
 
 function invoiceStatusForDashboard(inv: Invoice): string {
@@ -40,10 +40,10 @@ function invoiceStatusForDashboard(inv: Invoice): string {
 }
 
 const periodLabels: Record<PeriodPreset, string> = {
-  "30d": "Laatste 30 dagen",
-  "90d": "Laatste 90 dagen",
-  ytd: "Dit jaar",
-  "12m": "Laatste 12 maanden",
+  "30d": "Last 30 days",
+  "90d": "Last 90 days",
+  ytd: "This year",
+  "12m": "Last 12 months",
 };
 
 function monthKeyFromDate(dateIso: string) {
@@ -53,14 +53,14 @@ function monthKeyFromDate(dateIso: string) {
 function monthLabel(key: string) {
   const [year, month] = key.split("-");
   const d = new Date(Number(year), Number(month) - 1, 1);
-  return d.toLocaleDateString("nl-NL", { month: "short" });
+  return d.toLocaleDateString("en", { month: "short" });
 }
 function fmt(value: number) {
-  if (value >= 1000) return `€${(value / 1000).toFixed(1)}k`;
-  return `€${value.toLocaleString("nl-NL", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+  if (value >= 1000) return `${(value / 1000).toFixed(1)}k`;
+  return value.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 }
 function fmtFull(value: number) {
-  return `€${value.toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 function getPeriodRange(period: PeriodPreset) {
   const now = new Date();
@@ -139,7 +139,7 @@ export default function Dashboard() {
         setReportRows(reportRes);
         setTimeEntries(timeEntriesRes);
       })
-      .catch((e: unknown) => setLoadError(e instanceof Error ? e.message : "Dashboard data kon niet geladen worden."))
+      .catch((e: unknown) => setLoadError(e instanceof Error ? e.message : "Failed to load dashboard data."))
       .finally(() => setLoading(false));
   }, [user, period, companyFilter]);
 
@@ -222,7 +222,7 @@ export default function Dashboard() {
   const customerSummary = useMemo(() => {
     const grouped = new Map<string, { name: string; hours: number; revenue: number }>();
     for (const row of reportRows) {
-      const name = row.company_name ?? "Onbekend";
+      const name = row.company_name ?? "Unknown";
       if (!grouped.has(name)) grouped.set(name, { name, hours: 0, revenue: 0 });
       const agg = grouped.get(name)!;
       const h = Number(row.hours);
@@ -234,18 +234,18 @@ export default function Dashboard() {
   }, [reportRows]);
 
   const revenueChartConfig: ChartConfig = {
-    betaald: { label: "Betaald", color: "hsl(142 71% 38%)" },
-    open: { label: "Openstaand", color: "hsl(38 92% 50%)" },
+    betaald: { label: "Paid", color: "hsl(162 100% 13%)" },
+    open: { label: "Outstanding", color: "hsl(39 90% 65%)" },
   };
   const hoursChartConfig: ChartConfig = {
-    hours: { label: "Uren", color: "hsl(220 13% 55%)" },
+    hours: { label: "Hours", color: "hsl(162 40% 50%)" },
   };
 
   if (loading) {
     return (
       <div className="flex items-center justify-center py-24 text-muted-foreground gap-2">
         <Loader2 className="h-5 w-5 animate-spin" />
-        <span className="text-sm">Laden…</span>
+        <span className="text-sm">Loading…</span>
       </div>
     );
   }
@@ -270,9 +270,9 @@ export default function Dashboard() {
           <Select value={companyFilter} onValueChange={setCompanyFilter}>
             <SelectTrigger className="h-8 text-sm w-[180px]"><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">Alle klanten</SelectItem>
+              <SelectItem value="all">All clients</SelectItem>
               {companies.map((c) => (
-                <SelectItem key={c.id} value={c.id}>{c.name || c.contact_person || "Klant"}</SelectItem>
+                <SelectItem key={c.id} value={c.id}>{c.name || c.contact_person || "Client"}</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -289,39 +289,39 @@ export default function Dashboard() {
       {/* KPI row */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         <KpiCard
-          label="Omzet ontvangen"
+          label="Revenue received"
           value={fmt(kpis.paidAmount)}
-          sub={`${kpis.paidCount} facturen`}
+          sub={`${kpis.paidCount} invoices`}
           icon={Euro}
           positive
         />
         <KpiCard
-          label="Openstaand"
+          label="Outstanding"
           value={fmt(kpis.openAmount)}
-          sub={`${kpis.openCount} facturen`}
+          sub={`${kpis.openCount} invoices`}
           icon={FileText}
           positive={false}
         />
         <KpiCard
-          label="Banksaldo"
+          label="Bank balance"
           value={bankSaldo !== null ? (bankSaldo < 0 ? `−${fmt(Math.abs(bankSaldo))}` : fmt(bankSaldo)) : "—"}
           icon={Landmark}
           positive={bankSaldo === null || bankSaldo >= 0}
         />
         <KpiCard
-          label="Uren periode"
+          label="Hours (period)"
           value={kpis.hours.toFixed(1)}
           icon={Clock}
         />
         <KpiCard
-          label="Klanten"
+          label="Clients"
           value={String(companies.length)}
           icon={Building2}
         />
         <KpiCard
-          label={`BTW Q${Math.ceil((new Date().getMonth() + 1) / 3)}`}
+          label={`Tax Q${Math.ceil((new Date().getMonth() + 1) / 3)}`}
           value={btwQuarter !== null ? fmt(Math.max(0, btwQuarter.saldo_btw)) : "—"}
-          sub={btwQuarter?.inkoop_btw ? `−${fmt(btwQuarter.inkoop_btw)} aftrek` : "Huidig kwartaal"}
+          sub={btwQuarter?.inkoop_btw ? `−${fmt(btwQuarter.inkoop_btw)} input credit` : "Current quarter"}
           icon={Receipt}
           positive={false}
         />
@@ -336,35 +336,35 @@ export default function Dashboard() {
           <div className="bg-card border border-border rounded-lg p-4">
             <div className="flex items-center justify-between mb-4">
               <div>
-                <h2 className="text-sm font-semibold">Omzet en openstaand</h2>
-                <p className="text-xs text-muted-foreground mt-0.5">Betaald vs. openstaand per maand</p>
+                <h2 className="text-sm font-semibold">Revenue & outstanding</h2>
+                <p className="text-xs text-muted-foreground mt-0.5">Paid vs. outstanding per month</p>
               </div>
               <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-success" />Betaald</span>
-                <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-warning" />Openstaand</span>
+                <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-success" />Paid</span>
+                <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-warning" />Outstanding</span>
               </div>
             </div>
             {revenueByMonth.length === 0 ? (
-              <p className="text-sm text-muted-foreground py-12 text-center">Geen factuurdata voor deze filters.</p>
+              <p className="text-sm text-muted-foreground py-12 text-center">No invoice data for the selected filters.</p>
             ) : (
               <ChartContainer config={revenueChartConfig} className="h-56 w-full">
                 <AreaChart data={revenueByMonth} margin={{ top: 4, right: 0, bottom: 0, left: 0 }}>
                   <defs>
                     <linearGradient id="gradBetaald" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="hsl(142 71% 38%)" stopOpacity={0.2} />
-                      <stop offset="95%" stopColor="hsl(142 71% 38%)" stopOpacity={0} />
+                      <stop offset="5%" stopColor="hsl(162 100% 13%)" stopOpacity={0.2} />
+                      <stop offset="95%" stopColor="hsl(162 100% 13%)" stopOpacity={0} />
                     </linearGradient>
                     <linearGradient id="gradOpen" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="hsl(38 92% 50%)" stopOpacity={0.15} />
-                      <stop offset="95%" stopColor="hsl(38 92% 50%)" stopOpacity={0} />
+                      <stop offset="5%" stopColor="hsl(39 90% 65%)" stopOpacity={0.15} />
+                      <stop offset="95%" stopColor="hsl(39 90% 65%)" stopOpacity={0} />
                     </linearGradient>
                   </defs>
                   <CartesianGrid vertical={false} stroke="hsl(var(--border))" />
                   <XAxis dataKey="label" tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
                   <YAxis tickLine={false} axisLine={false} width={60} tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} tickFormatter={fmt} />
                   <ChartTooltip content={<ChartTooltipContent formatter={(v) => fmtFull(Number(v))} />} />
-                  <Area dataKey="betaald" stroke="hsl(142 71% 38%)" strokeWidth={2} fill="url(#gradBetaald)" dot={false} />
-                  <Area dataKey="open" stroke="hsl(38 92% 50%)" strokeWidth={2} fill="url(#gradOpen)" dot={false} />
+                  <Area dataKey="betaald" stroke="hsl(162 100% 13%)" strokeWidth={2} fill="url(#gradBetaald)" dot={false} />
+                  <Area dataKey="open" stroke="hsl(39 90% 65%)" strokeWidth={2} fill="url(#gradOpen)" dot={false} />
                 </AreaChart>
               </ChartContainer>
             )}
@@ -374,10 +374,10 @@ export default function Dashboard() {
           <div className="grid gap-4 md:grid-cols-2">
             {/* Hours chart */}
             <div className="bg-card border border-border rounded-lg p-4">
-              <h2 className="text-sm font-semibold mb-1">Uren per maand</h2>
-              <p className="text-xs text-muted-foreground mb-4">Gelogde uren in de geselecteerde periode</p>
+              <h2 className="text-sm font-semibold mb-1">Hours per month</h2>
+              <p className="text-xs text-muted-foreground mb-4">Logged hours in the selected period</p>
               {hoursByMonth.length === 0 ? (
-                <p className="text-sm text-muted-foreground py-8 text-center">Geen urendata.</p>
+                <p className="text-sm text-muted-foreground py-8 text-center">No time data.</p>
               ) : (
                 <ChartContainer config={hoursChartConfig} className="h-44 w-full">
                   <BarChart data={hoursByMonth} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
@@ -394,13 +394,13 @@ export default function Dashboard() {
             {/* Customer revenue */}
             <div className="bg-card border border-border rounded-lg p-4">
               <div className="flex items-center justify-between mb-3">
-                <h2 className="text-sm font-semibold">Klanten omzet</h2>
-                <Link to="/overzichten" className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-0.5 transition-colors">
-                  Alles <ChevronRight className="h-3 w-3" />
+                <h2 className="text-sm font-semibold">Client revenue</h2>
+                <Link to="/reports" className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-0.5 transition-colors">
+                  View all <ChevronRight className="h-3 w-3" />
                 </Link>
               </div>
               {customerSummary.length === 0 ? (
-                <p className="text-sm text-muted-foreground py-8 text-center">Geen data.</p>
+                <p className="text-sm text-muted-foreground py-8 text-center">No data.</p>
               ) : (
                 <div className="space-y-2.5">
                   {customerSummary.map((c) => {
@@ -428,19 +428,19 @@ export default function Dashboard() {
         <div className="bg-card border border-border rounded-lg flex flex-col min-h-[500px]">
           <div className="p-4 border-b border-border">
             <div className="flex items-center justify-between mb-3">
-              <h2 className="text-sm font-semibold">Facturen</h2>
-              <Link to="/facturen" className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-0.5 transition-colors">
-                Bekijk alles <ChevronRight className="h-3 w-3" />
+              <h2 className="text-sm font-semibold">Invoices</h2>
+              <Link to="/invoices" className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-0.5 transition-colors">
+                View all <ChevronRight className="h-3 w-3" />
               </Link>
             </div>
             {/* Amount summary bar */}
             <div className="flex items-center gap-4 mb-3">
               <div>
-                <p className="text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">Betaald</p>
+                <p className="text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">Paid</p>
                 <p className="text-lg font-bold tabular-nums text-success">{fmt(kpis.paidAmount)}</p>
               </div>
               <div>
-                <p className="text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">Openstaand</p>
+                <p className="text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">Outstanding</p>
                 <p className="text-lg font-bold tabular-nums text-warning">{fmt(kpis.openAmount)}</p>
               </div>
             </div>
@@ -466,7 +466,7 @@ export default function Dashboard() {
                     : "border-transparent text-muted-foreground hover:text-foreground",
                 )}
               >
-                {tab === "all" ? "Alles" : STATUS_LABELS[tab]}
+                {tab === "all" ? "All" : STATUS_LABELS[tab]}
                 <span className={cn("ml-1.5 rounded-full px-1.5 py-0.5 text-[10px]", invoiceTab === tab ? "bg-success/15" : "bg-muted")}>
                   {invoiceCounts[tab]}
                 </span>
@@ -477,14 +477,14 @@ export default function Dashboard() {
           {/* Invoice list */}
           <div className="flex-1 overflow-y-auto">
             {invoiceTableRows.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-10">Geen facturen.</p>
+              <p className="text-sm text-muted-foreground text-center py-10">No invoices.</p>
             ) : (
               <table className="w-full text-xs">
                 <thead className="sticky top-0 bg-card z-10">
                   <tr className="border-b border-border">
-                    <th className="text-left px-4 py-2 font-medium text-muted-foreground">Klant</th>
-                    <th className="text-left px-2 py-2 font-medium text-muted-foreground">Datum</th>
-                    <th className="text-right px-4 py-2 font-medium text-muted-foreground">Bedrag</th>
+                    <th className="text-left px-4 py-2 font-medium text-muted-foreground">Client</th>
+                    <th className="text-left px-2 py-2 font-medium text-muted-foreground">Date</th>
+                    <th className="text-right px-4 py-2 font-medium text-muted-foreground">Amount</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -511,7 +511,7 @@ export default function Dashboard() {
                           </div>
                         </td>
                         <td className="px-2 py-2.5 text-muted-foreground whitespace-nowrap">
-                          {new Date(inv.invoice_date).toLocaleDateString("nl-NL", { day: "numeric", month: "short" })}
+                          {new Date(inv.invoice_date).toLocaleDateString(undefined, { day: "numeric", month: "short" })}
                         </td>
                         <td className="px-4 py-2.5 text-right font-medium tabular-nums whitespace-nowrap">
                           {fmtFull(net)}

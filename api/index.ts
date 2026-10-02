@@ -1,24 +1,19 @@
-/// <reference types="@cloudflare/workers-types" />
-
+import type { AppEnv, D1PreparedStatement } from "./types.js";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { hashPassword, verifyPassword } from "./auth-crypto.js";
 import { signPortalToken, signUserToken, verifyPortalToken, verifyUserToken } from "./jwt.js";
 import { seedInvoice2026IfNeeded } from "./seed-d1.js";
 
-export type Env = {
-  DB: D1Database;
-  JWT_SECRET: string;
-  AI: Ai;
-  ASSETS?: Fetcher;
-  FILES: R2Bucket;
-  /** Extra accounts na de eerste gebruiker: zet op "true" in wrangler.toml. Anders alleen eerste account (lege `users`). */
-  ALLOW_REGISTRATION?: string;
-  TELEGRAM_BOT_TOKEN?: string;
-  TELEGRAM_CHAT_ID?: string;
-};
+export type Env = AppEnv;
 
-type Variables = { userId?: string; portalCompanyId?: string; email?: string };
+type Variables = {
+  userId?: string;       // org isolation key (= org_id = owner's user_id)
+  ownUserId?: string;    // actual logged-in user id (for audit logs, invites)
+  orgRole?: string;      // role of the logged-in user in the org
+  portalCompanyId?: string;
+  email?: string;
+};
 
 function rowInvoiced(r: Record<string, unknown>) {
   return { ...r, invoiced: Boolean(r.invoiced) };
@@ -94,9 +89,22 @@ const publicApiPaths = new Set([
   "/api/auth/register",
   "/api/auth/registration-status",
   "/api/portal/login",
+  "/api/org/invite/info",
+  "/api/org/invite/accept",
 ]);
 
 const api = new Hono<{ Bindings: Env; Variables: Variables }>();
+
+api.use("*", async (c, next) => {
+  await next();
+  c.header("X-Content-Type-Options", "nosniff");
+  c.header("X-Frame-Options", "DENY");
+  c.header("Referrer-Policy", "strict-origin-when-cross-origin");
+  c.header("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  if (c.req.url.startsWith("https://")) {
+    c.header("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  }
+});
 
 api.use(
   "/api/*",
@@ -129,7 +137,14 @@ api.use("/api/*", async (c, next) => {
 
   try {
     const payload = await verifyUserToken(secret, token);
-    c.set("userId", payload.sub);
+    // org_id is the isolation key for all data queries.
+    // For single-user accounts: org_id = user_id (owner's id).
+    // For team members: org_id = owner's user_id (their org).
+    // Backward compat: old tokens without org_id fall back to sub.
+    const orgId = (payload.org_id as string | undefined) ?? payload.sub;
+    c.set("userId", orgId);        // used by all existing WHERE user_id = ? queries
+    c.set("ownUserId", payload.sub);
+    c.set("orgRole", (payload.org_role as string | undefined) ?? "owner");
     c.set("email", payload.email);
     await next();
   } catch {
@@ -137,7 +152,6 @@ api.use("/api/*", async (c, next) => {
   }
 });
 
-// --- Auth ---
 api.get("/api/auth/registration-status", async (c) => {
   const countRow = await c.env.DB.prepare("SELECT COUNT(*) as c FROM users").first<{ c: number }>();
   const count = countRow?.c ?? 0;
@@ -192,8 +206,24 @@ api.post("/api/auth/register", async (c) => {
     }
   }
 
-  const token = await signUserToken(secret, id, emailRaw);
-  return c.json({ token, user: { id, email: emailRaw } });
+  try {
+    await seedDefaultChartOfAccounts(c.env.DB, id);
+  } catch (e) {
+    console.error("seedDefaultChartOfAccounts:", e);
+  }
+
+  // Create org with id = user id (backward compat: org_id = user_id for owners)
+  const now = new Date().toISOString();
+  const orgName = emailRaw.split("@")[0]!;
+  await c.env.DB.batch([
+    c.env.DB.prepare("INSERT OR IGNORE INTO organizations (id, name, owner_user_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
+      .bind(id, orgName, id, now, now),
+    c.env.DB.prepare("INSERT OR IGNORE INTO organization_members (id, org_id, user_id, role, joined_at) VALUES (?, ?, ?, 'owner', ?)")
+      .bind(crypto.randomUUID(), id, id, now),
+  ]);
+
+  const token = await signUserToken(secret, id, emailRaw, id, "owner");
+  return c.json({ token, user: { id, email: emailRaw, org_id: id, org_role: "owner" } });
 });
 
 api.post("/api/auth/login", async (c) => {
@@ -217,19 +247,29 @@ api.post("/api/auth/login", async (c) => {
   if (!row || !(await verifyPassword(password, row.password_hash))) {
     return c.json({ error: "Invalid email or password" }, 401);
   }
-  const token = await signUserToken(secret, row.id, row.email);
-  return c.json({ token, user: { id: row.id, email: row.email } });
+
+  // Look up org membership â€” primary org is the one they own, else first member
+  const member = await c.env.DB
+    .prepare("SELECT org_id, role FROM organization_members WHERE user_id = ? ORDER BY CASE role WHEN 'owner' THEN 0 ELSE 1 END, joined_at ASC LIMIT 1")
+    .bind(row.id)
+    .first<{ org_id: string; role: string }>();
+  // Backward compat: no org yet (old user) â†’ org_id = user_id
+  const orgId   = member?.org_id  ?? row.id;
+  const orgRole = member?.role     ?? "owner";
+
+  const token = await signUserToken(secret, row.id, row.email, orgId, orgRole as "owner" | "admin" | "member" | "viewer");
+  return c.json({ token, user: { id: row.id, email: row.email, org_id: orgId, org_role: orgRole } });
 });
 
 api.get("/api/auth/me", async (c) => {
-  const userId = c.get("userId")!;
-  const row = await c.env.DB.prepare("SELECT id, email, created_at FROM users WHERE id = ?").bind(userId).first<{
-    id: string;
-    email: string;
-    created_at: string;
+  const ownUserId = c.get("ownUserId") ?? c.get("userId")!;
+  const orgId = c.get("userId")!;
+  const row = await c.env.DB.prepare("SELECT id, email, created_at FROM users WHERE id = ?").bind(ownUserId).first<{
+    id: string; email: string; created_at: string;
   }>();
   if (!row) return c.json({ error: "User not found" }, 404);
-  return c.json(row);
+  const org = await c.env.DB.prepare("SELECT id, name, plan FROM organizations WHERE id = ?").bind(orgId).first<{ id: string; name: string; plan: string }>();
+  return c.json({ ...row, org_id: orgId, org_role: c.get("orgRole"), org });
 });
 
 api.patch("/api/auth/password", async (c) => {
@@ -263,7 +303,6 @@ api.patch("/api/auth/password", async (c) => {
   return c.json({ ok: true });
 });
 
-// --- Klantenportaal (ingelogd als bedrijf: uren + facturen) ---
 api.post("/api/portal/login", async (c) => {
   const secret = c.env.JWT_SECRET;
   if (!secret || secret.length < 16) {
@@ -428,7 +467,6 @@ api.get("/api/portal/invoices/:id/pdf-data", async (c) => {
   return c.json({ invoice, lines: lines ?? [], company: company ?? null, settings });
 });
 
-// --- Dashboard ---
 api.get("/api/dashboard/stats", async (c) => {
   const userId = c.get("userId")!;
   const now = new Date();
@@ -452,7 +490,6 @@ api.get("/api/dashboard/stats", async (c) => {
   });
 });
 
-// --- Companies ---
 api.get("/api/companies", async (c) => {
   const userId = c.get("userId")!;
   const { results } = await c.env.DB
@@ -620,7 +657,6 @@ api.get("/api/companies/:id", async (c) => {
   return c.json(row);
 });
 
-// --- Company products ---
 api.get("/api/companies/:id/products", async (c) => {
   const userId = c.get("userId")!;
   const { id } = c.req.param();
@@ -677,7 +713,6 @@ api.delete("/api/companies/:id/products/:productId", async (c) => {
   return c.body(null, 204);
 });
 
-// --- Time entries ---
 api.get("/api/time-entries", async (c) => {
   const userId = c.get("userId")!;
   const companyId = c.req.query("company_id");
@@ -757,7 +792,6 @@ api.delete("/api/time-entries/:id", async (c) => {
   return c.body(null, 204);
 });
 
-// --- AI writing helper ---
 api.post("/api/ai/improve-grammar", async (c) => {
   let body: { text?: string };
   try {
@@ -814,7 +848,6 @@ api.post("/api/time-entries/mark-invoiced", async (c) => {
   return c.json({ ok: true });
 });
 
-// --- Reports ---
 api.get("/api/reports/time-entries", async (c) => {
   const userId = c.get("userId")!;
   const from = c.req.query("from");
@@ -836,7 +869,6 @@ api.get("/api/reports/time-entries", async (c) => {
   return c.json(results ?? []);
 });
 
-// --- Daily notes ---
 api.get("/api/notes/daily", async (c) => {
   const userId = c.get("userId")!;
   const date = c.req.query("date");
@@ -888,7 +920,6 @@ api.put("/api/notes/daily", async (c) => {
   return c.json(row);
 });
 
-// --- Business settings ---
 api.get("/api/business-settings", async (c) => {
   const userId = c.get("userId")!;
   const row = await c.env.DB.prepare("SELECT * FROM business_settings WHERE user_id = ?").bind(userId).first();
@@ -907,6 +938,7 @@ api.put("/api/business-settings", async (c) => {
           company_name = ?, contact_person = ?, email = ?, phone = ?, street = ?, postal_code = ?, city = ?, country = ?,
           kvk_number = ?, btw_number = ?, iban = ?,
           private_name = ?, private_street = ?, private_postal_code = ?, private_city = ?, private_country = ?,
+          tax_name = ?, default_tax_rate = ?, currency = ?,
           updated_at = ?
          WHERE id = ?`,
       )
@@ -927,6 +959,9 @@ api.put("/api/business-settings", async (c) => {
         req.private_postal_code ?? null,
         req.private_city ?? null,
         req.private_country ?? null,
+        req.tax_name ?? "VAT",
+        req.default_tax_rate ?? 20,
+        req.currency ?? "EUR",
         now,
         existing.id,
       )
@@ -941,9 +976,10 @@ api.put("/api/business-settings", async (c) => {
         id, user_id,
         company_name, contact_person, email, phone, street, postal_code, city, country, kvk_number, btw_number, iban,
         private_name, private_street, private_postal_code, private_city, private_country,
+        tax_name, default_tax_rate, currency,
         created_at, updated_at
       )
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       id,
@@ -955,7 +991,7 @@ api.put("/api/business-settings", async (c) => {
       req.street ?? null,
       req.postal_code ?? null,
       req.city ?? null,
-      req.country ?? "Nederland",
+      req.country ?? null,
       req.kvk_number ?? null,
       req.btw_number ?? null,
       req.iban ?? null,
@@ -964,6 +1000,9 @@ api.put("/api/business-settings", async (c) => {
       req.private_postal_code ?? null,
       req.private_city ?? null,
       req.private_country ?? null,
+      req.tax_name ?? "VAT",
+      req.default_tax_rate ?? 20,
+      req.currency ?? "EUR",
       now,
       now,
     )
@@ -972,7 +1011,6 @@ api.put("/api/business-settings", async (c) => {
   return c.json(row);
 });
 
-// --- Invoices ---
 api.get("/api/invoices", async (c) => {
   const userId = c.get("userId")!;
   const { results } = await c.env.DB
@@ -1185,7 +1223,7 @@ function addDaysIso(dateIso: string, days: number): string {
   return d.toISOString().split("T")[0]!;
 }
 
-async function nextInvoiceNumberForYear(db: D1Database, userId: string, year: number, offset: number): Promise<string> {
+async function nextInvoiceNumberForYear(db: Env["DB"], userId: string, year: number, offset: number): Promise<string> {
   const prefix = `F${year}-`;
   const row = await db
     .prepare("SELECT COUNT(*) as c FROM invoices WHERE user_id = ? AND invoice_number LIKE ?")
@@ -1249,7 +1287,7 @@ api.post("/api/invoices/:id/split", async (c) => {
   const now = new Date().toISOString();
 
   const createdIds: string[] = [];
-  const stmts: ReturnType<D1Database["prepare"]>[] = [];
+  const stmts: ReturnType<Env["DB"]["prepare"]>[] = [];
   for (let i = 0; i < parts; i++) {
     const termInvoiceDate = addDaysIso(invDate, intervalDays * i);
     const sub = subtotalParts[i]!;
@@ -1260,7 +1298,7 @@ api.post("/api/invoices/:id/split", async (c) => {
     const newId = crypto.randomUUID();
     const newNr = await nextInvoiceNumberForYear(c.env.DB, userId, year, i);
     const termNote = `Termijn ${i + 1}/${parts} (gesplitst vanaf ${invoice.invoice_number})`;
-    const termDesc = `${origDesc} — termijn ${i + 1}/${parts}`;
+    const termDesc = `${origDesc} â€” termijn ${i + 1}/${parts}`;
     const newNotes = [invoice.notes, termNote].filter(Boolean).join("\n");
 
     stmts.push(
@@ -1324,7 +1362,6 @@ api.get("/api/invoice-lines", async (c) => {
   return c.json(results ?? []);
 });
 
-// --- Diensten ---
 api.get("/api/services", async (c) => {
   const userId = c.get("userId")!;
   const { results } = await c.env.DB.prepare("SELECT * FROM services WHERE user_id = ? ORDER BY name").bind(userId).all();
@@ -1431,7 +1468,6 @@ api.post("/api/invoice-lines/batch", async (c) => {
   return c.json({ ok: true });
 });
 
-// --- Quotes ---
 api.get("/api/quotes", async (c) => {
   const userId = c.get("userId")!;
   const { results } = await c.env.DB
@@ -1610,7 +1646,6 @@ api.post("/api/quote-lines/batch", async (c) => {
   return c.json({ ok: true });
 });
 
-// --- Subscriptions ---
 api.get("/api/subscriptions", async (c) => {
   const userId = c.get("userId")!;
   const { results } = await c.env.DB.prepare("SELECT * FROM subscriptions WHERE user_id = ? ORDER BY name").bind(userId).all();
@@ -1685,7 +1720,7 @@ api.get("/api/subscriptions/:id/payments", async (c) => {
     .prepare("SELECT * FROM subscription_payments WHERE subscription_id = ? AND user_id = ? ORDER BY period_date DESC")
     .bind(id, userId)
     .all();
-  return c.json((results ?? []).map((r) => ({ ...r, paid: Boolean(r.paid) })));
+  return c.json((results ?? []).map((r) => { const p = r as Record<string, unknown>; return { ...p, paid: Boolean(p.paid) }; }));
 });
 
 api.post("/api/subscriptions/:id/payments/toggle", async (c) => {
@@ -1725,10 +1760,10 @@ api.post("/api/subscriptions/:id/payments/toggle", async (c) => {
     .prepare("SELECT * FROM subscription_payments WHERE subscription_id = ? AND period_date = ?")
     .bind(id, periodDate)
     .first();
-  return c.json({ ...row, paid: Boolean(row?.paid) });
+  const r = row as Record<string, unknown> | null;
+  return c.json(r ? { ...r, paid: Boolean(r.paid) } : null);
 });
 
-// --- Leads ---
 api.get("/api/leads", async (c) => {
   const userId = c.get("userId")!;
   const { results } = await c.env.DB
@@ -1788,7 +1823,6 @@ api.delete("/api/leads/:id", async (c) => {
   return c.body(null, 204);
 });
 
-// --- Creditnota ---
 api.post("/api/invoices/:id/credit-note", async (c) => {
   const userId = c.get("userId")!;
   const { id } = c.req.param();
@@ -1848,7 +1882,6 @@ api.post("/api/invoices/:id/credit-note", async (c) => {
   return c.json({ ...row, is_credit_note: Boolean(row?.is_credit_note) });
 });
 
-// --- Expenses ---
 api.get("/api/expenses", async (c) => {
   const userId = c.get("userId")!;
   const from = c.req.query("from");
@@ -1928,7 +1961,6 @@ api.delete("/api/expenses/:id", async (c) => {
   return c.body(null, 204);
 });
 
-// --- BTW rapport ---
 api.get("/api/reports/btw", async (c) => {
   const userId = c.get("userId")!;
   const from = c.req.query("from");
@@ -1967,7 +1999,6 @@ api.get("/api/reports/btw", async (c) => {
   });
 });
 
-// --- Winst & verlies rapport ---
 api.get("/api/reports/profit", async (c) => {
   const userId = c.get("userId")!;
   const yearParam = c.req.query("year");
@@ -2017,7 +2048,6 @@ api.get("/api/reports/profit", async (c) => {
   });
 });
 
-// --- Kilometerregistratie ---
 api.get("/api/mileage", async (c) => {
   const userId = c.get("userId")!;
   const from = c.req.query("from");
@@ -2079,7 +2109,6 @@ api.delete("/api/mileage/:id", async (c) => {
   return c.body(null, 204);
 });
 
-// --- Bankrekening ---
 api.get("/api/audit-log", async (c) => {
   const userId = c.get("userId")!;
   const { entity_type, entity_id, limit: limitStr } = c.req.query();
@@ -2152,7 +2181,6 @@ api.delete("/api/bank-transactions/:id", async (c) => {
   return c.body(null, 204);
 });
 
-// --- Bijlagen (R2) ---
 const ALLOWED_TYPES = new Set([
   "image/jpeg", "image/png", "image/gif", "image/webp", "image/heic", "image/heif",
   "application/pdf",
@@ -2236,6 +2264,920 @@ api.delete("/api/attachments/:id", async (c) => {
   return c.body(null, 204);
 });
 
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+const DEFAULT_ACCOUNTS: Array<{
+  number: string;
+  name: string;
+  type: "assets" | "liabilities" | "equity" | "revenue" | "expenses";
+  description?: string;
+}> = [
+  // Activa
+  { number: "1000", name: "Kas", type: "assets" },
+  { number: "1100", name: "Bank", type: "assets" },
+  { number: "1200", name: "Spaarrekening", type: "assets" },
+  { number: "1300", name: "Debiteuren", type: "assets", description: "Te ontvangen van klanten" },
+  { number: "1400", name: "BTW vordering", type: "assets", description: "Voorbelasting" },
+  { number: "1500", name: "Overige vorderingen", type: "assets" },
+  // Passiva / schulden
+  { number: "4000", name: "Crediteuren", type: "liabilities" },
+  { number: "4800", name: "BTW te betalen", type: "liabilities", description: "Verschuldigde omzetbelasting" },
+  { number: "4900", name: "Overige schulden", type: "liabilities" },
+  // Eigen vermogen
+  { number: "2000", name: "Eigen vermogen", type: "equity" },
+  { number: "2100", name: "PrivÃ©onttrekkingen", type: "equity" },
+  { number: "2200", name: "PrivÃ©stortingen", type: "equity" },
+  { number: "2900", name: "Resultaat lopend jaar", type: "equity" },
+  // Opbrengsten
+  { number: "8000", name: "Omzet diensten", type: "revenue" },
+  { number: "8100", name: "Omzet producten", type: "revenue" },
+  { number: "8900", name: "Overige opbrengsten", type: "revenue" },
+  // Kosten
+  { number: "9000", name: "Inkoopkosten", type: "expenses" },
+  { number: "9100", name: "Personeelskosten", type: "expenses" },
+  { number: "9200", name: "Huisvestingskosten", type: "expenses" },
+  { number: "9300", name: "Vervoerskosten", type: "expenses" },
+  { number: "9400", name: "Marketing & reclame", type: "expenses" },
+  { number: "9500", name: "ICT & software", type: "expenses" },
+  { number: "9600", name: "Kantoorkosten", type: "expenses" },
+  { number: "9700", name: "Telefoon & internet", type: "expenses" },
+  { number: "9800", name: "FinanciÃ«le kosten", type: "expenses" },
+  { number: "9900", name: "Overige bedrijfskosten", type: "expenses" },
+];
+
+async function seedDefaultChartOfAccounts(db: Env["DB"], userId: string): Promise<void> {
+  const existing = await db
+    .prepare("SELECT COUNT(*) as c FROM chart_of_accounts WHERE user_id = ?")
+    .bind(userId)
+    .first<{ c: number }>();
+  if ((existing?.c ?? 0) > 0) return;
+  const now = new Date().toISOString();
+  const stmts = DEFAULT_ACCOUNTS.map((a) =>
+    db
+      .prepare(
+        `INSERT INTO chart_of_accounts (id, user_id, account_number, name, account_type, is_system, description, created_at)
+         VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
+      )
+      .bind(crypto.randomUUID(), userId, a.number, a.name, a.type, a.description ?? null, now),
+  );
+  await db.batch(stmts);
+}
+
+function periodStartEnd(year: number, period: number, type: "month" | "quarter"): { starts_on: string; ends_on: string } {
+  if (type === "month") {
+    const start = new Date(Date.UTC(year, period - 1, 1));
+    const end = new Date(Date.UTC(year, period, 0));
+    return {
+      starts_on: start.toISOString().split("T")[0]!,
+      ends_on: end.toISOString().split("T")[0]!,
+    };
+  }
+  const startMonth = (period - 1) * 3;
+  const start = new Date(Date.UTC(year, startMonth, 1));
+  const end = new Date(Date.UTC(year, startMonth + 3, 0));
+  return {
+    starts_on: start.toISOString().split("T")[0]!,
+    ends_on: end.toISOString().split("T")[0]!,
+  };
+}
+
+async function getOrCreatePeriod(db: Env["DB"], userId: string, date: string): Promise<string> {
+  const d = new Date(date);
+  const year = d.getUTCFullYear();
+  const month = d.getUTCMonth() + 1;
+  const existing = await db
+    .prepare("SELECT id FROM accounting_periods WHERE user_id = ? AND year = ? AND period = ? AND period_type = 'month'")
+    .bind(userId, year, month)
+    .first<{ id: string }>();
+  if (existing) return existing.id;
+  const id = crypto.randomUUID();
+  const { starts_on, ends_on } = periodStartEnd(year, month, "month");
+  const now = new Date().toISOString();
+  await db
+    .prepare(
+      `INSERT INTO accounting_periods (id, user_id, year, period, period_type, status, starts_on, ends_on, created_at)
+       VALUES (?, ?, ?, ?, 'month', 'open', ?, ?, ?)`,
+    )
+    .bind(id, userId, year, month, starts_on, ends_on, now)
+    .run();
+  return id;
+}
+
+async function createJournalEntry(
+  db: Env["DB"],
+  userId: string,
+  date: string,
+  description: string,
+  reference: string | null,
+  referenceType: string | null,
+  lines: Array<{ accountNumber: string; debitCents: number; creditCents: number; description?: string }>,
+): Promise<string | null> {
+  // Resolve account ids
+  const accountIds: Map<string, string> = new Map();
+  for (const line of lines) {
+    const row = await db
+      .prepare("SELECT id FROM chart_of_accounts WHERE user_id = ? AND account_number = ? AND active = 1")
+      .bind(userId, line.accountNumber)
+      .first<{ id: string }>();
+    if (!row) return null;
+    accountIds.set(line.accountNumber, row.id);
+  }
+
+  const periodId = await getOrCreatePeriod(db, userId, date);
+  const entryId = crypto.randomUUID();
+  const now = new Date().toISOString();
+
+  await db
+    .prepare(
+      `INSERT INTO journal_entries (id, user_id, period_id, entry_date, description, reference, reference_type, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(entryId, userId, periodId, date, description, reference, referenceType, now)
+    .run();
+
+  const lineStmts = lines.map((line) =>
+    db
+      .prepare(
+        `INSERT INTO journal_entry_lines (id, journal_entry_id, account_id, debit_cents, credit_cents, description, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        crypto.randomUUID(),
+        entryId,
+        accountIds.get(line.accountNumber)!,
+        line.debitCents,
+        line.creditCents,
+        line.description ?? null,
+        now,
+      ),
+  );
+  await db.batch(lineStmts);
+  return entryId;
+}
+
+// â”€â”€ Chart of accounts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+api.get("/api/accounts", async (c) => {
+  const userId = c.get("userId")!;
+  const { results } = await c.env.DB
+    .prepare("SELECT * FROM chart_of_accounts WHERE user_id = ? ORDER BY account_number")
+    .bind(userId)
+    .all();
+  return c.json(results ?? []);
+});
+
+api.post("/api/accounts", async (c) => {
+  const userId = c.get("userId")!;
+  const req = await c.req.json<Record<string, unknown>>();
+  if (!req.account_number || !req.name || !req.account_type) return c.json({ error: "account_number, name en account_type zijn verplicht" }, 400);
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  await c.env.DB
+    .prepare(`INSERT INTO chart_of_accounts (id, user_id, account_number, name, account_type, parent_id, description, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+    .bind(id, userId, req.account_number, req.name, req.account_type, req.parent_id ?? null, req.description ?? null, now)
+    .run();
+  const row = await c.env.DB.prepare("SELECT * FROM chart_of_accounts WHERE id = ?").bind(id).first();
+  return c.json(row, 201);
+});
+
+api.patch("/api/accounts/:id", async (c) => {
+  const userId = c.get("userId")!;
+  const { id } = c.req.param();
+  const req = await c.req.json<Record<string, unknown>>();
+  await c.env.DB
+    .prepare(`UPDATE chart_of_accounts SET name = COALESCE(?, name), description = COALESCE(?, description), active = COALESCE(?, active) WHERE id = ? AND user_id = ?`)
+    .bind(req.name ?? null, req.description ?? null, req.active ?? null, id, userId)
+    .run();
+  const row = await c.env.DB.prepare("SELECT * FROM chart_of_accounts WHERE id = ? AND user_id = ?").bind(id, userId).first();
+  return c.json(row);
+});
+
+api.delete("/api/accounts/:id", async (c) => {
+  const userId = c.get("userId")!;
+  const { id } = c.req.param();
+  const acct = await c.env.DB.prepare("SELECT is_system FROM chart_of_accounts WHERE id = ? AND user_id = ?").bind(id, userId).first<{ is_system: number }>();
+  if (!acct) return c.json({ error: "Not found" }, 404);
+  if (acct.is_system) return c.json({ error: "Systeemrekening kan niet worden verwijderd" }, 400);
+  await c.env.DB.prepare("DELETE FROM chart_of_accounts WHERE id = ? AND user_id = ?").bind(id, userId).run();
+  return c.body(null, 204);
+});
+
+// â”€â”€ Accounting periods â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+api.get("/api/periods", async (c) => {
+  const userId = c.get("userId")!;
+  const { year } = c.req.query();
+  let sql = "SELECT * FROM accounting_periods WHERE user_id = ?";
+  const params: unknown[] = [userId];
+  if (year) { sql += " AND year = ?"; params.push(Number(year)); }
+  sql += " ORDER BY year DESC, period DESC";
+  const { results } = await c.env.DB.prepare(sql).bind(...params).all();
+  return c.json(results ?? []);
+});
+
+api.post("/api/periods", async (c) => {
+  const userId = c.get("userId")!;
+  const req = await c.req.json<Record<string, unknown>>();
+  const year = Number(req.year);
+  const period = Number(req.period);
+  const type = (req.period_type as string) === "quarter" ? "quarter" : "month";
+  if (!year || !period) return c.json({ error: "year en period zijn verplicht" }, 400);
+  const { starts_on, ends_on } = periodStartEnd(year, period, type);
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  await c.env.DB
+    .prepare(`INSERT OR IGNORE INTO accounting_periods (id, user_id, year, period, period_type, status, starts_on, ends_on, created_at) VALUES (?, ?, ?, ?, ?, 'open', ?, ?, ?)`)
+    .bind(id, userId, year, period, type, starts_on, ends_on, now)
+    .run();
+  const row = await c.env.DB.prepare("SELECT * FROM accounting_periods WHERE user_id = ? AND year = ? AND period = ? AND period_type = ?").bind(userId, year, period, type).first();
+  return c.json(row, 201);
+});
+
+api.patch("/api/periods/:id", async (c) => {
+  const userId = c.get("userId")!;
+  const { id } = c.req.param();
+  const req = await c.req.json<Record<string, unknown>>();
+  if (!["open", "locked"].includes(req.status as string)) return c.json({ error: "status moet 'open' of 'locked' zijn" }, 400);
+  await c.env.DB.prepare("UPDATE accounting_periods SET status = ? WHERE id = ? AND user_id = ?").bind(req.status, id, userId).run();
+  const row = await c.env.DB.prepare("SELECT * FROM accounting_periods WHERE id = ? AND user_id = ?").bind(id, userId).first();
+  return c.json(row);
+});
+
+// â”€â”€ Journal entries â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+api.get("/api/journal-entries", async (c) => {
+  const userId = c.get("userId")!;
+  const { from, to, period_id, reference, limit: limitStr } = c.req.query();
+  const limit = Math.min(parseInt(limitStr ?? "100", 10), 500);
+  let sql = "SELECT * FROM journal_entries WHERE user_id = ?";
+  const params: unknown[] = [userId];
+  if (from)      { sql += " AND entry_date >= ?"; params.push(from); }
+  if (to)        { sql += " AND entry_date <= ?"; params.push(to); }
+  if (period_id) { sql += " AND period_id = ?";   params.push(period_id); }
+  if (reference) { sql += " AND reference = ?";   params.push(reference); }
+  sql += " ORDER BY entry_date DESC, created_at DESC LIMIT ?";
+  params.push(limit);
+  const { results } = await c.env.DB.prepare(sql).bind(...params).all();
+  return c.json(results ?? []);
+});
+
+api.get("/api/journal-entries/:id", async (c) => {
+  const userId = c.get("userId")!;
+  const { id } = c.req.param();
+  const entry = await c.env.DB.prepare("SELECT * FROM journal_entries WHERE id = ? AND user_id = ?").bind(id, userId).first();
+  if (!entry) return c.json({ error: "Not found" }, 404);
+  const { results: lines } = await c.env.DB
+    .prepare(`SELECT l.*, a.account_number, a.name as account_name, a.account_type
+              FROM journal_entry_lines l
+              JOIN chart_of_accounts a ON a.id = l.account_id
+              WHERE l.journal_entry_id = ? ORDER BY l.created_at`)
+    .bind(id)
+    .all();
+  return c.json({ ...entry, lines: lines ?? [] });
+});
+
+api.post("/api/journal-entries", async (c) => {
+  const userId = c.get("userId")!;
+  const req = await c.req.json<Record<string, unknown>>();
+  const lines = req.lines as Array<{ account_number: string; debit_cents: number; credit_cents: number; description?: string }>;
+  if (!req.entry_date || !req.description || !Array.isArray(lines) || lines.length < 2) {
+    return c.json({ error: "entry_date, description en minimaal 2 regels zijn verplicht" }, 400);
+  }
+  const totalDebit  = lines.reduce((s, l) => s + (l.debit_cents  ?? 0), 0);
+  const totalCredit = lines.reduce((s, l) => s + (l.credit_cents ?? 0), 0);
+  if (totalDebit !== totalCredit) {
+    return c.json({ error: `Journaalpost niet gesaldeerd: debet ${totalDebit} â‰  credit ${totalCredit} (in centen)` }, 400);
+  }
+  const entryId = await createJournalEntry(
+    c.env.DB, userId,
+    req.entry_date as string,
+    req.description as string,
+    (req.reference as string) ?? null,
+    (req.reference_type as string) ?? null,
+    lines.map((l) => ({ accountNumber: l.account_number, debitCents: l.debit_cents, creditCents: l.credit_cents, description: l.description })),
+  );
+  if (!entryId) return c.json({ error: "EÃ©n of meer rekeningnummers niet gevonden" }, 400);
+  return c.json({ id: entryId }, 201);
+});
+
+api.delete("/api/journal-entries/:id", async (c) => {
+  const userId = c.get("userId")!;
+  const { id } = c.req.param();
+  await c.env.DB.prepare("DELETE FROM journal_entries WHERE id = ? AND user_id = ?").bind(id, userId).run();
+  return c.body(null, 204);
+});
+
+// â”€â”€ Boekhoudkundig overzicht (trial balance) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+api.get("/api/trial-balance", async (c) => {
+  const userId = c.get("userId")!;
+  const { from, to } = c.req.query();
+  let dateFilter = "";
+  const params: unknown[] = [userId];
+  if (from || to) {
+    const conditions: string[] = [];
+    if (from) { conditions.push("je.entry_date >= ?"); params.push(from); }
+    if (to)   { conditions.push("je.entry_date <= ?"); params.push(to); }
+    dateFilter = " AND " + conditions.join(" AND ");
+  }
+  const { results } = await c.env.DB
+    .prepare(`
+      SELECT
+        a.account_number,
+        a.name,
+        a.account_type,
+        COALESCE(SUM(l.debit_cents),  0) AS total_debit_cents,
+        COALESCE(SUM(l.credit_cents), 0) AS total_credit_cents,
+        COALESCE(SUM(l.debit_cents),  0) - COALESCE(SUM(l.credit_cents), 0) AS balance_cents
+      FROM chart_of_accounts a
+      LEFT JOIN journal_entry_lines l ON l.account_id = a.id
+      LEFT JOIN journal_entries je    ON je.id = l.journal_entry_id${dateFilter}
+      WHERE a.user_id = ? AND a.active = 1
+      GROUP BY a.id
+      ORDER BY a.account_number
+    `)
+    .bind(...params, userId)
+    .all();
+  return c.json(results ?? []);
+});
+
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+// â”€â”€ CSV-import (ING / Rabobank / ABN AMRO / generiek) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function parseAmount(raw: string): number {
+  // Handle European decimal notation: 1.234,56 â†’ 1234.56
+  const cleaned = raw.trim().replace(/\./g, "").replace(",", ".");
+  return parseFloat(cleaned) || 0;
+}
+
+function detectAndParseCSV(text: string): Array<{
+  date: string; description: string; amount: number; type: "inkomst" | "uitgave";
+}> {
+  const lines = text.split(/\r?\n/).filter((l) => l.trim());
+  if (!lines.length) return [];
+
+  const header = lines[0]!.toLowerCase();
+  const rows: Array<{ date: string; description: string; amount: number; type: "inkomst" | "uitgave" }> = [];
+
+  // ING: "Datum";"Naam / Omschrijving";"Rekening";"Tegenrekening";"Code";"Af Bij";"Bedrag (EUR)";"Mutatiesoort";"Mededelingen"
+  if (header.includes("af bij") || header.includes("naam / omschrijving")) {
+    for (const line of lines.slice(1)) {
+      const cols = line.split(";").map((c) => c.replace(/^"|"$/g, "").trim());
+      if (cols.length < 7) continue;
+      const dateRaw = cols[0]!;       // YYYYMMDD
+      const desc = cols[1] ?? "";
+      const afBij = cols[5]!.toLowerCase();
+      const amtRaw = cols[6]!;
+      const amount = Math.abs(parseAmount(amtRaw));
+      const type: "inkomst" | "uitgave" = afBij === "bij" ? "inkomst" : "uitgave";
+      const date = `${dateRaw.slice(0, 4)}-${dateRaw.slice(4, 6)}-${dateRaw.slice(6, 8)}`;
+      rows.push({ date, description: desc, amount: afBij === "af" ? -amount : amount, type });
+    }
+    return rows;
+  }
+
+  // Rabobank: "IBAN/BBAN";"Munt";"BIC";"Volgnr";"Datum";"Rentedatum";"Bedrag";"Saldo na trn";"Tegenpartij IBAN";"Tegenpartij naam";"Initierende partij";"BIC tegenpartij";"Code";"Batch ID";"Transactiereferentie";"Machtigingskenmerk";"Incassant ID";"Betalingskenmerk";"Omschrijving-1";"Omschrijving-2";"Omschrijving-3"
+  if (header.includes("volgnr") || header.includes("rentedatum")) {
+    for (const line of lines.slice(1)) {
+      const cols = line.split(";").map((c) => c.replace(/^"|"$/g, "").trim());
+      if (cols.length < 7) continue;
+      const date = cols[4]!;  // YYYY-MM-DD
+      const amtRaw = cols[6]!;
+      const amount = parseAmount(amtRaw);
+      const counterparty = cols[9] ?? "";
+      const desc = [cols[18], cols[19], cols[20]].filter(Boolean).join(" ").trim() || counterparty;
+      rows.push({ date, description: desc, amount, type: amount >= 0 ? "inkomst" : "uitgave" });
+    }
+    return rows;
+  }
+
+  // ABN AMRO: "Accountnumber"\t"Currency"\t"Date"\t"Balance Before"\t"Balance After"\t"Interest Date"\t"Amount"\t"Description"
+  if (header.includes("accountnumber") || (header.includes("amount") && header.includes("description"))) {
+    const sep = header.includes("\t") ? "\t" : ",";
+    for (const line of lines.slice(1)) {
+      const cols = line.split(sep).map((c) => c.replace(/^"|"$/g, "").trim());
+      if (cols.length < 8) continue;
+      const date = cols[2]!;
+      const amtRaw = cols[6]!;
+      const amount = parseAmount(amtRaw);
+      const desc = cols[7] ?? "";
+      rows.push({ date, description: desc, amount, type: amount >= 0 ? "inkomst" : "uitgave" });
+    }
+    return rows;
+  }
+
+  // Generic CSV fallback: date, description, amount
+  const sep = header.includes(";") ? ";" : ",";
+  for (const line of lines.slice(1)) {
+    const cols = line.split(sep).map((c) => c.replace(/^"|"$/g, "").trim());
+    if (cols.length < 3) continue;
+    const date = cols[0]!;
+    const desc = cols[1]!;
+    const amount = parseAmount(cols[2]!);
+    rows.push({ date, description: desc, amount, type: amount >= 0 ? "inkomst" : "uitgave" });
+  }
+  return rows;
+}
+
+api.post("/api/bank-transactions/import-csv", async (c) => {
+  const userId = c.get("userId")!;
+  const formData = await c.req.formData();
+  const file = formData.get("file") as File | null;
+  if (!file) return c.json({ error: "Geen bestand meegestuurd (field: file)" }, 400);
+
+  const text = await file.text();
+  const parsed = detectAndParseCSV(text);
+  if (!parsed.length) return c.json({ error: "Geen geldige transacties gevonden in CSV" }, 400);
+
+  const now = new Date().toISOString();
+  let imported = 0;
+  let skipped = 0;
+
+  for (const row of parsed) {
+    const amount = Math.abs(row.amount);
+    // Skip duplicates (same date + description + amount already exists)
+    const exists = await c.env.DB
+      .prepare("SELECT id FROM bank_transactions WHERE user_id = ? AND date = ? AND description = ? AND amount = ?")
+      .bind(userId, row.date, row.description, amount)
+      .first();
+    if (exists) { skipped++; continue; }
+
+    await c.env.DB
+      .prepare(`INSERT INTO bank_transactions (id, user_id, date, description, amount, type, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+      .bind(crypto.randomUUID(), userId, row.date, row.description, amount, row.type, now)
+      .run();
+    imported++;
+  }
+
+  return c.json({ imported, skipped, total: parsed.length });
+});
+
+// â”€â”€ Reconciliation endpoints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+api.post("/api/bank-transactions/:id/reconcile", async (c) => {
+  const userId = c.get("userId")!;
+  const { id } = c.req.param();
+  const req = await c.req.json<{ type: string; ref_id?: string }>();
+
+  const txn = await c.env.DB
+    .prepare("SELECT id FROM bank_transactions WHERE id = ? AND user_id = ?")
+    .bind(id, userId)
+    .first();
+  if (!txn) return c.json({ error: "Not found" }, 404);
+
+  const now = new Date().toISOString();
+  await c.env.DB
+    .prepare(`UPDATE bank_transactions SET reconciled = 1, reconciled_at = ?, reconciled_type = ?, reconciled_ref_id = ? WHERE id = ? AND user_id = ?`)
+    .bind(now, req.type ?? "manual", req.ref_id ?? null, id, userId)
+    .run();
+
+  return c.json({ ok: true });
+});
+
+api.post("/api/bank-transactions/:id/unreconcile", async (c) => {
+  const userId = c.get("userId")!;
+  const { id } = c.req.param();
+  await c.env.DB
+    .prepare("UPDATE bank_transactions SET reconciled = 0, reconciled_at = NULL, reconciled_type = NULL, reconciled_ref_id = NULL WHERE id = ? AND user_id = ?")
+    .bind(id, userId)
+    .run();
+  return c.json({ ok: true });
+});
+
+// â”€â”€ Auto-match suggestions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+api.get("/api/bank-transactions/:id/suggestions", async (c) => {
+  const userId = c.get("userId")!;
+  const { id } = c.req.param();
+  const txn = await c.env.DB
+    .prepare("SELECT * FROM bank_transactions WHERE id = ? AND user_id = ?")
+    .bind(id, userId)
+    .first<{ amount: number; type: string; date: string }>();
+  if (!txn) return c.json({ error: "Not found" }, 404);
+
+  const amount = txn.amount;
+  // Â±1 cent tolerance, Â±30 dagen
+  const dateParsed = new Date(txn.date);
+  const fromDate = new Date(dateParsed.getTime() - 30 * 86400_000).toISOString().split("T")[0]!;
+  const toDate   = new Date(dateParsed.getTime() + 30 * 86400_000).toISOString().split("T")[0]!;
+
+  const suggestions: unknown[] = [];
+
+  if (txn.type === "inkomst") {
+    const { results: invoices } = await c.env.DB
+      .prepare(`SELECT id, invoice_number, total, status FROM invoices
+                WHERE user_id = ? AND ABS(total - ?) < 0.02 AND status != 'paid'
+                  AND (invoice_date BETWEEN ? AND ? OR due_date BETWEEN ? AND ?) LIMIT 5`)
+      .bind(userId, amount, fromDate, toDate, fromDate, toDate)
+      .all();
+    if (invoices?.length) suggestions.push(...(invoices as Record<string, unknown>[]).map((i) => ({ ...i, match_type: "invoice" })));
+  } else {
+    const { results: expenses } = await c.env.DB
+      .prepare(`SELECT id, description, amount_incl_vat FROM expenses
+                WHERE user_id = ? AND ABS(amount_incl_vat - ?) < 0.02
+                  AND expense_date BETWEEN ? AND ? LIMIT 5`)
+      .bind(userId, amount, fromDate, toDate)
+      .all();
+    if (expenses?.length) suggestions.push(...(expenses as Record<string, unknown>[]).map((e) => ({ ...e, match_type: "expense" })));
+  }
+
+  return c.json(suggestions);
+});
+
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+// â”€â”€ Winst & verlies rekening (P&L) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+api.get("/api/reports/pnl", async (c) => {
+  const userId = c.get("userId")!;
+  const { from, to, year } = c.req.query();
+
+  let fromDate = from;
+  let toDate = to;
+  if (year && !fromDate) {
+    fromDate = `${year}-01-01`;
+    toDate   = `${year}-12-31`;
+  }
+
+  const dateFilter = (fromDate && toDate)
+    ? " AND je.entry_date BETWEEN ? AND ?"
+    : fromDate
+      ? " AND je.entry_date >= ?"
+      : "";
+  const dateParams: unknown[] = fromDate && toDate ? [fromDate, toDate] : fromDate ? [fromDate] : [];
+
+  // Revenue & expenses via journal entries
+  const { results: journalRows } = await c.env.DB
+    .prepare(`
+      SELECT
+        a.account_type,
+        a.account_number,
+        a.name,
+        COALESCE(SUM(l.credit_cents), 0) - COALESCE(SUM(l.debit_cents), 0) AS net_cents
+      FROM chart_of_accounts a
+      LEFT JOIN journal_entry_lines l ON l.account_id = a.id
+      LEFT JOIN journal_entries je    ON je.id = l.journal_entry_id${dateFilter}
+      WHERE a.user_id = ? AND a.account_type IN ('revenue','expenses') AND a.active = 1
+      GROUP BY a.id
+      ORDER BY a.account_number
+    `)
+    .bind(...dateParams, userId)
+    .all<{ account_type: string; account_number: string; name: string; net_cents: number }>();
+
+  const revenue  = (journalRows ?? []).filter((r) => r.account_type === "revenue");
+  const expenses = (journalRows ?? []).filter((r) => r.account_type === "expenses");
+
+  const totalRevenue  = revenue.reduce((s, r)  => s + r.net_cents, 0);
+  const totalExpenses = expenses.reduce((s, r) => s + Math.abs(r.net_cents), 0);
+  const netProfit     = totalRevenue - totalExpenses;
+
+  // Fallback: use invoices/expenses directly when no journal entries exist
+  let fallback = false;
+  if (!journalRows?.length) {
+    fallback = true;
+    const invParams: unknown[] = [userId];
+    let invWhere = "";
+    if (fromDate) { invWhere += " AND invoice_date >= ?"; invParams.push(fromDate); }
+    if (toDate)   { invWhere += " AND invoice_date <= ?"; invParams.push(toDate); }
+    const { results: invRows } = await c.env.DB
+      .prepare(`SELECT COALESCE(SUM(total_cents), CAST(ROUND(SUM(total)*100) AS INTEGER)) AS total_cents FROM invoices WHERE user_id = ? AND status IN ('sent','paid')${invWhere}`)
+      .bind(...invParams)
+      .all<{ total_cents: number }>();
+
+    const expParams: unknown[] = [userId];
+    let expWhere = "";
+    if (fromDate) { expWhere += " AND expense_date >= ?"; expParams.push(fromDate); }
+    if (toDate)   { expWhere += " AND expense_date <= ?"; expParams.push(toDate); }
+    const { results: expRows } = await c.env.DB
+      .prepare(`SELECT COALESCE(SUM(amount_incl_vat_cents), CAST(ROUND(SUM(amount_incl_vat)*100) AS INTEGER)) AS total_cents FROM expenses WHERE user_id = ?${expWhere}`)
+      .bind(...expParams)
+      .all<{ total_cents: number }>();
+
+    return c.json({
+      fallback: true,
+      period: { from: fromDate, to: toDate },
+      revenue: { total_cents: invRows?.[0]?.total_cents ?? 0, lines: [] },
+      expenses: { total_cents: expRows?.[0]?.total_cents ?? 0, lines: [] },
+      net_profit_cents: (invRows?.[0]?.total_cents ?? 0) - (expRows?.[0]?.total_cents ?? 0),
+    });
+  }
+
+  return c.json({
+    fallback,
+    period: { from: fromDate, to: toDate },
+    revenue:  { total_cents: totalRevenue,  lines: revenue  },
+    expenses: { total_cents: totalExpenses, lines: expenses.map((e) => ({ ...e, net_cents: Math.abs(e.net_cents) })) },
+    net_profit_cents: netProfit,
+  });
+});
+
+// â”€â”€ Balansrekening â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+api.get("/api/reports/balance-sheet", async (c) => {
+  const userId = c.get("userId")!;
+  const { as_of } = c.req.query();
+  const asOf = as_of ?? new Date().toISOString().split("T")[0]!;
+
+  const { results } = await c.env.DB
+    .prepare(`
+      SELECT
+        a.account_type,
+        a.account_number,
+        a.name,
+        COALESCE(SUM(l.debit_cents), 0)  AS total_debit_cents,
+        COALESCE(SUM(l.credit_cents), 0) AS total_credit_cents
+      FROM chart_of_accounts a
+      LEFT JOIN journal_entry_lines l ON l.account_id = a.id
+      LEFT JOIN journal_entries je    ON je.id = l.journal_entry_id AND je.entry_date <= ?
+      WHERE a.user_id = ? AND a.account_type IN ('assets','liabilities','equity') AND a.active = 1
+      GROUP BY a.id
+      ORDER BY a.account_number
+    `)
+    .bind(asOf, userId)
+    .all<{ account_type: string; account_number: string; name: string; total_debit_cents: number; total_credit_cents: number }>();
+
+  const rows = results ?? [];
+  const assets      = rows.filter((r) => r.account_type === "assets").map((r) => ({ ...r, balance_cents: r.total_debit_cents - r.total_credit_cents }));
+  const liabilities = rows.filter((r) => r.account_type === "liabilities").map((r) => ({ ...r, balance_cents: r.total_credit_cents - r.total_debit_cents }));
+  const equity      = rows.filter((r) => r.account_type === "equity").map((r) => ({ ...r, balance_cents: r.total_credit_cents - r.total_debit_cents }));
+
+  const totalAssets      = assets.reduce((s, r) => s + r.balance_cents, 0);
+  const totalLiabilities = liabilities.reduce((s, r) => s + r.balance_cents, 0);
+  const totalEquity      = equity.reduce((s, r) => s + r.balance_cents, 0);
+
+  return c.json({
+    as_of: asOf,
+    assets:      { total_cents: totalAssets,      lines: assets },
+    liabilities: { total_cents: totalLiabilities, lines: liabilities },
+    equity:      { total_cents: totalEquity,       lines: equity },
+    balanced: totalAssets === totalLiabilities + totalEquity,
+  });
+});
+
+// â”€â”€ BTW-aangifte overzicht â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+api.get("/api/reports/vat", async (c) => {
+  const userId = c.get("userId")!;
+  const { year, quarter } = c.req.query();
+
+  const y = parseInt(year ?? String(new Date().getFullYear()), 10);
+  const q = quarter ? parseInt(quarter, 10) : null;
+
+  let fromDate: string;
+  let toDate: string;
+  if (q) {
+    const startMonth = (q - 1) * 3 + 1;
+    fromDate = `${y}-${String(startMonth).padStart(2, "0")}-01`;
+    const endMonth = q * 3;
+    const lastDay = new Date(y, endMonth, 0).getDate();
+    toDate = `${y}-${String(endMonth).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+  } else {
+    fromDate = `${y}-01-01`;
+    toDate   = `${y}-12-31`;
+  }
+
+  const { results: invoiceVat } = await c.env.DB
+    .prepare(`
+      SELECT
+        btw_percentage,
+        COALESCE(SUM(subtotal_cents), CAST(ROUND(SUM(subtotal)*100) AS INTEGER))    AS subtotal_cents,
+        COALESCE(SUM(btw_amount_cents), CAST(ROUND(SUM(btw_amount)*100) AS INTEGER)) AS btw_cents
+      FROM invoices
+      WHERE user_id = ? AND status IN ('sent','paid')
+        AND invoice_date BETWEEN ? AND ?
+      GROUP BY btw_percentage
+    `)
+    .bind(userId, fromDate, toDate)
+    .all<{ btw_percentage: number; subtotal_cents: number; btw_cents: number }>();
+
+  const { results: expenseVat } = await c.env.DB
+    .prepare(`
+      SELECT
+        vat_rate,
+        COALESCE(SUM(amount_excl_vat_cents), CAST(ROUND(SUM(amount_excl_vat)*100) AS INTEGER)) AS excl_cents,
+        COALESCE(SUM(vat_amount_cents), CAST(ROUND(SUM(vat_amount)*100) AS INTEGER))           AS vat_cents
+      FROM expenses
+      WHERE user_id = ? AND expense_date BETWEEN ? AND ?
+      GROUP BY vat_rate
+    `)
+    .bind(userId, fromDate, toDate)
+    .all<{ vat_rate: number; excl_cents: number; vat_cents: number }>();
+
+  const vatCharged  = (invoiceVat ?? []).reduce((s, r) => s + r.btw_cents, 0);
+  const vatRecovery = (expenseVat ?? []).reduce((s, r) => s + r.vat_cents, 0);
+
+  return c.json({
+    period: { from: fromDate, to: toDate, year: y, quarter: q },
+    vat_charged_cents:  vatCharged,
+    vat_recovery_cents: vatRecovery,
+    vat_payable_cents:  vatCharged - vatRecovery,
+    invoice_lines: invoiceVat ?? [],
+    expense_lines: expenseVat ?? [],
+  });
+});
+
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+// â”€â”€ Org info + members â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+api.get("/api/org", async (c) => {
+  const orgId = c.get("userId")!;
+  const org = await c.env.DB.prepare("SELECT * FROM organizations WHERE id = ?").bind(orgId).first();
+  if (!org) return c.json({ error: "Organisatie niet gevonden" }, 404);
+  const { results: members } = await c.env.DB
+    .prepare(`SELECT m.id, m.user_id, m.role, m.joined_at, u.email
+              FROM organization_members m
+              JOIN users u ON u.id = m.user_id
+              WHERE m.org_id = ? ORDER BY m.joined_at`)
+    .bind(orgId)
+    .all();
+  const { results: pendingInvites } = await c.env.DB
+    .prepare("SELECT id, email, role, expires_at, created_at FROM org_invites WHERE org_id = ? AND accepted_at IS NULL AND expires_at > datetime('now') ORDER BY created_at DESC")
+    .bind(orgId)
+    .all();
+  return c.json({ ...org, members: members ?? [], pending_invites: pendingInvites ?? [] });
+});
+
+api.patch("/api/org", async (c) => {
+  const orgId   = c.get("userId")!;
+  const orgRole = c.get("orgRole") ?? "member";
+  if (!["owner", "admin"].includes(orgRole)) return c.json({ error: "Geen toegang" }, 403);
+  const req = await c.req.json<{ name?: string; plan?: string }>();
+  const now = new Date().toISOString();
+  await c.env.DB
+    .prepare("UPDATE organizations SET name = COALESCE(?, name), plan = COALESCE(?, plan), updated_at = ? WHERE id = ?")
+    .bind(req.name ?? null, req.plan ?? null, now, orgId)
+    .run();
+  return c.json(await c.env.DB.prepare("SELECT * FROM organizations WHERE id = ?").bind(orgId).first());
+});
+
+// â”€â”€ Invite member â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+api.post("/api/org/invite", async (c) => {
+  const orgId      = c.get("userId")!;
+  const ownUserId  = c.get("ownUserId") ?? orgId;
+  const orgRole    = c.get("orgRole") ?? "member";
+  if (!["owner", "admin"].includes(orgRole)) return c.json({ error: "Geen toegang" }, 403);
+
+  const req = await c.req.json<{ email?: string; role?: string }>();
+  const email = (req.email ?? "").trim().toLowerCase();
+  if (!email) return c.json({ error: "Email is verplicht" }, 400);
+  const role = (["admin", "member", "viewer"].includes(req.role ?? "") ? req.role : "member") as string;
+
+  const token = crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
+  const now = new Date().toISOString();
+  const expiresAt = new Date(Date.now() + 7 * 86400_000).toISOString();
+
+  // Cancel any existing open invite for the same email+org
+  await c.env.DB
+    .prepare("DELETE FROM org_invites WHERE org_id = ? AND email = ? AND accepted_at IS NULL")
+    .bind(orgId, email)
+    .run();
+
+  await c.env.DB
+    .prepare("INSERT INTO org_invites (id, org_id, email, role, token, invited_by, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+    .bind(crypto.randomUUID(), orgId, email, role, token, ownUserId, expiresAt, now)
+    .run();
+
+  const org = await c.env.DB.prepare("SELECT name FROM organizations WHERE id = ?").bind(orgId).first<{ name: string }>();
+  return c.json({ invite_token: token, email, role, expires_at: expiresAt, org_name: org?.name });
+});
+
+// â”€â”€ Accept invite (new or existing user) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+api.get("/api/org/invite/info", async (c) => {
+  const { token } = c.req.query();
+  if (!token) return c.json({ error: "Token verplicht" }, 400);
+  const invite = await c.env.DB
+    .prepare(`SELECT i.email, i.role, i.expires_at, o.name as org_name
+              FROM org_invites i JOIN organizations o ON o.id = i.org_id
+              WHERE i.token = ? AND i.accepted_at IS NULL AND i.expires_at > datetime('now')`)
+    .bind(token)
+    .first<{ email: string; role: string; expires_at: string; org_name: string }>();
+  if (!invite) return c.json({ error: "Uitnodiging niet gevonden of verlopen" }, 404);
+  return c.json(invite);
+});
+
+api.post("/api/org/invite/accept", async (c) => {
+  const secret = c.env.JWT_SECRET;
+  const req = await c.req.json<{ token?: string; email?: string; password?: string; name?: string }>();
+  const inviteToken = req.token ?? "";
+  if (!inviteToken) return c.json({ error: "Token verplicht" }, 400);
+
+  const invite = await c.env.DB
+    .prepare("SELECT * FROM org_invites WHERE token = ? AND accepted_at IS NULL AND expires_at > datetime('now')")
+    .bind(inviteToken)
+    .first<{ id: string; org_id: string; email: string; role: string; invited_by: string }>();
+  if (!invite) return c.json({ error: "Uitnodiging niet gevonden of verlopen" }, 404);
+
+  const email   = (req.email ?? invite.email).trim().toLowerCase();
+  const password = req.password ?? "";
+  const now = new Date().toISOString();
+
+  // Check if user exists already
+  let userId: string;
+  let existingUser = await c.env.DB.prepare("SELECT id FROM users WHERE email = ?").bind(email).first<{ id: string }>();
+
+  if (existingUser) {
+    userId = existingUser.id;
+  } else {
+    // Register new user
+    if (password.length < 6) return c.json({ error: "Wachtwoord minimaal 6 tekens" }, 400);
+    const hash = await hashPassword(password);
+    userId = crypto.randomUUID();
+    await c.env.DB.prepare("INSERT INTO users (id, email, password_hash, created_at) VALUES (?, ?, ?, ?)")
+      .bind(userId, email, hash, now)
+      .run();
+  }
+
+  // Add to org (or update role if already member)
+  const alreadyMember = await c.env.DB
+    .prepare("SELECT id FROM organization_members WHERE org_id = ? AND user_id = ?")
+    .bind(invite.org_id, userId)
+    .first();
+  if (!alreadyMember) {
+    await c.env.DB
+      .prepare("INSERT INTO organization_members (id, org_id, user_id, role, invited_by, joined_at) VALUES (?, ?, ?, ?, ?, ?)")
+      .bind(crypto.randomUUID(), invite.org_id, userId, invite.role, invite.invited_by, now)
+      .run();
+  }
+
+  // Mark invite as accepted
+  await c.env.DB
+    .prepare("UPDATE org_invites SET accepted_at = ? WHERE id = ?")
+    .bind(now, invite.id)
+    .run();
+
+  const token = await signUserToken(secret, userId, email, invite.org_id, invite.role as "owner" | "admin" | "member" | "viewer");
+  return c.json({ token, user: { id: userId, email, org_id: invite.org_id, org_role: invite.role } });
+});
+
+// â”€â”€ Remove member â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+api.delete("/api/org/members/:memberId", async (c) => {
+  const orgId   = c.get("userId")!;
+  const orgRole = c.get("orgRole") ?? "member";
+  if (!["owner", "admin"].includes(orgRole)) return c.json({ error: "Geen toegang" }, 403);
+  const { memberId } = c.req.param();
+  // Cannot remove org owner
+  const m = await c.env.DB
+    .prepare("SELECT role FROM organization_members WHERE id = ? AND org_id = ?")
+    .bind(memberId, orgId)
+    .first<{ role: string }>();
+  if (!m) return c.json({ error: "Lid niet gevonden" }, 404);
+  if (m.role === "owner") return c.json({ error: "Eigenaar kan niet worden verwijderd" }, 400);
+  await c.env.DB.prepare("DELETE FROM organization_members WHERE id = ? AND org_id = ?").bind(memberId, orgId).run();
+  return c.body(null, 204);
+});
+
+// â”€â”€ Update member role â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+api.patch("/api/org/members/:memberId", async (c) => {
+  const orgId   = c.get("userId")!;
+  const orgRole = c.get("orgRole") ?? "member";
+  if (orgRole !== "owner") return c.json({ error: "Alleen eigenaar kan rollen wijzigen" }, 403);
+  const { memberId } = c.req.param();
+  const req = await c.req.json<{ role?: string }>();
+  if (!["admin", "member", "viewer"].includes(req.role ?? "")) return c.json({ error: "Ongeldige rol" }, 400);
+  await c.env.DB
+    .prepare("UPDATE organization_members SET role = ? WHERE id = ? AND org_id = ?")
+    .bind(req.role, memberId, orgId)
+    .run();
+  return c.json({ ok: true });
+});
+
+// â”€â”€ Cancel invite â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+api.delete("/api/org/invites/:inviteId", async (c) => {
+  const orgId   = c.get("userId")!;
+  const orgRole = c.get("orgRole") ?? "member";
+  if (!["owner", "admin"].includes(orgRole)) return c.json({ error: "Geen toegang" }, 403);
+  const { inviteId } = c.req.param();
+  await c.env.DB.prepare("DELETE FROM org_invites WHERE id = ? AND org_id = ?").bind(inviteId, orgId).run();
+  return c.body(null, 204);
+});
+
+// â”€â”€ Switch org (for users in multiple orgs) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+api.post("/api/org/switch", async (c) => {
+  const secret     = c.env.JWT_SECRET;
+  const ownUserId  = c.get("ownUserId") ?? c.get("userId")!;
+  const email      = c.get("email") ?? "";
+  const req        = await c.req.json<{ org_id?: string }>();
+  const targetOrgId = req.org_id;
+  if (!targetOrgId) return c.json({ error: "org_id verplicht" }, 400);
+
+  const member = await c.env.DB
+    .prepare("SELECT role FROM organization_members WHERE org_id = ? AND user_id = ?")
+    .bind(targetOrgId, ownUserId)
+    .first<{ role: string }>();
+  if (!member) return c.json({ error: "Geen toegang tot deze organisatie" }, 403);
+
+  const token = await signUserToken(secret, ownUserId, email, targetOrgId, member.role as "owner" | "admin" | "member" | "viewer");
+  return c.json({ token, org_id: targetOrgId, org_role: member.role });
+});
+
+// â”€â”€ List my orgs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+api.get("/api/org/mine", async (c) => {
+  const ownUserId = c.get("ownUserId") ?? c.get("userId")!;
+  const { results } = await c.env.DB
+    .prepare(`SELECT o.id, o.name, o.plan, m.role
+              FROM organization_members m
+              JOIN organizations o ON o.id = m.org_id
+              WHERE m.user_id = ? ORDER BY m.joined_at`)
+    .bind(ownUserId)
+    .all();
+  return c.json(results ?? []);
+});
+
 /** D1-fouten (o.a. ontbrekende tabellen) anders als kale "Internal Server Error" zonder JSON. */
 api.onError((err, c) => {
   console.error(err);
@@ -2252,7 +3194,6 @@ api.onError((err, c) => {
   return c.json({ error: "Serverfout" }, 500);
 });
 
-// --- Telegram notification helper ---
 async function sendTelegramMessage(env: Env, text: string): Promise<void> {
   if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID) return;
   await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
@@ -2288,17 +3229,17 @@ async function getUpcomingPayments(env: Env): Promise<UpcomingPaymentRow[]> {
 function buildUpcomingPaymentsMessage(results: UpcomingPaymentRow[]): string {
   const lines = results.map((s) => {
     const method = s.payment_method ?? "onbekend";
-    const cat = s.category === "zakelijk" ? "Zakelijk" : "Privé";
+    const cat = s.category === "zakelijk" ? "Zakelijk" : "PrivÃ©";
     const date = new Date(s.next_payment_date).toLocaleDateString("nl-NL", { day: "numeric", month: "long" });
-    return `• <b>${s.name}</b> — €${Number(s.amount).toFixed(2)} (${method}) — ${date} [${cat}]`;
+    return `â€¢ <b>${s.name}</b> â€” â‚¬${Number(s.amount).toFixed(2)} (${method}) â€” ${date} [${cat}]`;
   });
 
   const total = results.reduce((sum, s) => sum + Number(s.amount), 0);
 
   return (
-    `💰 <b>Komende betalingen</b>\n\n` +
+    `ðŸ’° <b>Komende betalingen</b>\n\n` +
     lines.join("\n") +
-    `\n\n<b>Totaal: €${total.toFixed(2)}</b>\n\nZorg dat je saldo/creditcard op orde is!`
+    `\n\n<b>Totaal: â‚¬${total.toFixed(2)}</b>\n\nZorg dat je saldo/creditcard op orde is!`
   );
 }
 
@@ -2319,7 +3260,7 @@ api.post("/api/telegram/test", async (c) => {
   const email = c.get("email") ?? "onbekend";
   const now = new Date().toLocaleString("nl-NL", { dateStyle: "medium", timeStyle: "short" });
   const text =
-    `🧪 <b>Telegram testbericht</b>\n` +
+    `ðŸ§ª <b>Telegram testbericht</b>\n` +
     `Verzonden vanuit de app-instellingen.\n` +
     `Gebruiker: <code>${email}</code>\n` +
     `Tijd: ${now}`;
@@ -2339,7 +3280,7 @@ api.post("/api/telegram/test-upcoming-payments", async (c) => {
   if (results.length === 0) {
     await sendTelegramMessage(
       c.env,
-      "💰 <b>Komende betalingen</b>\n\nGeen betalingen gepland in de komende 2 dagen.",
+      "ðŸ’° <b>Komende betalingen</b>\n\nGeen betalingen gepland in de komende 2 dagen.",
     );
     return c.json({ ok: true, count: 0 });
   }
@@ -2348,50 +3289,8 @@ api.post("/api/telegram/test-upcoming-payments", async (c) => {
   return c.json({ ok: true, count: results.length });
 });
 
-// Exported for Node.js server (server/index.ts uses this directly with adapter bindings)
 export { api };
 
-// --- Deploy: static SPA + API ---
-export default {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    const url = new URL(request.url);
-    if (url.pathname.startsWith("/api")) {
-      return api.fetch(request, env, ctx);
-    }
-    if (env.ASSETS) {
-      return env.ASSETS.fetch(request);
-    }
-    return new Response("Build the SPA first (npm run build) and deploy with [assets] in wrangler.toml.", {
-      status: 404,
-      headers: { "Content-Type": "text/plain; charset=utf-8" },
-    });
-  },
-  async scheduled(_event: ScheduledEvent, env: Env, _ctx: ExecutionContext): Promise<void> {
-    const now = new Date();
-    const nlParts = new Intl.DateTimeFormat("nl-NL", {
-      timeZone: "Europe/Amsterdam",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    })
-      .formatToParts(now)
-      .reduce<Record<string, string>>((acc, p) => {
-        if (p.type === "hour" || p.type === "minute") acc[p.type] = p.value;
-        return acc;
-      }, {});
-    const nlTime = `${nlParts.hour ?? "00"}:${nlParts.minute ?? "00"}`;
-    const utcHour = now.getUTCHours();
-    const utcMinute = now.getUTCMinutes();
-
-    // Bestaande dagelijkse run om 08:00 UTC behouden.
-    if (utcHour === 8 && utcMinute === 0) {
-      await checkUpcomingPayments(env);
-      return;
-    }
-
-    // Extra run exact om 10:23 Nederlandse tijd (DST-safe).
-    if (nlTime === "10:23") {
-      await checkUpcomingPayments(env);
-    }
-  },
-};
+export async function runScheduledTasks(env: Env): Promise<void> {
+  await checkUpcomingPayments(env);
+}

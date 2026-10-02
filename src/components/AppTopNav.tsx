@@ -3,33 +3,35 @@ import { Link, useLocation } from "react-router-dom";
 import {
   LayoutDashboard, Building2, Clock, FileText, FileCheck, BarChart3,
   Settings, LogOut, NotebookPen, RepeatIcon, Users, Package, Receipt,
-  Calculator, Car, Landmark, ChevronDown, Menu, X,
+  Calculator, Car, Landmark, BookOpen, PieChart, ChevronDown, Menu, X,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 
-const LOGO_SRC = "/gibby-logo.png";
+const LOGO_SRC = "/zedgerr-logo.png";
 
 type NavItem = { title: string; url: string; icon: React.ElementType };
 
 const primaryNav: NavItem[] = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard },
-  { title: "Facturen", url: "/facturen", icon: FileText },
-  { title: "Bedrijven", url: "/bedrijven", icon: Building2 },
-  { title: "Uren", url: "/uren", icon: Clock },
-  { title: "Uitgaven", url: "/uitgaven", icon: Receipt },
-  { title: "Bankrekening", url: "/bankrekening", icon: Landmark },
-  { title: "Overzichten", url: "/overzichten", icon: BarChart3 },
+  { title: "Invoices", url: "/invoices", icon: FileText },
+  { title: "Companies", url: "/companies", icon: Building2 },
+  { title: "Time", url: "/time", icon: Clock },
+  { title: "Expenses", url: "/expenses", icon: Receipt },
+  { title: "Bank", url: "/bank", icon: Landmark },
+  { title: "Reports", url: "/reports", icon: BarChart3 },
 ];
 
 const moreNav: NavItem[] = [
-  { title: "Offertes", url: "/offertes", icon: FileCheck },
-  { title: "Belasting", url: "/belasting", icon: Calculator },
-  { title: "Abonnementen", url: "/abonnementen", icon: RepeatIcon },
+  { title: "Accounting", url: "/accounting", icon: BookOpen },
+  { title: "Financial Reports", url: "/financial", icon: PieChart },
+  { title: "Quotes", url: "/quotes", icon: FileCheck },
+  { title: "Tax", url: "/tax", icon: Calculator },
+  { title: "Subscriptions", url: "/subscriptions", icon: RepeatIcon },
   { title: "Leads", url: "/leads", icon: Users },
-  { title: "Producten", url: "/producten", icon: Package },
-  { title: "Kilometers", url: "/kilometers", icon: Car },
-  { title: "Notities", url: "/notities", icon: NotebookPen },
+  { title: "Products", url: "/products", icon: Package },
+  { title: "Mileage", url: "/mileage", icon: Car },
+  { title: "Notes", url: "/notes", icon: NotebookPen },
 ];
 
 function isActive(url: string, pathname: string) {
@@ -69,7 +71,7 @@ export function AppTopNav() {
       <header className="h-14 bg-[hsl(var(--nav-bg))] border-b border-[hsl(var(--nav-border))] flex items-center px-4 gap-4 sticky top-0 z-40">
         {/* Logo */}
         <Link to="/" className="flex items-center gap-2 shrink-0 mr-2">
-          <img src={LOGO_SRC} alt="gibby.it" className="h-7 w-auto object-contain" />
+          <img src={LOGO_SRC} alt="Zedgerr" className="h-7 w-auto object-contain" />
         </Link>
 
         {/* Desktop nav */}
@@ -106,7 +108,7 @@ export function AppTopNav() {
                   : "text-[hsl(var(--nav-fg))] hover:text-[hsl(var(--nav-fg-active))] hover:bg-[hsl(var(--secondary))]",
               )}
             >
-              Meer
+              More
               <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", moreOpen && "rotate-180")} />
               {activeInMore && (
                 <span className="absolute bottom-0 left-3 right-3 h-0.5 bg-[hsl(var(--nav-indicator))] rounded-full" />
@@ -146,10 +148,10 @@ export function AppTopNav() {
         <div className="flex items-center gap-2 shrink-0">
           {/* Settings */}
           <Link
-            to="/instellingen"
+            to="/settings"
             className={cn(
               "hidden md:flex items-center gap-1 px-3 py-1.5 text-sm rounded-md transition-colors",
-              isActive("/instellingen", location.pathname)
+              isActive("/settings", location.pathname)
                 ? "text-[hsl(var(--nav-fg-active))] font-medium bg-[hsl(var(--secondary))]"
                 : "text-[hsl(var(--nav-fg))] hover:text-[hsl(var(--nav-fg-active))] hover:bg-[hsl(var(--secondary))]",
             )}
@@ -176,7 +178,7 @@ export function AppTopNav() {
                   className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-destructive hover:bg-destructive/8 transition-colors"
                 >
                   <LogOut className="h-4 w-4" />
-                  Uitloggen
+                  Sign out
                 </button>
               </div>
             )}
@@ -216,23 +218,23 @@ export function AppTopNav() {
             })}
             <div className="border-t border-[hsl(var(--border))] mt-2 pt-2">
               <Link
-                to="/instellingen"
+                to="/settings"
                 className={cn(
                   "flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-colors",
-                  isActive("/instellingen", location.pathname)
+                  isActive("/settings", location.pathname)
                     ? "text-[hsl(var(--primary))] font-medium bg-[hsl(var(--accent))]"
                     : "text-[hsl(var(--foreground))] hover:bg-[hsl(var(--secondary))]",
                 )}
               >
                 <Settings className="h-4 w-4" />
-                Instellingen
+                Settings
               </Link>
               <button
                 onClick={signOut}
                 className="flex items-center gap-3 w-full px-3 py-2.5 rounded-md text-sm text-destructive hover:bg-destructive/10 transition-colors"
               >
                 <LogOut className="h-4 w-4" />
-                Uitloggen
+                Sign out
               </button>
             </div>
           </nav>

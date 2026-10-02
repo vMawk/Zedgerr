@@ -1,4 +1,4 @@
-/// <reference types="@cloudflare/workers-types" />
+import type { D1Database } from "./types.js";
 
 const HOURS = [6, 4.5, 2, 3, 1.5, 7, 8, 5, 8, 5, 8, 8.5];
 const TOTAL_INCL = 622.5;
