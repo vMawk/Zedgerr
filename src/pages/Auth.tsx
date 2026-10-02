@@ -17,7 +17,7 @@ const HIGHLIGHTS = [
   { icon: FileText, text: "Invoices, quotes and credit notes in your own currency" },
   { icon: Globe2, text: "Tax presets for 40+ countries, including EU reverse charge" },
   { icon: Timer, text: "Time tracking, expenses, mileage and bank imports" },
-  { icon: ShieldCheck, text: "Self-hosted on your own server, with two-factor sign-in" },
+  { icon: ShieldCheck, text: "Your data never leaves your server — self-hosted, encrypted backups, two-factor sign-in" },
 ];
 
 function errorMessage(error: unknown, fallback: string) {
