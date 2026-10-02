@@ -182,7 +182,7 @@ export const api = {
   getSmtpSettings: () => req<{ host: string; port: number; secure: number; username: string; from_name: string; from_email: string; base_url: string }>("GET", "/smtp-settings"),
   saveSmtpSettings: (body: { host: string; port: number; secure: number; username: string; password: string; from_name: string; from_email: string; base_url: string }) =>
     req<{ ok: boolean }>("PUT", "/smtp-settings", body),
-  testSmtp: () => req<{ ok: boolean }>("POST", "/smtp-settings/test"),
+  testSmtp: (to: string) => req<{ ok: boolean }>("POST", "/smtp-settings/test", { to }),
 
   getInvoices: () => req<(Invoice & { companies: { name: string | null; contact_person: string | null } | null })[]>("GET", "/invoices"),
   invoicesExistForMonth: (month: string) => req<{ exists: boolean }>("GET", `/invoices/exists?month=${encodeURIComponent(month)}`),

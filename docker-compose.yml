@@ -1,7 +1,7 @@
 services:
   zedgerr:
-    image: ghcr.io/vmawk/zedgerr:latest
-    # build: .   # use this instead of `image` to build from source
+    build: .
+    # image: ghcr.io/vmawk/zedgerr:latest   # use pre-built image once published
     container_name: zedgerr
     restart: unless-stopped
     ports:

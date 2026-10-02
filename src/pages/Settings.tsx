@@ -65,6 +65,7 @@ export default function Settings() {
   const [smtpLoaded, setSmtpLoaded] = useState(false);
   const [savingSmtp, setSavingSmtp] = useState(false);
   const [testingSmtp, setTestingSmtp] = useState(false);
+  const [smtpTestTo, setSmtpTestTo] = useState("");
 
   // Backup / restore
   const [backupPassword, setBackupPassword] = useState("");
@@ -305,8 +306,8 @@ export default function Settings() {
   const handleTestSmtp = async () => {
     setTestingSmtp(true);
     try {
-      await api.testSmtp();
-      toast({ title: "Test email sent", description: "Check your inbox." });
+      await api.testSmtp(smtpTestTo);
+      toast({ title: "Test email sent", description: `Check ${smtpTestTo || "your inbox"}.` });
     } catch (err: unknown) {
       toast({ title: "Test failed", description: err instanceof Error ? err.message : String(err), variant: "destructive" });
     } finally {
@@ -842,9 +843,20 @@ export default function Settings() {
                   <Label htmlFor="smtp-tls" className="cursor-pointer font-normal">Use TLS (port 465)</Label>
                 </div>
               </div>
-              <div className="flex flex-wrap gap-2 pt-2">
+              <div className="flex flex-wrap gap-2 items-end pt-2">
                 <Button onClick={handleSaveSmtp} disabled={savingSmtp}>{savingSmtp ? "Saving…" : "Save"}</Button>
-                <Button variant="outline" onClick={handleTestSmtp} disabled={testingSmtp || !smtp.host}>{testingSmtp ? "Sending…" : "Send test email"}</Button>
+                <div className="flex gap-2 items-center">
+                  <Input
+                    type="email"
+                    placeholder="Send test to…"
+                    value={smtpTestTo}
+                    onChange={(e) => setSmtpTestTo(e.target.value)}
+                    className="w-52 h-9 text-sm"
+                  />
+                  <Button variant="outline" onClick={handleTestSmtp} disabled={testingSmtp || !smtp.host}>
+                    {testingSmtp ? "Sending…" : "Send test"}
+                  </Button>
+                </div>
               </div>
             </CardContent>
           </Card>

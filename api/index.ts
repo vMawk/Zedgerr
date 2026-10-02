@@ -3205,6 +3205,10 @@ api.post("/api/org/invite", async (c) => {
     .run();
 
   const org = await c.env.DB.prepare("SELECT name FROM organizations WHERE id = ?").bind(orgId).first<{ name: string }>();
+  // Prefer the business name the owner filled in over the auto-generated org name
+  const biz = await c.env.DB.prepare("SELECT company_name FROM business_settings WHERE user_id = ? LIMIT 1").bind(orgId).first<{ company_name: string | null }>();
+  const displayName = biz?.company_name?.trim() || org?.name || "Zedgerr";
+
   // Send invite email if SMTP is configured
   const smtp = await c.env.DB
     .prepare("SELECT * FROM smtp_settings WHERE user_id = ? LIMIT 1")
@@ -3222,12 +3226,28 @@ api.post("/api/org/invite", async (c) => {
         auth: smtp.username ? { user: smtp.username, pass: smtp.password } : undefined,
       });
       const inviteUrl = `${smtp.base_url.replace(/\/$/, "")}/invite?token=${token}`;
-      const orgName = org?.name ?? "Zedgerr";
+      const roleLabel = role.charAt(0).toUpperCase() + role.slice(1);
+      const expiryDate = new Date(expiresAt).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
       await transport.sendMail({
         from: smtp.from_name ? `"${smtp.from_name}" <${smtp.from_email}>` : smtp.from_email,
         to: email,
-        subject: `You've been invited to ${orgName}`,
-        html: `<p>Hi,</p><p>You've been invited to join <strong>${orgName}</strong> as a ${role}.</p><p><a href="${inviteUrl}">Accept invitation</a></p><p>This link expires on ${new Date(expiresAt).toDateString()}.</p><p>If you didn't expect this, you can ignore this email.</p>`,
+        subject: `You've been invited to ${displayName}`,
+        html: `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#f4f4f5;font-family:system-ui,sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:40px 16px;">
+<table width="520" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.08);">
+  <tr><td style="background:#004030;padding:28px 32px;">
+    <span style="font-size:22px;font-weight:700;color:#fff;letter-spacing:-0.5px;">${displayName}</span>
+  </td></tr>
+  <tr><td style="padding:32px;">
+    <p style="margin:0 0 8px;font-size:18px;font-weight:600;color:#111;">You've been invited</p>
+    <p style="margin:0 0 24px;font-size:15px;color:#555;">You've been invited to join <strong>${displayName}</strong> as a <strong>${roleLabel}</strong>.</p>
+    <a href="${inviteUrl}" style="display:inline-block;background:#004030;color:#fff;text-decoration:none;font-size:15px;font-weight:600;padding:12px 28px;border-radius:8px;">Accept invitation</a>
+    <p style="margin:24px 0 0;font-size:13px;color:#888;">Or copy this link into your browser:<br><span style="color:#004030;word-break:break-all;">${inviteUrl}</span></p>
+    <p style="margin:20px 0 0;font-size:13px;color:#aaa;border-top:1px solid #f0f0f0;padding-top:16px;">This invitation expires on ${expiryDate}. If you didn't expect this, you can ignore this email.</p>
+  </td></tr>
+</table>
+</td></tr></table>
+</body></html>`,
       });
       emailSent = true;
     } catch {
@@ -3436,7 +3456,9 @@ api.put("/api/smtp-settings", async (c) => {
 
 api.post("/api/smtp-settings/test", async (c) => {
   const userId = c.get("userId")!;
-  const email  = c.get("email") ?? "";
+  const body = await c.req.json<{ to?: string }>().catch(() => ({} as { to?: string }));
+  const to = (body.to ?? "").trim() || (c.get("email") ?? "");
+  if (!to) return c.json({ error: "Recipient email is required" }, 400);
   const smtp = await c.env.DB
     .prepare("SELECT * FROM smtp_settings WHERE user_id = ? LIMIT 1")
     .bind(userId)
@@ -3451,7 +3473,7 @@ api.post("/api/smtp-settings/test", async (c) => {
     });
     await transport.sendMail({
       from: smtp.from_name ? `"${smtp.from_name}" <${smtp.from_email}>` : smtp.from_email,
-      to: email,
+      to,
       subject: "Zedgerr SMTP test",
       html: "<p>Your SMTP configuration is working. Team invites will be sent via this address.</p>",
     });

@@ -1,7 +1,7 @@
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { getConnInfo } from "@hono/node-server/conninfo";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import Database from "better-sqlite3";
 import { createCipheriv, createDecipheriv, pbkdf2Sync, randomBytes } from "crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "fs";
@@ -86,7 +86,7 @@ function deriveKey(password: string, salt: Buffer): Buffer {
   return pbkdf2Sync(password, salt, 100_000, 32, "sha256");
 }
 
-async function requireOwner(c: Parameters<Parameters<typeof app.post>[1]>[0]): Promise<boolean> {
+async function requireOwner(c: Context): Promise<boolean> {
   const auth = c.req.header("Authorization") ?? "";
   if (!auth.startsWith("Bearer ")) return false;
   try {
@@ -99,18 +99,22 @@ async function requireOwner(c: Parameters<Parameters<typeof app.post>[1]>[0]): P
 
 app.post("/api/backup", async (c) => {
   if (!await requireOwner(c)) return c.json({ error: "Owner access required" }, 403);
-  const body = await c.req.json<{ password?: string }>().catch(() => ({}));
-  if (!body.password || body.password.length < 8) return c.json({ error: "Password must be at least 8 characters" }, 400);
+  let password = "";
+  try {
+    const body = await c.req.json<{ password?: string }>();
+    password = body.password ?? "";
+  } catch { /* no body */ }
+  if (!password || password.length < 8) return c.json({ error: "Password must be at least 8 characters" }, 400);
 
   sqlite.pragma("wal_checkpoint(TRUNCATE)");
   const dbData = readFileSync(DB_PATH);
   const salt = randomBytes(32);
   const iv   = randomBytes(12);
-  const key  = deriveKey(body.password, salt);
+  const key  = deriveKey(password, salt);
   const cipher = createCipheriv("aes-256-gcm", key, iv);
-  const ciphertext = Buffer.concat([cipher.update(dbData), cipher.final()]);
+  const encrypted = Buffer.concat([cipher.update(dbData), cipher.final()]);
   const authTag = cipher.getAuthTag();
-  const output = Buffer.concat([BACKUP_MAGIC, Buffer.from([1]), salt, iv, authTag, ciphertext]);
+  const output = Buffer.concat([BACKUP_MAGIC, Buffer.from([1]), salt, iv, authTag, encrypted]);
   const date = new Date().toISOString().slice(0, 10);
   return new Response(output, {
     headers: {
@@ -120,7 +124,7 @@ app.post("/api/backup", async (c) => {
   });
 });
 
-app.post("/api/restore", async (c) => {
+app.post("/api/restore", async (c: Context) => {
   if (!await requireOwner(c)) return c.json({ error: "Owner access required" }, 403);
   let file: File | null = null;
   let password = "";
