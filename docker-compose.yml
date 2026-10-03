@@ -1,0 +1,16 @@
+services:
+  zedgerr:
+    build: .
+    # image: ghcr.io/vmawk/zedgerr:latest   # use pre-built image once published
+    container_name: zedgerr
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./zedgerr-data:/data
+    environment:
+      # Set to "true" when running behind a reverse proxy (recommended for HTTPS).
+      TRUST_PROXY: "false"
+      # Optional settings: see the README for the full list.
+      # ALLOW_REGISTRATION: "false"
+      # OPENAI_API_KEY: ""

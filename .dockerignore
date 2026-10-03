@@ -1,0 +1,12 @@
+node_modules
+dist
+dist-server
+.git
+.env
+.env.*
+!.env.example
+data
+.db-dumps
+*.mp4
+*.sql
+docs/screenshots

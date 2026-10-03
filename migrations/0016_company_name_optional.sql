@@ -1,0 +1,3 @@
+-- Bedrijfsnaam optioneel: app toont "Klant" als naam leeg is (lege string i.p.v. NULL).
+-- No DROP TABLE companies here: the CASCADE would delete all time entries and invoices.
+-- debt_to_client staat al in companies (0012_company_debt_and_settlements op productie).

@@ -1,0 +1,4 @@
+ALTER TABLE users ADD COLUMN totp_secret TEXT;
+ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN totp_last_step INTEGER;
+ALTER TABLE users ADD COLUMN totp_recovery_codes TEXT;
