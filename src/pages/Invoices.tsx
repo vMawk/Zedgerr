@@ -168,11 +168,17 @@ export default function Invoices() {
     setPaymentMethod("overboeking");
   };
 
+  // Volgende nummer = hoogste bestaande nummer van dit jaar + 1 (niet het aantal facturen,
+  // want dat geeft dubbele nummers zodra er een factuur is verwijderd of overgeslagen).
   const generateInvoiceNumber = () => {
-    const now = new Date();
-    const year = now.getFullYear();
-    const count = invoices.filter((i) => i.invoice_number.startsWith(`F${year}`)).length + 1;
-    return `F${year}-${String(count).padStart(4, "0")}`;
+    const year = new Date().getFullYear();
+    const prefix = `F${year}-`;
+    const max = invoices.reduce((m, i) => {
+      if (!i.invoice_number.startsWith(prefix)) return m;
+      const n = parseInt(i.invoice_number.slice(prefix.length), 10);
+      return Number.isNaN(n) ? m : Math.max(m, n);
+    }, 0);
+    return `${prefix}${String(max + 1).padStart(4, "0")}`;
   };
 
   // ---- Regel-helpers (zelfde model als offertes) ----

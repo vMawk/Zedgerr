@@ -1025,6 +1025,14 @@ api.post("/api/invoices", async (c) => {
     .first<{ id: string; advance_balance: number }>();
   if (!company) return c.json({ error: "Bedrijf niet gevonden" }, 404);
 
+  const requestedNumber = String(req.invoice_number ?? "").trim();
+  if (!requestedNumber) return c.json({ error: "Factuurnummer ontbreekt" }, 400);
+  const duplicate = await c.env.DB
+    .prepare("SELECT 1 FROM invoices WHERE user_id = ? AND invoice_number = ?")
+    .bind(userId, requestedNumber)
+    .first();
+  if (duplicate) return c.json({ error: `Factuurnummer ${requestedNumber} bestaat al` }, 409);
+
   const companyAdvanceBalance = Math.max(0, toMoney(company.advance_balance, 0));
   const requestedAdvance = Math.max(0, toMoney(advance, 0));
   const appliedAdvance = Math.min(requestedAdvance, total, companyAdvanceBalance);
@@ -1154,14 +1162,23 @@ function addDaysIso(dateIso: string, days: number): string {
   return d.toISOString().split("T")[0]!;
 }
 
-async function nextInvoiceNumberForYear(db: D1Database, userId: string, year: number, offset: number): Promise<string> {
-  const prefix = `F${year}-`;
-  const row = await db
-    .prepare("SELECT COUNT(*) as c FROM invoices WHERE user_id = ? AND invoice_number LIKE ?")
+// Volgend nummer = hoogste bestaande nummer met dit voorvoegsel + 1.
+// Telt niet de facturen: dat gaf dubbele nummers na een verwijderde of overgeslagen factuur.
+async function nextNumberForPrefix(db: D1Database, userId: string, prefix: string, offset = 0): Promise<string> {
+  const { results } = await db
+    .prepare("SELECT invoice_number FROM invoices WHERE user_id = ? AND invoice_number LIKE ?")
     .bind(userId, `${prefix}%`)
-    .first<{ c: number }>();
-  const n = (row?.c ?? 0) + 1 + offset;
-  return `${prefix}${String(n).padStart(4, "0")}`;
+    .all<{ invoice_number: string }>();
+  let max = 0;
+  for (const r of results ?? []) {
+    const n = parseInt(r.invoice_number.slice(prefix.length), 10);
+    if (!Number.isNaN(n) && n > max) max = n;
+  }
+  return `${prefix}${String(max + 1 + offset).padStart(4, "0")}`;
+}
+
+async function nextInvoiceNumberForYear(db: D1Database, userId: string, year: number, offset: number): Promise<string> {
+  return nextNumberForPrefix(db, userId, `F${year}-`, offset);
 }
 
 api.post("/api/invoices/:id/split", async (c) => {
@@ -1778,10 +1795,7 @@ api.post("/api/invoices/:id/credit-note", async (c) => {
   if (invoice.is_credit_note) return c.json({ error: "Kan geen creditnota maken van een creditnota" }, 400);
 
   const year = new Date().getFullYear();
-  const countRow = await c.env.DB
-    .prepare("SELECT COUNT(*) as c FROM invoices WHERE user_id = ? AND invoice_number LIKE ?")
-    .bind(userId, `CN${year}-%`).first<{ c: number }>();
-  const cnNumber = `CN${year}-${String((countRow?.c ?? 0) + 1).padStart(4, "0")}`;
+  const cnNumber = await nextNumberForPrefix(c.env.DB, userId, `CN${year}-`);
 
   const newId = crypto.randomUUID();
   const today = new Date().toISOString().split("T")[0];
